@@ -41,6 +41,8 @@ data class ThinQDevice(
     val alias: String,
     val modelName: String? = null,
     val online: Boolean = true,
+    /** Raw LG product type, when returned; credential verification checks this. */
+    val deviceType: String? = null,
 )
 
 /** Temperature bounds and step for target-temperature control. */
