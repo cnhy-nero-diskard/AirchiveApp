@@ -40,6 +40,46 @@ interface AirchiveTelemetryPort {
         cursor: String? = null,
     ): TelemetryPage<Observation>
 
+    /**
+     * Bounded incremental stream of observations whose server-managed
+     * `persistedAt` mutation timestamp is at or after [sinceEpochMillis],
+     * returned oldest first in bursts of at most [pageSize] with the same
+     * opaque, durable cursor rules as [latestObservations]. This read exists
+     * only for incremental sync: it is **read-only**, goes through the same
+     * configured-device `telemetry` collection, and never writes or listens.
+     *
+     * The durable high-water mark for this stream is derived exclusively from
+     * the `persistedAt` values observed here (never the handset clock), so call
+     * with the stored watermark minus the documented overlap and page to
+     * completion; the last observed `persistedAt` becomes the new watermark.
+     */
+    suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int = MAX_PAGE_SIZE,
+        cursor: String? = null,
+    ): TelemetryPage<Observation>
+
+    /**
+     * Bounded incremental stream of observations whose server-managed
+     * `reconciledAt` mutation timestamp is at or after [sinceEpochMillis],
+     * returned oldest first in bursts of at most [pageSize] with the same
+     * opaque, durable cursor rules as [latestObservations]. This read exists
+     * only for incremental sync (each sample document may be reconciled after
+     * it was first persisted, e.g. a rollover patch or a completeness
+     * upgrade); it is **read-only**, goes through the same configured-device
+     * `telemetry` collection, and never writes or listens.
+     *
+     * The durable high-water mark for this stream is derived exclusively from
+     * the `reconciledAt` values observed here (never the handset clock), so
+     * call with the stored watermark minus the documented overlap and page to
+     * completion; the last observed `reconciledAt` becomes the new watermark.
+     */
+    suspend fun changedSinceReconciledAt(
+        sinceEpochMillis: Long,
+        pageSize: Int = MAX_PAGE_SIZE,
+        cursor: String? = null,
+    ): TelemetryPage<Observation>
+
     /** The most recent finalized daily totals, bounded at [limit]. */
     suspend fun latestFinalizedTotals(limit: Int = DEFAULT_TOTALS_LIMIT): List<DailyTotal>
 

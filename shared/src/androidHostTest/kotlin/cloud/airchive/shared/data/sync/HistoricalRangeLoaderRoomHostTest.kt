@@ -133,6 +133,18 @@ private class CountingRangeReader(
         cursor: String?,
     ): TelemetryPage<Observation> = delegate.latestObservations(sinceEpochMillis, pageSize, cursor)
 
+    override suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = delegate.changedSincePersistedAt(sinceEpochMillis, pageSize, cursor)
+
+    override suspend fun changedSinceReconciledAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = delegate.changedSinceReconciledAt(sinceEpochMillis, pageSize, cursor)
+
     override suspend fun observations(
         fromEpochMillis: Long,
         toEpochMillis: Long,

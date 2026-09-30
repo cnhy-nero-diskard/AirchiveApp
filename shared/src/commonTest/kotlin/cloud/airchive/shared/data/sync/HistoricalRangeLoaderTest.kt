@@ -389,6 +389,18 @@ private class CountingTelemetry(
         cursor: String?,
     ): TelemetryPage<Observation> = delegate.latestObservations(sinceEpochMillis, pageSize, cursor)
 
+    override suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = delegate.changedSincePersistedAt(sinceEpochMillis, pageSize, cursor)
+
+    override suspend fun changedSinceReconciledAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = delegate.changedSinceReconciledAt(sinceEpochMillis, pageSize, cursor)
+
     override suspend fun latestFinalizedTotals(limit: Int): List<DailyTotal> = delegate.latestFinalizedTotals(limit)
 
     override suspend fun collectorHealth(): CollectorHealth = delegate.collectorHealth()
@@ -428,6 +440,18 @@ private class ScriptedHistoricTelemetry(
     }
 
     override suspend fun latestObservations(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = TelemetryPage(items = emptyList(), nextCursor = null)
+
+    override suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = TelemetryPage(items = emptyList(), nextCursor = null)
+
+    override suspend fun changedSinceReconciledAt(
         sinceEpochMillis: Long,
         pageSize: Int,
         cursor: String?,

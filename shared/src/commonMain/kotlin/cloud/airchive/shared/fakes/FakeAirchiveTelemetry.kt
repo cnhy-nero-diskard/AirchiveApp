@@ -18,7 +18,11 @@ import kotlin.math.round
  *
  * Given a fixed clock, [observations] always contain exactly the same 288
  * five-minute samples spanning the latest 24 hours, [dailyTotals] hold the
- * latest 30 finalized LG totals, and collector health is healthy. Paging is
+ * latest 30 finalized LG totals, and collector health is healthy. The two
+ * incremental streams ([changedSincePersistedAt], [changedSinceReconciledAt])
+ * replay the same fixture deterministically: both are timestamp-ordered
+ * (`persistedAt` / `reconciledAt`), oldest first, and page through the opaque
+ * `index:` cursors exactly like [latestObservations]. Paging is
  * deterministic and durable: cursors encode the next index into the fixture, so
  * a caller that persists a cursor can resume exactly where it stopped. Values
  * are realistic typed numbers (Wh observations, kWh totals) and deliberately
@@ -59,6 +63,35 @@ class FakeAirchiveTelemetry(
         val view = observations
             .filter { o -> o.intervalEndEpochMillis > fromEpochMillis && o.intervalStartEpochMillis < toEpochMillis }
             .sortedBy { it.intervalStartEpochMillis }
+        return paginate(view, pageSize, cursor)
+    }
+
+    override suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> {
+        failWith?.let { throw it }
+        AirchiveTelemetryPort.requireValidPageSize(pageSize)
+        // Deterministic, timestamp-ordered incremental stream: only samples whose
+        // server-managed `persistedAt` moved at-or-after the lower bound are
+        // returned, oldest first (ties broken by sample id so paging is stable).
+        val view = observations
+            .filter { it.persistedAtEpochMillis != null && it.persistedAtEpochMillis >= sinceEpochMillis }
+            .sortedWith(compareBy({ it.persistedAtEpochMillis }, { it.sampleId }))
+        return paginate(view, pageSize, cursor)
+    }
+
+    override suspend fun changedSinceReconciledAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> {
+        failWith?.let { throw it }
+        AirchiveTelemetryPort.requireValidPageSize(pageSize)
+        val view = observations
+            .filter { it.reconciledAtEpochMillis != null && it.reconciledAtEpochMillis >= sinceEpochMillis }
+            .sortedWith(compareBy({ it.reconciledAtEpochMillis }, { it.sampleId }))
         return paginate(view, pageSize, cursor)
     }
 

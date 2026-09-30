@@ -12,7 +12,9 @@ import cloud.airchive.shared.data.telemetry.AirchiveReadPaths
 import cloud.airchive.shared.data.telemetry.DEFAULT_DAY_TIME_ZONE
 import cloud.airchive.shared.data.telemetry.TelemetryReadCursor
 import cloud.airchive.shared.data.telemetry.TelemetryReadKind
+import cloud.airchive.shared.data.telemetry.anchorField
 import cloud.airchive.shared.data.telemetry.parseCollectorHealth
+import cloud.airchive.shared.data.telemetry.readsAscending
 import cloud.airchive.shared.data.telemetry.parseDailyTotal
 import cloud.airchive.shared.data.telemetry.parseDeviceIdentity
 import cloud.airchive.shared.data.telemetry.parseObservation
@@ -47,7 +49,11 @@ import kotlinx.coroutines.withContext
  *   belong to the **same** [com.google.firebase.FirebaseApp], so Firestore
  *   attaches that signed-in user's ID token to every read automatically.
  * - Observation pages are bounded `1..MAX_PAGE_SIZE` (250) and daily-total
- *   lists are bounded `1..MAX_TOTALS_LIMIT` (250); cursors resume stably.
+ *   lists are bounded `1..MAX_TOTALS_LIMIT` (250); cursors resume stably. The
+ *   two incremental mutation streams ([changedSincePersistedAt],
+ *   [changedSinceReconciledAt]) follow the same rules: they filter/order by the
+ *   respective server `Timestamp` field (`persistedAt` / `reconciledAt`) and
+ *   resume exactly where the durable cursor anchored.
  *
  * ## Query / storage assumptions (fail-closed, documented)
  *
@@ -56,17 +62,22 @@ import kotlinx.coroutines.withContext
  *   `Timestamp` bounds on `observedAt`. Documents that store epoch-millis
  *   numbers instead would not match these queries (local parse still handles
  *   both representations for docs that do arrive).
-  * - `latestObservations` reads `observedAt >= since` newest-first and
+ * - `latestObservations` reads `observedAt >= since` newest-first and
   *   `observations` reads `(from, to)` oldest-first, each ordered by
-  *   `observedAt`. On resume, the opaque timestamp+document-id cursor is
+  *   `observedAt`. The incremental streams read `persistedAt >= since` and
+  *   `reconciledAt >= since` respectively, each ordered oldest-first by its own
+  *   `Timestamp` field. On resume, the opaque timestamp+document-id cursor is
   *   rehydrated with one permitted telemetry-document GET and passed to
   *   `startAfter(DocumentSnapshot)`, which includes Firestore's implicit
   *   document-id tiebreaker without requiring a composite key index. This adds
-  *   one bounded single-document read per resumed page.
+  *   one bounded single-document read per resumed page; the anchor field is
+  *   implied by the cursor kind (see [anchorField]), so a persisted-at cursor
+  *   can never be resumed against an observed-at query.
   * - `dailyTotals` is ordered by the `localDate` ISO date field newest first;
   *   the sibling schema's default single-field index is sufficient.
- * - `persistedAt`/`reconciledAt` survive normalization for the later
- *   incremental streams (task 2.6); this adapter adds no writes or watchers.
+ * - `persistedAt`/`reconciledAt` survive normalization and are the sort fields
+ *   of the incremental streams (task 2.6); this adapter adds no writes or
+ *   watchers.
  *
  * Whole Firestore documents may carry `raw`/`state` payload blocks; this
  * adapter recursively normalizes only `Timestamp`/`Date` values to epoch
@@ -126,21 +137,13 @@ class FirebaseAirchiveTelemetry private constructor(
         requireSignedInUser()
         requirePageSize(pageSize)
         var query = observationQuery(TelemetryReadKind.NEWEST)
-            .whereGreaterThanOrEqualTo(FIELD_OBSERVED_AT, millisToTimestamp(sinceEpochMillis))
+            .whereGreaterThanOrEqualTo(
+                AirchiveReadPaths.FIELD_OBSERVED_AT,
+                millisToTimestamp(sinceEpochMillis),
+            )
             .limit(pageSize.toLong())
         query = applyCursor(query, cursor, TelemetryReadKind.NEWEST)
-        val snapshot = query.get().awaitOrThrow()
-        val items = snapshot.documents.map { document ->
-            parseObservation(document.id, normalizeDocument(document.data ?: emptyMap()), dayTimeZone)
-        }
-        TelemetryPage(
-            items = items,
-            nextCursor = if (items.size == pageSize) {
-                snapshot.documents.lastOrNull()?.let { encodeCursor(TelemetryReadKind.NEWEST, it) }
-            } else {
-                null
-            },
-        )
+        readTelemetryPage(query, TelemetryReadKind.NEWEST, pageSize)
     }
 
     override suspend fun observations(
@@ -152,22 +155,55 @@ class FirebaseAirchiveTelemetry private constructor(
         requireSignedInUser()
         requirePageSize(pageSize)
         var query = observationQuery(TelemetryReadKind.OLDEST)
-            .whereGreaterThan(FIELD_OBSERVED_AT, millisToTimestamp(fromEpochMillis))
-            .whereLessThanOrEqualTo(FIELD_OBSERVED_AT, millisToTimestamp(toEpochMillis))
+            .whereGreaterThan(
+                AirchiveReadPaths.FIELD_OBSERVED_AT,
+                millisToTimestamp(fromEpochMillis),
+            )
+            .whereLessThanOrEqualTo(
+                AirchiveReadPaths.FIELD_OBSERVED_AT,
+                millisToTimestamp(toEpochMillis),
+            )
             .limit(pageSize.toLong())
         query = applyCursor(query, cursor, TelemetryReadKind.OLDEST)
-        val snapshot = query.get().awaitOrThrow()
-        val items = snapshot.documents.map { document ->
-            parseObservation(document.id, normalizeDocument(document.data ?: emptyMap()), dayTimeZone)
-        }
-        TelemetryPage(
-            items = items,
-            nextCursor = if (items.size == pageSize) {
-                snapshot.documents.lastOrNull()?.let { encodeCursor(TelemetryReadKind.OLDEST, it) }
-            } else {
-                null
-            },
-        )
+        readTelemetryPage(query, TelemetryReadKind.OLDEST, pageSize)
+    }
+
+    override suspend fun changedSincePersistedAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = withContext(ioDispatcher) {
+        requireSignedInUser()
+        requirePageSize(pageSize)
+        var query = firestore
+            .collection(AirchiveReadPaths.telemetryCollection(configuredDeviceId))
+            .whereGreaterThanOrEqualTo(
+                AirchiveReadPaths.FIELD_PERSISTED_AT,
+                millisToTimestamp(sinceEpochMillis),
+            )
+            .orderBy(AirchiveReadPaths.FIELD_PERSISTED_AT, Query.Direction.ASCENDING)
+            .limit(pageSize.toLong())
+        query = applyCursor(query, cursor, TelemetryReadKind.PERSISTED_AT)
+        readTelemetryPage(query, TelemetryReadKind.PERSISTED_AT, pageSize)
+    }
+
+    override suspend fun changedSinceReconciledAt(
+        sinceEpochMillis: Long,
+        pageSize: Int,
+        cursor: String?,
+    ): TelemetryPage<Observation> = withContext(ioDispatcher) {
+        requireSignedInUser()
+        requirePageSize(pageSize)
+        var query = firestore
+            .collection(AirchiveReadPaths.telemetryCollection(configuredDeviceId))
+            .whereGreaterThanOrEqualTo(
+                AirchiveReadPaths.FIELD_RECONCILED_AT,
+                millisToTimestamp(sinceEpochMillis),
+            )
+            .orderBy(AirchiveReadPaths.FIELD_RECONCILED_AT, Query.Direction.ASCENDING)
+            .limit(pageSize.toLong())
+        query = applyCursor(query, cursor, TelemetryReadKind.RECONCILED_AT)
+        readTelemetryPage(query, TelemetryReadKind.RECONCILED_AT, pageSize)
     }
 
     override suspend fun latestFinalizedTotals(limit: Int): List<DailyTotal> = withContext(ioDispatcher) {
@@ -203,13 +239,34 @@ class FirebaseAirchiveTelemetry private constructor(
     // --- private helpers ---------------------------------------------------
 
     private fun observationQuery(kind: TelemetryReadKind): Query {
-        val direction = when (kind) {
-            TelemetryReadKind.NEWEST -> Query.Direction.DESCENDING
-            TelemetryReadKind.OLDEST -> Query.Direction.ASCENDING
+        val direction = if (readsAscending(kind)) {
+            Query.Direction.ASCENDING
+        } else {
+            Query.Direction.DESCENDING
         }
         return firestore
             .collection(AirchiveReadPaths.telemetryCollection(configuredDeviceId))
-            .orderBy(FIELD_OBSERVED_AT, direction)
+            .orderBy(AirchiveReadPaths.FIELD_OBSERVED_AT, direction)
+    }
+
+    /** Runs one bounded query and builds its [TelemetryPage], encoding the durable cursor. */
+    private suspend fun readTelemetryPage(
+        query: Query,
+        kind: TelemetryReadKind,
+        pageSize: Int,
+    ): TelemetryPage<Observation> {
+        val snapshot = query.get().awaitOrThrow()
+        val items = snapshot.documents.map { document ->
+            parseObservation(document.id, normalizeDocument(document.data ?: emptyMap()), dayTimeZone)
+        }
+        return TelemetryPage(
+            items = items,
+            nextCursor = if (items.size == pageSize) {
+                snapshot.documents.lastOrNull()?.let { encodeCursor(kind, it) }
+            } else {
+                null
+            },
+        )
     }
 
     private suspend fun applyCursor(query: Query, cursor: String?, expectedKind: TelemetryReadKind): Query {
@@ -218,13 +275,14 @@ class FirebaseAirchiveTelemetry private constructor(
         require(decoded.kind == expectedKind) {
             "Cursor '$cursor' is for the ${decoded.kind} read, not the requested $expectedKind read."
         }
+        val anchorFieldName = anchorField(decoded.kind)
         val cursorPath = AirchiveReadPaths.telemetryDocument(configuredDeviceId, decoded.documentId)
         val anchor = firestore.document(cursorPath).get().awaitOrThrow()
         require(anchor.exists()) {
             "Telemetry cursor anchor '${decoded.documentId}' no longer exists; restart the bounded read."
         }
-        val actualTimestamp = requireNotNull(anchor.getTimestamp(FIELD_OBSERVED_AT)) {
-            "Telemetry cursor anchor '${decoded.documentId}' has no '$FIELD_OBSERVED_AT' timestamp."
+        val actualTimestamp = requireNotNull(anchor.getTimestamp(anchorFieldName)) {
+            "Telemetry cursor anchor '${decoded.documentId}' has no '$anchorFieldName' timestamp."
         }
         require(actualTimestamp.seconds == decoded.sortSeconds && actualTimestamp.nanoseconds == decoded.sortNanos) {
             "Telemetry cursor anchor '${decoded.documentId}' changed; restart the bounded read."
@@ -233,9 +291,10 @@ class FirebaseAirchiveTelemetry private constructor(
     }
 
     private fun encodeCursor(kind: TelemetryReadKind, last: DocumentSnapshot): String {
-        val timestamp = requireNotNull(last.getTimestamp(FIELD_OBSERVED_AT)) {
-            "Observation document '${last.id}' was returned by an '$FIELD_OBSERVED_AT' ordered query " +
-                "but has no '$FIELD_OBSERVED_AT' timestamp."
+        val anchorFieldName = anchorField(kind)
+        val timestamp = requireNotNull(last.getTimestamp(anchorFieldName)) {
+            "Observation document '${last.id}' was returned by an '$anchorFieldName' ordered query " +
+                "but has no '$anchorFieldName' timestamp."
         }
         return TelemetryReadCursor(
             kind = kind,
@@ -292,7 +351,6 @@ class FirebaseAirchiveTelemetry private constructor(
         /** Demo project used only by the local Firebase Emulator Suite. */
         internal const val EMULATOR_TEST_PROJECT_ID: String = "demo-airchive-telemetry-poller"
 
-        private const val FIELD_OBSERVED_AT = "observedAt"
         private const val FIELD_LOCAL_DATE = "localDate"
         private const val MILLIS_PER_SECOND = 1_000L
         private const val NANOS_PER_MILLI = 1_000_000

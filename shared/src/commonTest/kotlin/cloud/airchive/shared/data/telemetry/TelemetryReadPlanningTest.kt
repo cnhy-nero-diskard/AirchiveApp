@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 /**
  * Deterministic tests for the SDK-free read planning helpers: cursor
- * encoding/decoding, page-limit and totals-limit validation, and the four fixed
+ * encoding/decoding, sort-field planning, page-limit and totals-limit validation, and the four fixed
  * allowed Firestore path shapes.
  */
 class TelemetryReadPlanningTest {
@@ -16,7 +16,7 @@ class TelemetryReadPlanningTest {
     // --- cursor encoding / decoding ----------------------------------------
 
     @Test
-    fun cursorRoundTripsForBothDirections() {
+    fun cursorRoundTripsForEveryReadStream() {
         for (kind in TelemetryReadKind.entries) {
             val cursor = TelemetryReadCursor(
                 kind = kind,
@@ -26,6 +26,19 @@ class TelemetryReadPlanningTest {
             )
             assertEquals(cursor, TelemetryReadCursor.decode(cursor.encode()), "round trip for $kind")
         }
+    }
+
+    @Test
+    fun incrementalStreamsUseTheirOwnAscendingServerTimestampFields() {
+        assertEquals(AirchiveReadPaths.FIELD_OBSERVED_AT, anchorField(TelemetryReadKind.NEWEST))
+        assertEquals(AirchiveReadPaths.FIELD_OBSERVED_AT, anchorField(TelemetryReadKind.OLDEST))
+        assertEquals(AirchiveReadPaths.FIELD_PERSISTED_AT, anchorField(TelemetryReadKind.PERSISTED_AT))
+        assertEquals(AirchiveReadPaths.FIELD_RECONCILED_AT, anchorField(TelemetryReadKind.RECONCILED_AT))
+
+        assertEquals(false, readsAscending(TelemetryReadKind.NEWEST))
+        assertEquals(true, readsAscending(TelemetryReadKind.OLDEST))
+        assertEquals(true, readsAscending(TelemetryReadKind.PERSISTED_AT))
+        assertEquals(true, readsAscending(TelemetryReadKind.RECONCILED_AT))
     }
 
     @Test
