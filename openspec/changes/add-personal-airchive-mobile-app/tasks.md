@@ -11,7 +11,7 @@
 - [x] 2.2 Create a versioned Room KMP schema for normalized observations, finalized daily totals, covered ranges, and sync metadata keyed by project/UID/device; verify reopen and migration tests preserve data without storing raw payloads.
 - [x] 2.3 Implement the Android Firebase Auth/Firestore read adapter with only the four permitted path shapes and pages of at most 250; verify emulator reads use the enrolled identity and the adapter exposes no write operation.
 - [x] 2.4 Implement first-load synchronization for the latest 24 hours plus 30 available finalized daily totals; verify a 288-sample fixture paginates, reports progress, and stores no older five-minute samples before explicit selection.
-- [ ] 2.5 Implement on-demand historical range fetch and durable range coverage; verify revisiting a covered range reads Room without repeating the full Firestore query.
+- [x] 2.5 Implement on-demand historical range fetch and durable range coverage; verify revisiting a covered range reads Room without repeating the full Firestore query.
 - [ ] 2.6 Implement incremental `persistedAt` and `reconciledAt` queries with overlap, de-duplication, and server-timestamp high-water marks; verify a new sample, completeness upgrade, and older rollover patch each update the local row.
 - [ ] 2.7 Make both query streams and their Room upserts commit before watermarks advance; verify injected page and local-commit failures leave watermarks recoverable and a retry converges.
 - [ ] 2.8 Trigger refresh on app open/resume only after ten minutes and on manual request regardless of age, with no continuous listener or background worker; verify a counting fake observes those exact triggers.
