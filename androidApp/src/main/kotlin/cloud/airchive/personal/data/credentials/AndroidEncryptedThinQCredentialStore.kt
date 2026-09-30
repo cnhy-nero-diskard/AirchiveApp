@@ -372,22 +372,3 @@ private fun decodeRecord(bytes: ByteArray): EncryptedRecord =
         }
         EncryptedRecord(iv, ciphertext, maskedToken, accountCountry, createdAtEpochMillis)
     }
-
-/**
- * TEST-ONLY helper — never referenced by production paths. Lets the
- * instrumentation tests destroy and re-create the [AndroidEncryptedThinQCredentialStore]
- * AndroidKeyStore key entry, exactly like a lost or invalidated
- * platform-protected key, while leaving the on-disk record untouched.
- */
-internal object ThinQCredentialKeyTestHelper {
-
-    internal fun deleteKeyForTesting() {
-        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        keyStore.deleteEntry(KEY_ALIAS)
-    }
-
-    internal fun hasKey(): Boolean = runCatching {
-        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        keyStore.containsAlias(KEY_ALIAS)
-    }.getOrDefault(false)
-}

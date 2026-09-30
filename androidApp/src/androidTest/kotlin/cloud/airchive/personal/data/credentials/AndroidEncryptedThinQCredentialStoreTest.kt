@@ -12,6 +12,7 @@ import cloud.airchive.shared.data.local.openAirchiveDatabase
 import cloud.airchive.shared.contract.credentials.SaveThinQResult
 import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
 import java.io.File
+import java.security.KeyStore
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -56,13 +57,13 @@ class AndroidEncryptedThinQCredentialStoreTest {
         // deliberately KEEP the persisted per-install client id: its stability
         // across store instances is asserted separately below.
         runBlocking { AndroidEncryptedThinQCredentialStore(context).clear() }
-        ThinQCredentialKeyTestHelper.deleteKeyForTesting()
+        deleteKeyForTesting()
     }
 
     @After
     fun tearDown() {
         runBlocking { AndroidEncryptedThinQCredentialStore(context).clear() }
-        ThinQCredentialKeyTestHelper.deleteKeyForTesting()
+        deleteKeyForTesting()
     }
 
     // --- save + reopen -------------------------------------------------------
@@ -261,9 +262,9 @@ class AndroidEncryptedThinQCredentialStoreTest {
         assertEquals(TOKEN_A, store.readToken())
 
         // Simulate losing the platform-protected key by destroying the alias.
-        assertTrue("precondition: store key must exist", ThinQCredentialKeyTestHelper.hasKey())
-        ThinQCredentialKeyTestHelper.deleteKeyForTesting()
-        assertFalse("precondition: store key must be gone", ThinQCredentialKeyTestHelper.hasKey())
+        assertTrue("precondition: store key must exist", hasKeyForTesting())
+        deleteKeyForTesting()
+        assertFalse("precondition: store key must be gone", hasKeyForTesting())
 
         // The persisted record can no longer be decrypted.
         assertNull("readToken must not crash or leak ciphertext after key loss", store.readToken())
@@ -284,7 +285,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
     fun reopenAfterKeyLoss_surfacesUnlockFailedWithoutCrash() = runBlocking {
         val store = AndroidEncryptedThinQCredentialStore(context)
         store.save(TOKEN_A, COUNTRY_PH)
-        ThinQCredentialKeyTestHelper.deleteKeyForTesting()
+        deleteKeyForTesting()
 
         val reopened = AndroidEncryptedThinQCredentialStore(context)
         val state = reopened.observe().first()
@@ -303,6 +304,18 @@ class AndroidEncryptedThinQCredentialStoreTest {
     companion object {
         const val COUNTRY_PH = "PH"
         const val MASK = "\u2022\u2022\u2022\u2022"
+        private const val TEST_KEY_ALIAS = "airchive_thinq_pat_key"
+
+        private fun deleteKeyForTesting() {
+            KeyStore.getInstance("AndroidKeyStore").apply {
+                load(null)
+                deleteEntry(TEST_KEY_ALIAS)
+            }
+        }
+
+        private fun hasKeyForTesting(): Boolean = runCatching {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(TEST_KEY_ALIAS)
+        }.getOrDefault(false)
 
         // Clearly synthetic PAT fixtures; never a real token. `.example.invalid`
         // marks them as test data and keeps them out of any production-looking shape.
