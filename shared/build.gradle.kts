@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.android.kmp.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.room3.plugin)
 }
 
 kotlin {
@@ -49,6 +51,12 @@ kotlin {
             implementation(libs.kotlin.test)
         }
 
+        getByName("androidHostTest") {
+            dependencies {
+                implementation(libs.sqlite.bundled.jvm)
+            }
+        }
+
         androidMain.dependencies {
             implementation(libs.ktor.client.cio)
         }
@@ -57,4 +65,14 @@ kotlin {
             implementation(libs.ktor.client.darwin)
         }
     }
+}
+
+dependencies {
+    add("kspAndroid", libs.room3.compiler)
+    add("kspIosArm64", libs.room3.compiler)
+    add("kspIosSimulatorArm64", libs.room3.compiler)
+}
+
+room3 {
+    schemaDirectory("$projectDir/schemas")
 }

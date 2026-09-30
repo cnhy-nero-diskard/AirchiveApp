@@ -1,0 +1,566 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "a27d16dbeeee613872b37875076175a0",
+    "entities": [
+      {
+        "tableName": "observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firebase_project_id` TEXT NOT NULL, `owner_uid` TEXT NOT NULL, `device_id` TEXT NOT NULL, `sample_id` TEXT NOT NULL, `interval_start_epoch_millis` INTEGER NOT NULL, `interval_end_epoch_millis` INTEGER NOT NULL, `energy_value` REAL, `recorded_unit` TEXT, `interval_status` TEXT, `quality` TEXT NOT NULL, `quality_flags` TEXT NOT NULL, `flag_texts` TEXT NOT NULL, `source_failure` TEXT, `persisted_at_epoch_millis` INTEGER, `reconciled_at_epoch_millis` INTEGER, `scheduled_at_epoch_millis` INTEGER, `observed_at_epoch_millis` INTEGER, `local_date` TEXT, `timezone` TEXT, `completeness` INTEGER, `metadata_version` TEXT, `collector_version` TEXT, `energy_property` TEXT, `raw_daily_total` TEXT, `raw_daily_total_number` REAL, `interval_value` TEXT, `interval_value_number` REAL, `interval_seconds` REAL, `final_previous_day_total` TEXT, `final_previous_day_total_number` REAL, `unit_text` TEXT, `unit_source` TEXT, `unit_source_text` TEXT, `energy_source_failure_ok` INTEGER, `energy_source_failure_class` TEXT, `energy_source_failure_error_code` TEXT, `energy_source_failure_error_name` TEXT, `state_source_failure_ok` INTEGER, `state_source_failure_class` TEXT, `state_source_failure_error_code` TEXT, `state_source_failure_error_name` TEXT, `model_device_id` TEXT, PRIMARY KEY(`firebase_project_id`, `owner_uid`, `device_id`, `sample_id`))",
+        "fields": [
+          {
+            "fieldPath": "firebaseProjectId",
+            "columnName": "firebase_project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleId",
+            "columnName": "sample_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "intervalStartEpochMillis",
+            "columnName": "interval_start_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "intervalEndEpochMillis",
+            "columnName": "interval_end_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "energyValue",
+            "columnName": "energy_value",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "recordedUnit",
+            "columnName": "recorded_unit",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "intervalStatus",
+            "columnName": "interval_status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qualityFlags",
+            "columnName": "quality_flags",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "flagTexts",
+            "columnName": "flag_texts",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceFailure",
+            "columnName": "source_failure",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "persistedAtEpochMillis",
+            "columnName": "persisted_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "reconciledAtEpochMillis",
+            "columnName": "reconciled_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "scheduledAtEpochMillis",
+            "columnName": "scheduled_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "observedAtEpochMillis",
+            "columnName": "observed_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "localDate",
+            "columnName": "local_date",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "completeness",
+            "columnName": "completeness",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "metadataVersion",
+            "columnName": "metadata_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "collectorVersion",
+            "columnName": "collector_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "energyProperty",
+            "columnName": "energy_property",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawDailyTotal",
+            "columnName": "raw_daily_total",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawDailyTotalNumber",
+            "columnName": "raw_daily_total_number",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "intervalValue",
+            "columnName": "interval_value",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "intervalValueNumber",
+            "columnName": "interval_value_number",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "intervalSeconds",
+            "columnName": "interval_seconds",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "finalPreviousDayTotal",
+            "columnName": "final_previous_day_total",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "finalPreviousDayTotalNumber",
+            "columnName": "final_previous_day_total_number",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "unitText",
+            "columnName": "unit_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "unitSource",
+            "columnName": "unit_source",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "unitSourceText",
+            "columnName": "unit_source_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "energySourceFailureOk",
+            "columnName": "energy_source_failure_ok",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "energySourceFailureClass",
+            "columnName": "energy_source_failure_class",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "energySourceFailureErrorCode",
+            "columnName": "energy_source_failure_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "energySourceFailureErrorName",
+            "columnName": "energy_source_failure_error_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stateSourceFailureOk",
+            "columnName": "state_source_failure_ok",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "stateSourceFailureClass",
+            "columnName": "state_source_failure_class",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stateSourceFailureErrorCode",
+            "columnName": "state_source_failure_error_code",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stateSourceFailureErrorName",
+            "columnName": "state_source_failure_error_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "modelDeviceId",
+            "columnName": "model_device_id",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firebase_project_id",
+            "owner_uid",
+            "device_id",
+            "sample_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_observations_firebase_project_id_owner_uid_device_id_interval_start_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "firebase_project_id",
+              "owner_uid",
+              "device_id",
+              "interval_start_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_observations_firebase_project_id_owner_uid_device_id_interval_start_epoch_millis` ON `${TABLE_NAME}` (`firebase_project_id`, `owner_uid`, `device_id`, `interval_start_epoch_millis`)"
+          },
+          {
+            "name": "index_observations_firebase_project_id_owner_uid_device_id_interval_end_epoch_millis",
+            "unique": false,
+            "columnNames": [
+              "firebase_project_id",
+              "owner_uid",
+              "device_id",
+              "interval_end_epoch_millis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_observations_firebase_project_id_owner_uid_device_id_interval_end_epoch_millis` ON `${TABLE_NAME}` (`firebase_project_id`, `owner_uid`, `device_id`, `interval_end_epoch_millis`)"
+          }
+        ]
+      },
+      {
+        "tableName": "daily_totals",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firebase_project_id` TEXT NOT NULL, `owner_uid` TEXT NOT NULL, `device_id` TEXT NOT NULL, `total_id` TEXT NOT NULL, `day_start_epoch_millis` INTEGER NOT NULL, `energy_value` REAL NOT NULL, `recorded_unit` TEXT, `source` TEXT NOT NULL, `finalized` INTEGER NOT NULL, `local_date` TEXT, `total_text` TEXT, `total_number` REAL, `unit_text` TEXT, `fetched_at_epoch_millis` INTEGER, `model_device_id` TEXT, PRIMARY KEY(`firebase_project_id`, `owner_uid`, `device_id`, `total_id`))",
+        "fields": [
+          {
+            "fieldPath": "firebaseProjectId",
+            "columnName": "firebase_project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalId",
+            "columnName": "total_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayStartEpochMillis",
+            "columnName": "day_start_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "energyValue",
+            "columnName": "energy_value",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordedUnit",
+            "columnName": "recorded_unit",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finalized",
+            "columnName": "finalized",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localDate",
+            "columnName": "local_date",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalText",
+            "columnName": "total_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalNumber",
+            "columnName": "total_number",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "unitText",
+            "columnName": "unit_text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fetchedAtEpochMillis",
+            "columnName": "fetched_at_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "modelDeviceId",
+            "columnName": "model_device_id",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firebase_project_id",
+            "owner_uid",
+            "device_id",
+            "total_id"
+          ]
+        }
+      },
+      {
+        "tableName": "covered_ranges",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firebase_project_id` TEXT NOT NULL, `owner_uid` TEXT NOT NULL, `device_id` TEXT NOT NULL, `from_epoch_millis` INTEGER NOT NULL, `to_epoch_millis` INTEGER NOT NULL, PRIMARY KEY(`firebase_project_id`, `owner_uid`, `device_id`, `from_epoch_millis`))",
+        "fields": [
+          {
+            "fieldPath": "firebaseProjectId",
+            "columnName": "firebase_project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromEpochMillis",
+            "columnName": "from_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toEpochMillis",
+            "columnName": "to_epoch_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firebase_project_id",
+            "owner_uid",
+            "device_id",
+            "from_epoch_millis"
+          ]
+        }
+      },
+      {
+        "tableName": "sync_metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firebase_project_id` TEXT NOT NULL, `owner_uid` TEXT NOT NULL, `device_id` TEXT NOT NULL, `last_successful_sync_epoch_millis` INTEGER, `last_error_epoch_millis` INTEGER, `last_error` TEXT, `persisted_at_watermark_epoch_millis` INTEGER, `reconciled_at_watermark_epoch_millis` INTEGER, PRIMARY KEY(`firebase_project_id`, `owner_uid`, `device_id`))",
+        "fields": [
+          {
+            "fieldPath": "firebaseProjectId",
+            "columnName": "firebase_project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSuccessfulSyncEpochMillis",
+            "columnName": "last_successful_sync_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastErrorEpochMillis",
+            "columnName": "last_error_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "last_error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "persistedAtWatermarkEpochMillis",
+            "columnName": "persisted_at_watermark_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "reconciledAtWatermarkEpochMillis",
+            "columnName": "reconciled_at_watermark_epoch_millis",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firebase_project_id",
+            "owner_uid",
+            "device_id"
+          ]
+        }
+      },
+      {
+        "tableName": "collector_health",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firebase_project_id` TEXT NOT NULL, `owner_uid` TEXT NOT NULL, `device_id` TEXT NOT NULL, `status` TEXT NOT NULL, `last_poll_epoch_millis` INTEGER, `last_success_epoch_millis` INTEGER, `last_failure_epoch_millis` INTEGER, `last_failure_reason` TEXT, `last_sample_id` TEXT, `last_sample_path` TEXT, `last_error_class` TEXT, `consecutive_failures` INTEGER, `consecutive_rate_limits` INTEGER, `rate_limited_until_epoch_millis` INTEGER, `collector_version` TEXT, PRIMARY KEY(`firebase_project_id`, `owner_uid`, `device_id`))",
+        "fields": [
+          {
+            "fieldPath": "firebaseProjectId",
+            "columnName": "firebase_project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerUid",
+            "columnName": "owner_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPollEpochMillis",
+            "columnName": "last_poll_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccessEpochMillis",
+            "columnName": "last_success_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastFailureEpochMillis",
+            "columnName": "last_failure_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastFailureReason",
+            "columnName": "last_failure_reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSampleId",
+            "columnName": "last_sample_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSamplePath",
+            "columnName": "last_sample_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorClass",
+            "columnName": "last_error_class",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "consecutiveFailures",
+            "columnName": "consecutive_failures",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "consecutiveRateLimits",
+            "columnName": "consecutive_rate_limits",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rateLimitedUntilEpochMillis",
+            "columnName": "rate_limited_until_epoch_millis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "collectorVersion",
+            "columnName": "collector_version",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firebase_project_id",
+            "owner_uid",
+            "device_id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a27d16dbeeee613872b37875076175a0')"
+    ]
+  }
+}
