@@ -1,0 +1,90 @@
+rules_version = '2';
+
+// ============================================================================
+// EMULATOR-ONLY TEST FIXTURE — do NOT deploy, and do NOT treat as production.
+// ============================================================================
+// This rules file exists solely to drive OpenSpec task 2.3's local emulator
+// harness (firebase.test.json). There is no real data and no real user here.
+//
+// Production authorization is owned by the sibling OpenSpec change
+// `add-owner-mobile-telemetry-access`, whose rules are UID-enrolled and match
+// config/airchive-mobile.properties (firestore.ownerEnrollmentRequired=true).
+// This fixture deliberately does NOT attempt to reproduce UID enrollment —
+// the guest/parent must keep the production rules in the sibling repo.
+//
+// Fixture grant model (tightest that still exercises the app's read adapter):
+//   * EXACTLY ONE fake owner account (`owner@airchive.example.invalid`) may
+//     READ exactly ONE device fixture: the configured non-secret device id
+//     from config/airchive-mobile.properties (`device.id`), which is also what
+//     BuildConfig.AIRCHIVE_DEVICE_ID pins into the app under test.
+//   * Only the four approved Airchive read shapes are exposed:
+//       devices/{deviceId}                              identity GET
+//       devices/{deviceId}/telemetry/{sampleId}         bounded LIST (1..250)
+//       devices/{deviceId}/dailyTotals/{localDate}      bounded LIST (1..250)
+//       devices/{deviceId}/runtime/collector            health GET
+//   * Everything the production contract denies is also denied here:
+//       - any other test account (email mismatch),
+//       - any other device id (path mismatch),
+//       - metadata / reconciliation / any other unlisted sub-path,
+//       - unbounded or oversized (> 250) list queries,
+//       - EVERY write (no `allow write` exists anywhere in this file).
+// ============================================================================
+
+function ownerFixtureEmail() {
+  // Clearly-labeled emulator-only account, never a real user.
+  return "owner@airchive.example.invalid";
+}
+
+function ownerFixtureDeviceId() {
+  // Must mirror the non-secret configured device id
+  // (config/airchive-mobile.properties -> device.id). The adapter under test
+  // builds every path from BuildConfig.AIRCHIVE_DEVICE_ID, so the fixture
+  // rules pin that same value.
+  return "d7dc30c9698797295acbb90ee543447738db8f7b3d5cff230eb66978a855be3a";
+}
+
+function isOwnerFixture() {
+  return request.auth != null
+    && request.auth.token.email == ownerFixtureEmail();
+}
+
+function isOwnerDevice(deviceId) {
+  return deviceId == ownerFixtureDeviceId();
+}
+
+function boundedListQuery() {
+  return request.query.limit != null
+    && request.query.limit >= 1
+    && request.query.limit <= 250;
+}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Identity document: single GET of the one fixture device only.
+    match /devices/{deviceId} {
+      allow get: if isOwnerFixture() && isOwnerDevice(deviceId);
+      // No write rule -> identity writes denied by default.
+    }
+
+    // Sampled observations: GET + bounded LIST (1..250), fixture device only.
+    match /devices/{deviceId}/telemetry/{sampleId} {
+      allow get: if isOwnerFixture() && isOwnerDevice(deviceId);
+      allow list: if isOwnerFixture() && isOwnerDevice(deviceId) && boundedListQuery();
+    }
+
+    // Finalized daily totals: GET + bounded LIST (1..250), fixture device only.
+    match /devices/{deviceId}/dailyTotals/{localDate} {
+      allow get: if isOwnerFixture() && isOwnerDevice(deviceId);
+      allow list: if isOwnerFixture() && isOwnerDevice(deviceId) && boundedListQuery();
+    }
+
+    // Collector health: single GET of the one fixture device only.
+    match /devices/{deviceId}/runtime/collector {
+      allow get: if isOwnerFixture() && isOwnerDevice(deviceId);
+    }
+
+    // Every other /devices/... sub-path (metadata, reconciliation, runtime/*,
+    // other device ids, ...) has no matching rule and is denied by default.
+  }
+}

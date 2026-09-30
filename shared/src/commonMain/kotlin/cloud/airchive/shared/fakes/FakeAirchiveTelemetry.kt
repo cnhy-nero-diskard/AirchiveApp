@@ -5,6 +5,7 @@ import cloud.airchive.shared.contract.telemetry.CollectorHealth
 import cloud.airchive.shared.contract.telemetry.CollectorStatus
 import cloud.airchive.shared.contract.telemetry.DailyTotal
 import cloud.airchive.shared.contract.telemetry.DailyTotalSource
+import cloud.airchive.shared.contract.telemetry.DeviceIdentity
 import cloud.airchive.shared.contract.telemetry.EnergyUnit
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.telemetry.ObservationQuality
@@ -63,12 +64,24 @@ class FakeAirchiveTelemetry(
 
     override suspend fun latestFinalizedTotals(limit: Int): List<DailyTotal> {
         failWith?.let { throw it }
+        AirchiveTelemetryPort.requireValidTotalsLimit(limit)
         return dailyTotals.take(limit)
     }
 
     override suspend fun collectorHealth(): CollectorHealth {
         failWith?.let { throw it }
         return health
+    }
+
+    override suspend fun deviceIdentity(): DeviceIdentity {
+        failWith?.let { throw it }
+        return DeviceIdentity(
+            deviceId = DEMO_DEVICE_ID,
+            alias = "Demo AC",
+            modelName = "Demo Air Conditioner",
+            deviceType = "air-conditioner",
+            updatedAtEpochMillis = nowEpochMillis,
+        )
     }
 
     private fun paginate(view: List<Observation>, pageSize: Int, cursor: String?): TelemetryPage<Observation> {

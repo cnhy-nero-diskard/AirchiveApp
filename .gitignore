@@ -8,6 +8,9 @@
 *.jks
 *.keystore
 *.p12
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
 
 # Xcode and Android Studio generated state.
 **/xcuserdata/

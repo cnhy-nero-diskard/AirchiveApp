@@ -1,0 +1,22 @@
+{
+  "//": "LOCAL-EMULATOR-ONLY harness for OpenSpec task 2.3 (androidApp Firebase read adapter).",
+  "//": "Never used to talk to production Airchive. Loaded only by:",
+  "//": "  firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller --only auth,firestore \"gradlew.bat :androidApp:connectedDebugAndroidTest\"",
+  "//": "The instrumentation test dials 10.0.2.2:9099/19080 from the local AVD; 19080 avoids the host-reserved 8080 range.",
+  "//": "The rules file is the test-only fixture under tests/firebase/; see its header for what it permits/denies.",
+  "// NOTE": "firebase-tools reads the Firestore rules path from the TOP-LEVEL `firestore` key (getFirestoreConfig); `emulators.firestore.rules` is not honored. Ports live in the `emulators` block.",
+  "firestore": {
+    "rules": "tests/firebase/firestore.rules"
+  },
+  "emulators": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 19080
+    },
+    "singleProjectMode": true
+  }
+}

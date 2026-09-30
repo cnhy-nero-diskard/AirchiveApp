@@ -46,9 +46,19 @@ interface AirchiveTelemetryPort {
     /** Latest collector health record, or an offline heartbeat. */
     suspend fun collectorHealth(): CollectorHealth
 
+    /**
+     * The configured AC's identity document at `devices/{configuredDeviceId}`.
+     * Read-only identity metadata (alias/model/type); adapters fail closed with
+     * a clear error when the collector has not written the document yet.
+     */
+    suspend fun deviceIdentity(): DeviceIdentity
+
     companion object {
         /** Maximum documents per Firestore query, per the Airchive access contract. */
         const val MAX_PAGE_SIZE = 250
+
+        /** Maximum daily-total documents per read (matches the page bound). */
+        const val MAX_TOTALS_LIMIT = 250
 
         /** Bounded initial total-count default (30 finalized daily totals). */
         const val DEFAULT_TOTALS_LIMIT = 30
@@ -57,6 +67,13 @@ interface AirchiveTelemetryPort {
         fun requireValidPageSize(pageSize: Int) {
             require(pageSize in 1..MAX_PAGE_SIZE) {
                 "pageSize must be in 1..$MAX_PAGE_SIZE, got $pageSize"
+            }
+        }
+
+        /** Enforces the daily-total list bound `1..MAX_TOTALS_LIMIT`. */
+        fun requireValidTotalsLimit(limit: Int) {
+            require(limit in 1..MAX_TOTALS_LIMIT) {
+                "limit must be in 1..$MAX_TOTALS_LIMIT, got $limit"
             }
         }
     }
