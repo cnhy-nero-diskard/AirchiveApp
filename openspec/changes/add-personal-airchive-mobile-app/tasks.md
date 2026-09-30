@@ -7,7 +7,7 @@
 
 ## 2. Build the local history and sync path
 
-- [ ] 2.1 Create typed models and fixture parsers for observations, daily totals, device identity, and collector health, including legacy missing units, null intervals, quality flags, and source failures; verify representative Airchive payload tests pass.
+- [x] 2.1 Create typed models and fixture parsers for observations, daily totals, device identity, and collector health, including legacy missing units, null intervals, quality flags, and source failures; verify representative Airchive payload tests pass.
 - [ ] 2.2 Create a versioned Room KMP schema for normalized observations, finalized daily totals, covered ranges, and sync metadata keyed by project/UID/device; verify reopen and migration tests preserve data without storing raw payloads.
 - [ ] 2.3 Implement the Android Firebase Auth/Firestore read adapter with only the four permitted path shapes and pages of at most 250; verify emulator reads use the enrolled identity and the adapter exposes no write operation.
 - [ ] 2.4 Implement first-load synchronization for the latest 24 hours plus 30 available finalized daily totals; verify a 288-sample fixture paginates, reports progress, and stores no older five-minute samples before explicit selection.

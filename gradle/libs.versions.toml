@@ -7,6 +7,7 @@ activity-compose = "1.13.0"
 ktor = "3.6.0"
 serialization = "1.11.0"
 coroutines = "1.11.0"
+kotlinx-datetime = "0.8.0"
 room = "3.0.3"
 sqlite = "2.7.1"
 firebase-bom = "34.19.0"
@@ -27,6 +28,8 @@ ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "kto
 
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
