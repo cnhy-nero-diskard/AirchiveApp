@@ -2,7 +2,7 @@
 
 - [x] 1.1 Scaffold Android and iOS app targets plus a shared Kotlin Multiplatform/Compose module; verify the Android debug app builds and the iOS project references the shared module.
 - [x] 1.2 Add compatible Compose, Ktor, serialization, Room KMP, coroutine, and Android Firebase dependencies with a version catalog; verify dependency resolution and an Android clean build.
-- [ ] 1.3 Define shared interfaces for owner identity, telemetry reads, local storage, protected ThinQ credentials, and LG requests; verify fake implementations run the app without live accounts.
+- [x] 1.3 Define shared interfaces for owner identity, telemetry reads, local storage, protected ThinQ credentials, and LG requests; verify fake implementations run the app without live accounts.
 - [ ] 1.4 Record the configured Firebase project, one monitored device ID, `Asia/Manila` day boundary, and the sibling Airchive read contract in nonsecret configuration; verify the debug build targets the intended project and contains no service-account key or PAT.
 
 ## 2. Build the local history and sync path

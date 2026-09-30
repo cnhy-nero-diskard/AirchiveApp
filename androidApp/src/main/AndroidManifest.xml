@@ -2,6 +2,7 @@
     <application
         android:allowBackup="false"
         android:label="Airchive"
+        android:theme="@style/Theme.Airchive"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
