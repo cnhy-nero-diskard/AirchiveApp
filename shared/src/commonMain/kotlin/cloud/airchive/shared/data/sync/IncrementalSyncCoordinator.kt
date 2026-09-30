@@ -53,8 +53,8 @@ import kotlinx.coroutines.flow.first
  *    repeated cursor aborts with [IllegalStateException] instead of paging
  *    forever, and an oversized page is rejected the same way.
  *
- * Manual refresh/trigger scheduling is deliberately out of scope here (task
- * 2.8).
+ * [ForegroundRefreshController] owns app-open/resume and explicit manual trigger
+ * policy; this coordinator performs exactly one bounded sync attempt per call.
  */
 class IncrementalSyncCoordinator(
     private val telemetry: AirchiveTelemetryPort,

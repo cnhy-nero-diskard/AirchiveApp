@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -51,7 +52,10 @@ import cloud.airchive.shared.fakes.FakeProviders
 import kotlinx.coroutines.flow.first
 
 @Composable
-fun AirchiveApp(providers: FakeProviders? = null) {
+fun AirchiveApp(
+    providers: FakeProviders? = null,
+    onManualRefresh: (() -> Unit)? = null,
+) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
         mutableStateOf<DemoHomeState>(DemoHomeState.Loading)
@@ -75,7 +79,7 @@ fun AirchiveApp(providers: FakeProviders? = null) {
                     message = "The local fake providers could not load their sample data. No account or network is required.",
                 )
 
-                is DemoHomeState.Ready -> DemoHome(state.summary)
+                is DemoHomeState.Ready -> DemoHome(state.summary, onManualRefresh)
             }
         }
     }
@@ -158,7 +162,7 @@ private fun DemoMessage(title: String, message: String? = null) {
 }
 
 @Composable
-private fun DemoHome(summary: DemoSummary) {
+private fun DemoHome(summary: DemoSummary, onManualRefresh: (() -> Unit)?) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -176,6 +180,11 @@ private fun DemoHome(summary: DemoSummary) {
         ) {
             Text("Airchive", style = MaterialTheme.typography.headlineMedium)
             Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
+            onManualRefresh?.let { refresh ->
+                Button(onClick = refresh) {
+                    Text("Refresh history now")
+                }
+            }
 
             SummaryCard("Demo mode") {
                 Text("This screen uses in-memory sample data only.")
