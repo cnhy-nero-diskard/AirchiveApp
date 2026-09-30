@@ -10,6 +10,7 @@ import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
 import cloud.airchive.shared.AirchiveApp
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
+import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
 import cloud.airchive.shared.data.sync.ForegroundRefreshController
 import cloud.airchive.shared.data.sync.IncrementalSyncCoordinator
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
@@ -24,6 +25,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var demoProviders: FakeProviders
     private lateinit var foregroundRefresh: ForegroundRefreshController
     private var ownerAccessController: OwnerAccessCoordinator? = null
+    private lateinit var firstRunOnboardingController: FirstRunOnboardingController
     private var ownerAuthConfigurationMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +53,10 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             OwnerAuthConfiguration.MissingOptions(setOf("Firebase client initialization"))
         }
+        var onboardingAccess = OwnerAccessCoordinator(FakeOwnerIdentity(), demoProviders.telemetry)
+        var onboardingTelemetry = demoProviders.telemetry
+        var onboardingProjectId = "demo-firebase-project"
+        var onboardingDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID
         when (configuration) {
             is OwnerAuthConfiguration.Ready -> {
                 val auth = configuration.identity.firebaseAuth
@@ -59,17 +65,33 @@ class MainActivity : ComponentActivity() {
                     firestore = FirebaseFirestore.getInstance(auth.app),
                 )
                 ownerAccessController = OwnerAccessCoordinator(configuration.identity, telemetry)
+                onboardingAccess = requireNotNull(ownerAccessController)
+                onboardingTelemetry = telemetry
+                onboardingProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID
+                onboardingDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID
             }
 
             is OwnerAuthConfiguration.MissingOptions -> {
                 ownerAuthConfigurationMessage = configuration.actionableMessage
             }
         }
+        firstRunOnboardingController = FirstRunOnboardingController(
+            ownerAccess = onboardingAccess,
+            credentialStore = demoProviders.thinQCredentialStore,
+            telemetry = onboardingTelemetry,
+            local = demoProviders.localHistory,
+            firebaseProjectId = onboardingProjectId,
+            configuredDeviceId = onboardingDeviceId,
+            // The current graph still uses the in-memory fake credential store;
+            // task 3.3 replaces it with Android Keystore before real PAT entry.
+            demoOnly = true,
+        )
 
         setContent {
             AirchiveApp(
                 providers = demoProviders,
                 ownerAccessController = ownerAccessController,
+                onboardingController = firstRunOnboardingController,
                 ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                 onManualRefresh = ::onManualRefresh,
             )

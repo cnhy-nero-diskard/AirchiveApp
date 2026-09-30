@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -32,14 +35,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
 import cloud.airchive.shared.contract.history.SyncMetadata
+import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
 import cloud.airchive.shared.contract.owner.OwnerAccessState
 import cloud.airchive.shared.contract.owner.SignInFailure
 import cloud.airchive.shared.contract.owner.SignInResult
@@ -56,8 +64,10 @@ import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
-import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
+import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
+import cloud.airchive.shared.data.onboarding.FirstRunOnboardingStep
+import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -69,6 +79,7 @@ fun AirchiveApp(
     onManualRefresh: (() -> Unit)? = null,
     ownerAccessController: OwnerAccessCoordinator? = null,
     ownerAuthConfigurationMessage: String? = null,
+    onboardingController: FirstRunOnboardingController? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -97,8 +108,10 @@ fun AirchiveApp(
                     providers = activeProviders,
                     context = state.context,
                     onManualRefresh = onManualRefresh,
+                    googleSignInIsSimulated = ownerAccessController == null,
                     ownerAccessController = ownerAccessController,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    onboardingController = onboardingController,
                 )
             }
         }
@@ -135,8 +148,10 @@ private fun DemoHomeContent(
     providers: FakeProviders,
     context: DemoHomeContext,
     onManualRefresh: (() -> Unit)?,
+    googleSignInIsSimulated: Boolean,
     ownerAccessController: OwnerAccessCoordinator?,
     ownerAuthConfigurationMessage: String?,
+    onboardingController: FirstRunOnboardingController?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -161,11 +176,24 @@ private fun DemoHomeContent(
         liveState = context.liveState,
         credential = context.credential,
     )
+    val activeOnboardingController = remember(providers, context.partition, ownerAccessController, onboardingController) {
+            onboardingController ?: FirstRunOnboardingController(
+            ownerAccess = ownerAccessController
+                ?: OwnerAccessCoordinator(FakeOwnerIdentity(), providers.telemetry),
+            credentialStore = providers.thinQCredentialStore,
+            telemetry = providers.telemetry,
+            local = providers.localHistory,
+            firebaseProjectId = context.partition.firebaseProjectId,
+            configuredDeviceId = context.device.deviceId,
+            demoOnly = true,
+        )
+    }
     DemoHome(
         summary = summary,
         historySync = presentHistorySync(history, nowEpochMillis),
         onManualRefresh = onManualRefresh,
-        ownerAccessController = ownerAccessController,
+        googleSignInIsSimulated = googleSignInIsSimulated,
+        onboardingController = activeOnboardingController,
         ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
     )
 }
@@ -211,7 +239,8 @@ private fun DemoHome(
     summary: DemoSummary,
     historySync: HistorySyncPresentation,
     onManualRefresh: (() -> Unit)?,
-    ownerAccessController: OwnerAccessCoordinator?,
+    googleSignInIsSimulated: Boolean,
+    onboardingController: FirstRunOnboardingController,
     ownerAuthConfigurationMessage: String?,
 ) {
     Box(
@@ -232,7 +261,15 @@ private fun DemoHome(
             Text("Airchive", style = MaterialTheme.typography.headlineMedium)
             Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
 
-            OwnerAccessCard(ownerAccessController, ownerAuthConfigurationMessage)
+            ownerAuthConfigurationMessage?.let { configurationMessage ->
+                SummaryCard("Firebase setup") {
+                    Text(configurationMessage)
+                }
+            }
+            FirstRunOnboardingCard(
+                controller = onboardingController,
+                googleSignInIsSimulated = googleSignInIsSimulated,
+            )
 
             SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
                 Text(
@@ -306,86 +343,194 @@ private fun DemoHome(
 }
 
 @Composable
-private fun OwnerAccessCard(
-    controller: OwnerAccessCoordinator?,
-    configurationMessage: String?,
+private fun FirstRunOnboardingCard(
+    controller: FirstRunOnboardingController,
+    googleSignInIsSimulated: Boolean,
 ) {
-    if (controller == null) {
-        SummaryCard("Google history access") {
-            Text(
-                configurationMessage
-                    ?: "This demo build has no Google account connected. Configure Firebase client options to enable owner sign-in.",
-            )
-        }
-        return
-    }
-
-    var state by remember(controller) { mutableStateOf<OwnerAccessState?>(null) }
+    val state by controller.state.collectAsState()
+    var token by remember(controller) { mutableStateOf("") }
+    var country by remember(controller) { mutableStateOf(FirstRunOnboardingController.DEFAULT_COUNTRY) }
     var busy by remember(controller) { mutableStateOf(false) }
+    var portalUnavailable by remember(controller) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
 
     LaunchedEffect(controller) {
-        state = controller.restore()
+        controller.restore()
     }
 
-    fun launchAction(action: suspend () -> OwnerAccessState) {
+    fun launchAction(action: suspend () -> Unit) {
         scope.launch {
             busy = true
             try {
-                state = action()
+                action()
             } finally {
                 busy = false
             }
         }
     }
 
-    SummaryCard("Google history access") {
-        val current = state
-        val message = when (current) {
-            null -> "Restoring Firebase sign-in session…"
-            OwnerAccessState.SignedOut ->
-                "Sign in with Google to request history access. Sign-in alone does not grant Firestore access."
-            is OwnerAccessState.SignInFailed -> when (current.reason) {
-                SignInFailure.USER_CANCELLED -> "Google sign-in was cancelled. You can try again when ready."
-                SignInFailure.NETWORK -> "Google sign-in could not reach Firebase. Check the connection and retry."
-                SignInFailure.PLATFORM -> "Google sign-in is not configured for this app build."
-                SignInFailure.UNKNOWN -> "Google sign-in failed. Retry or check the app setup."
-            }
-            is OwnerAccessState.AccessPending ->
-                "Signed in as ${current.session.uid}, but Firestore access is pending or denied. Ask the operator to enroll this exact UID, then retry."
-            is OwnerAccessState.AccessCheckFailed ->
-                "Could not verify Airchive access (${current.safeErrorCode}). Your sign-in remains active; retry the read."
-            is OwnerAccessState.Authorized ->
-                "History access verified for ${current.device.alias}. Signed-in UID: ${current.session.uid}."
+    val stepNumber = when (state.step) {
+        FirstRunOnboardingStep.GOOGLE_ACCESS -> 1
+        FirstRunOnboardingStep.THINQ_CREDENTIAL -> 2
+        FirstRunOnboardingStep.INITIAL_HISTORY -> 3
+        FirstRunOnboardingStep.COMPLETE -> 3
+    }
+
+    SummaryCard(if (state.demoOnly) "First-run setup · demo preview" else "First-run setup") {
+        state.demoWarning?.let { warning ->
+            Text(warning, style = MaterialTheme.typography.bodyMedium)
         }
-        Text(
-            message,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        )
+        Text("Step $stepNumber of 3 · ${state.step.label()}.")
+        state.safeErrorCode?.let { code ->
+            Text(
+                code.onboardingErrorMessage(),
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
 
-        when (current) {
-            null -> Unit
-            OwnerAccessState.SignedOut,
-            is OwnerAccessState.SignInFailed,
-            -> Button(
-                enabled = !busy,
-                onClick = { launchAction(controller::signIn) },
-            ) {
-                Text(if (busy) "Signing in…" else "Continue with Google")
+        when (state.step) {
+            FirstRunOnboardingStep.GOOGLE_ACCESS -> {
+                val message = when (val access = state.ownerAccess) {
+                    OwnerAccessState.SignedOut ->
+                        "Use Google for Airchive history. Sign-in alone does not grant Firestore access."
+                    is OwnerAccessState.SignInFailed -> when (access.reason) {
+                        SignInFailure.USER_CANCELLED -> "Google sign-in was cancelled. You can retry when ready."
+                        SignInFailure.NETWORK -> "Google sign-in could not reach Firebase. Check the connection and retry."
+                        SignInFailure.PLATFORM -> "Google sign-in is not configured for this build."
+                        SignInFailure.UNKNOWN -> "Google sign-in failed. Retry or check the app setup."
+                    }
+                    is OwnerAccessState.AccessPending ->
+                        "Signed in as ${access.session.uid}, but Firestore access is pending or denied. Ask the operator to enroll this exact UID, then retry."
+                    is OwnerAccessState.AccessCheckFailed ->
+                        "Could not verify Airchive access (${access.safeErrorCode}). Keep this session and retry the read."
+                    is OwnerAccessState.Authorized ->
+                        "History access verified for ${access.device.alias}. Signed-in UID: ${access.session.uid}."
+                }
+                Text(message, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                if (state.ownerAccess is OwnerAccessState.AccessPending ||
+                    state.ownerAccess is OwnerAccessState.AccessCheckFailed
+                ) {
+                    Button(enabled = !busy, onClick = { launchAction(controller::retryAccess) }) {
+                        Text(if (busy) "Checking access…" else "Retry history access")
+                    }
+                } else if (state.ownerAccess !is OwnerAccessState.Authorized) {
+                    Button(enabled = !busy, onClick = { launchAction(controller::signIn) }) {
+                        Text(
+                            if (busy) "Signing in…"
+                            else if (googleSignInIsSimulated) "Simulate Google access"
+                            else "Continue with Google",
+                        )
+                    }
+                }
             }
 
-            is OwnerAccessState.AccessPending,
-            is OwnerAccessState.AccessCheckFailed,
-            -> Button(
-                enabled = !busy,
-                onClick = { launchAction(controller::retryHistoryAccess) },
-            ) {
-                Text(if (busy) "Checking access…" else "Retry history access")
+            FirstRunOnboardingStep.THINQ_CREDENTIAL -> {
+                Text(
+                    "Create a separate control-capable LG ThinQ PAT. Do not reuse the collector’s read-only token.",
+                )
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        portalUnavailable = try {
+                            uriHandler.openUri(FirstRunOnboardingController.PAT_PORTAL_URL)
+                            false
+                        } catch (_: Exception) {
+                            true
+                        }
+                    },
+                ) {
+                    Text("Open LG ThinQ PAT portal")
+                }
+                if (portalUnavailable) {
+                    Text("Open this link in a browser: ${FirstRunOnboardingController.PAT_PORTAL_URL}")
+                }
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("ThinQ Personal Access Token") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                OutlinedTextField(
+                    value = country,
+                    onValueChange = { country = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("ThinQ account country") },
+                    supportingText = { Text("Two-letter country code · prefills with PH") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                )
+                state.credentialFailure?.let { failure ->
+                    Text(
+                        when (failure) {
+                            ThinQCredentialSaveFailure.INVALID_INPUT -> "Enter a token and a two-letter country code."
+                            ThinQCredentialSaveFailure.KEY_UNAVAILABLE -> "Protected credential storage is unavailable. Retry setup without replacing a saved token."
+                            ThinQCredentialSaveFailure.UNKNOWN -> "The credential could not be saved. Retry setup."
+                        },
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                Button(
+                    enabled = !busy,
+                    onClick = {
+                        val submittedToken = token
+                        token = ""
+                        launchAction { controller.saveThinQCredential(submittedToken, country) }
+                    },
+                ) {
+                    Text(if (busy) "Saving…" else if (state.demoOnly) "Save synthetic token" else "Save PAT")
+                }
             }
 
-            is OwnerAccessState.Authorized -> Unit
+            FirstRunOnboardingStep.INITIAL_HISTORY -> {
+                Text("Fetch only the latest 24 hours of samples and up to 30 finalized daily totals.")
+                state.firstLoadProgress?.let { progress ->
+                    Text(
+                        "${progress.observationsSeen} observations · " +
+                            "${progress.observationPagesFetched} pages · " +
+                            "${progress.dailyTotalsFetched ?: "—"} finalized totals",
+                    )
+                }
+                Button(
+                    enabled = !busy,
+                    onClick = {
+                        launchAction {
+                            controller.syncInitialHistory(Clock.System.now().toEpochMilliseconds())
+                        }
+                    },
+                ) {
+                    Text(if (busy) "Syncing history…" else "Sync history now")
+                }
+            }
+
+            FirstRunOnboardingStep.COMPLETE -> {
+                val history = state.history
+                Text(
+                    "Initial history is ready: ${history?.observations?.size ?: 0} samples and " +
+                        "${history?.dailyTotals?.size ?: 0} finalized daily totals are cached.",
+                )
+            }
         }
     }
+}
+
+private fun FirstRunOnboardingStep.label(): String = when (this) {
+    FirstRunOnboardingStep.GOOGLE_ACCESS -> "Google history access"
+    FirstRunOnboardingStep.THINQ_CREDENTIAL -> "ThinQ credential"
+    FirstRunOnboardingStep.INITIAL_HISTORY -> "Initial history sync"
+    FirstRunOnboardingStep.COMPLETE -> "Setup complete"
+}
+
+private fun String.onboardingErrorMessage(): String = when (this) {
+    "ACCESS_DENIED" -> "Airchive access is pending or denied. Keep this account and retry after UID enrollment."
+    "OFFLINE" -> "The history service is offline. Retry when the device is connected."
+    "REMOTE_FAILURE" -> "The history request failed. Cached rows remain available; retry when ready."
+    else -> "Setup could not complete ($this). Retry this step."
 }
 
 @Composable
