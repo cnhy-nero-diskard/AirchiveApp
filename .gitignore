@@ -1,0 +1,15 @@
+/.gradle/
+**/build/
+**/.kotlin/
+/local.properties
+
+# Local Firebase configuration and private release material must never be committed.
+/androidApp/google-services.json
+*.jks
+*.keystore
+*.p12
+
+# Xcode and Android Studio generated state.
+**/xcuserdata/
+**/DerivedData/
+.DS_Store
