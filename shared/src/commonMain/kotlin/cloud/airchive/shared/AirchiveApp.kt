@@ -66,6 +66,7 @@ import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingStep
+import cloud.airchive.shared.data.onboarding.OwnerSettingsController
 import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
@@ -81,6 +82,7 @@ fun AirchiveApp(
     ownerAccessController: OwnerAccessCoordinator? = null,
     ownerAuthConfigurationMessage: String? = null,
     onboardingController: FirstRunOnboardingController? = null,
+    ownerSettingsController: OwnerSettingsController? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -113,6 +115,7 @@ fun AirchiveApp(
                     ownerAccessController = ownerAccessController,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     onboardingController = onboardingController,
+                    ownerSettingsController = ownerSettingsController,
                 )
             }
         }
@@ -141,7 +144,6 @@ private data class DemoSummary(
     val device: ThinQDevice,
     val profile: ThinQDeviceProfile,
     val liveState: ThinQLiveState,
-    val credential: ThinQCredentialState,
 )
 
 @Composable
@@ -153,6 +155,7 @@ private fun DemoHomeContent(
     ownerAccessController: OwnerAccessCoordinator?,
     ownerAuthConfigurationMessage: String?,
     onboardingController: FirstRunOnboardingController?,
+    ownerSettingsController: OwnerSettingsController?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -166,6 +169,9 @@ private fun DemoHomeContent(
     val history by remember(providers, context.partition) {
         providers.localHistory.observe(context.partition)
     }.collectAsState(initial = initialHistory)
+    val credential by remember(providers) {
+        providers.thinQCredentialStore.observe()
+    }.collectAsState(initial = context.credential)
     val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
     val summary = DemoSummary(
         history = history,
@@ -175,7 +181,6 @@ private fun DemoHomeContent(
         device = context.device,
         profile = context.profile,
         liveState = context.liveState,
-        credential = context.credential,
     )
     val activeOnboardingController = remember(providers, context.partition, ownerAccessController, onboardingController) {
             onboardingController ?: FirstRunOnboardingController(
@@ -190,22 +195,34 @@ private fun DemoHomeContent(
             demoOnly = true,
         )
     }
+    val onboardingState by activeOnboardingController.state.collectAsState()
+    val activeSettingsController = remember(providers, context.partition, ownerSettingsController) {
+        ownerSettingsController ?: OwnerSettingsController(
+            identity = providers.ownerIdentity,
+            credentialStore = providers.thinQCredentialStore,
+            credentialVerifier = FakeThinQCredentialVerifier(context.device.deviceId),
+            local = providers.localHistory,
+            firebaseProjectId = context.partition.firebaseProjectId,
+            configuredDeviceId = context.device.deviceId,
+        )
+    }
     DemoHome(
         summary = summary,
         historySync = presentHistorySync(history, nowEpochMillis),
         onManualRefresh = onManualRefresh,
         googleSignInIsSimulated = googleSignInIsSimulated,
         onboardingController = activeOnboardingController,
+        ownerSettingsController = activeSettingsController,
+        credentialState = credential,
+        ownerAccessState = onboardingState.ownerAccess,
         ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
     )
 }
 
 private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeContext {
-    val owner = when (val result = providers.ownerIdentity.signIn()) {
-        is SignInResult.Success -> result.session
-        else -> error("The deterministic demo identity did not sign in.")
-    }
-
+    // The demo cache is keyed by its fixed fixture owner, but Google history
+    // sign-in remains an explicit first-run action in the onboarding panel.
+    val owner = FakeOwnerIdentity.DEFAULT_SESSION
     val device = providers.thinQ.listDevices().firstOrNull()
         ?: error("The deterministic demo has no device.")
     val partition = HistoryPartition(
@@ -243,6 +260,9 @@ private fun DemoHome(
     onManualRefresh: (() -> Unit)?,
     googleSignInIsSimulated: Boolean,
     onboardingController: FirstRunOnboardingController,
+    ownerSettingsController: OwnerSettingsController,
+    credentialState: ThinQCredentialState,
+    ownerAccessState: OwnerAccessState,
     ownerAuthConfigurationMessage: String?,
 ) {
     Box(
@@ -336,10 +356,13 @@ private fun DemoHome(
                 Text("Status is sample data; it does not describe a live collector connection.")
             }
 
-            SummaryCard("Credentials") {
-                Text(if (summary.credential.present) "ThinQ credential configured in fake store." else "No ThinQ credential configured.")
-                Text("The demo never saves or displays a real token.")
-            }
+            OwnerSettingsCard(
+                controller = ownerSettingsController,
+                credentialState = credentialState,
+                ownerAccessState = ownerAccessState,
+                demoOnly = onboardingController.state.value.demoOnly,
+                afterSettingsAction = { onboardingController.restore() },
+            )
         }
     }
 }
