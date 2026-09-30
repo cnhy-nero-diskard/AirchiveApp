@@ -8,10 +8,9 @@ import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
-import kotlin.math.abs
-import kotlin.math.round
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -24,7 +23,9 @@ import kotlinx.serialization.json.contentOrNull
  *
  * Every parser is conservative: unexpected shapes throw
  * [ThinQClientException.MalformedResponse] rather than inventing defaults, and
- * unknown enum/string values are dropped (never guessed). This layer is built
+ * unknown enum/string values are dropped (never guessed). Range capabilities
+ * additionally require finite min/max/step with min <= max and step > 0, and
+ * preserve the profile's `write_values.except` exclusions. This layer is built
  * for extension — task 4.2 deepens the capability/state model, so the parsers
  * stay isolated here and take their input as raw [JsonElement] nodes.
  *
@@ -75,7 +76,10 @@ internal object ThinQPayloads {
     /**
      * Parses one AC profile into a writable-capability snapshot. Only entries
      * the SDK marks writable are offered, and only the four everyday controls
-     * are read out; everything else is ignored for now (task 4.2 extends this).
+     * are read out; everything else is ignored. Power is writable only when the
+     * enum explicitly lists both POWER_ON and POWER_OFF; modes/fans keep only
+     * contract-known values mapped to their exact LG write strings; temperature
+     * requires a finite, ordered range with a positive step and a known unit.
      */
     fun acProfile(deviceId: String, response: JsonElement?): ParsedAcProfile {
         val root = response as? JsonObject ?: throw ThinQClientException.MalformedResponse
@@ -177,7 +181,13 @@ internal object ThinQPayloads {
             val unit = unitFromSymbol(block.string("unit")) ?: continue
             val cap = rangeCapability(block["targetTemperature"]) ?: continue
             if (cap.writable) {
-                result[unit] = TemperatureCapability(min = cap.min, max = cap.max, step = cap.step, unit = unit)
+                result[unit] = TemperatureCapability(
+                    min = cap.min,
+                    max = cap.max,
+                    step = cap.step,
+                    unit = unit,
+                    excludedValues = cap.excluded,
+                )
             }
         }
         return result
@@ -191,7 +201,9 @@ internal object ThinQPayloads {
             else -> return null
         }
         val symbol = preferredUnit.symbol()
-        val preferred = blocks.firstOrNull { it.string("unit")?.trim()?.uppercase() == symbol }
+        val preferred = blocks.firstOrNull {
+            it.string("unit")?.trim()?.uppercase() == symbol && number(it, "targetTemperature") != null
+        }
         val chosen = preferred ?: blocks.firstOrNull { number(it, "targetTemperature") != null } ?: return null
         val raw = number(chosen, "targetTemperature") ?: return null
         val blockUnit = unitFromSymbol(chosen.string("unit"))
@@ -203,7 +215,12 @@ internal object ThinQPayloads {
 
     private data class EnumCapability(val writable: Boolean, val writeValues: List<String>)
 
-    private data class RangeCapability(val min: Double, val max: Double, val step: Double) {
+    private data class RangeCapability(
+        val min: Double,
+        val max: Double,
+        val step: Double,
+        val excluded: Set<Double> = emptySet(),
+    ) {
         val writable: Boolean get() = true
     }
 
@@ -218,7 +235,14 @@ internal object ThinQPayloads {
         return EnumCapability(writable = obj.boolean("writable"), writeValues = values)
     }
 
-    /** A readable/writable `range` property with valid min/max/step, or `null`. */
+    /**
+     * A readable/writable `range` property with a finite, ordered min/max and a
+     * finite positive step, or `null` when absent/malformed. Non-finite bounds
+     * or steps, reversed ranges, and zero/negative steps are all omitted: a
+     * capability the parser cannot trust never produces a control. The
+     * profile's `write_values.except` exclusions are preserved (finite entries
+     * only).
+     */
     private fun rangeCapability(prop: JsonElement?): RangeCapability? {
         val obj = prop as? JsonObject ?: return null
         if (obj.string("type") != "range") return null
@@ -226,10 +250,32 @@ internal object ThinQPayloads {
         val values = obj["write_values"] as? JsonObject ?: return null
         val min = number(values, "min") ?: return null
         val max = number(values, "max") ?: return null
-        if (min > max) return null
+        if (!min.isFinite() || !max.isFinite() || min > max) return null
         val step = number(values, "step") ?: 1.0
-        if (step <= 0.0) return null
-        return RangeCapability(min = min, max = max, step = step)
+        if (!step.isFinite() || step <= 0.0) return null
+        val excluded = parseExclusions(values["except"]) ?: return null
+        return RangeCapability(min = min, max = max, step = step, excluded = excluded)
+    }
+
+    /**
+     * Parses `write_values.except` into normalized exclusions. Only finite
+     * numbers are kept; if the exclusion field is present but malformed, return
+     * `null` so the caller disables this temperature capability rather than
+     * silently allowing a value the profile may have intended to exclude.
+     */
+    private fun parseExclusions(node: JsonElement?): Set<Double>? {
+        if (node == null) return emptySet()
+        if (node == JsonNull) return null
+        val array = node as? JsonArray ?: return null
+        val values = mutableSetOf<Double>()
+        for (entry in array) {
+            val primitive = entry as? JsonPrimitive ?: return null
+            if (primitive.isString) return null
+            val value = number(primitive) ?: return null
+            if (!value.isFinite()) return null
+            values += value
+        }
+        return values
     }
 
     // ------------------------------------------------------------ value maps
@@ -247,6 +293,10 @@ internal object ThinQPayloads {
 
     private fun number(obj: JsonObject, key: String): Double? {
         val value = obj[key] as? JsonPrimitive ?: return null
+        return number(value)
+    }
+
+    private fun number(value: JsonPrimitive): Double? {
         if (value.isString) return value.contentOrNull?.toDoubleOrNull()
         // "true"/"false" parse to null; numbers parse fine.
         return value.content.toDoubleOrNull()
@@ -291,18 +341,16 @@ internal fun convertTemperature(value: Double, from: TemperatureUnit, to: Temper
         else -> value * 9.0 / 5.0 + 32.0
     }
 
-/** True when [value] lies inside the capability bounds and on its step grid. */
-internal fun Double.inCapability(cap: TemperatureCapability, epsilon: Double = 1e-9): Boolean {
-    if (this < cap.min - epsilon || this > cap.max + epsilon) return false
-    val quotient = (this - cap.min) / cap.step
-    return abs(quotient - round(quotient)) <= epsilon
-}
-
 /**
  * Parsed AC profile snapshot used by the client to validate commands locally and
  * build exact wire bodies. It keeps the profile's own LG write strings so a
- * round-trip never invents a value the device did not list. Task 4.2 can extend
- * this snapshot (additional resources/units) without touching the contract model.
+ * round-trip never invents a value the device did not list.
+ *
+ * [toContractProfile] surfaces exactly one preferred temperature unit and its
+ * capability, so `controls.temperatureUnit` always equals the surfaced
+ * `controls.targetTemperature.unit`. Additional units stay on [temperatureByUnit]
+ * only so [KtorThinQClient] can convert a requested command into a unit the
+ * returned profile actually provides — never the reverse.
  */
 internal data class ParsedAcProfile(
     val deviceId: String,

@@ -1,5 +1,8 @@
 package cloud.airchive.shared.contract.thinq
 
+import kotlin.math.abs
+import kotlin.math.round
+
 /**
  * Narrow LG/ThinQ client for exactly the four everyday AC operations.
  *
@@ -45,18 +48,51 @@ data class ThinQDevice(
     val deviceType: String? = null,
 )
 
-/** Temperature bounds and step for target-temperature control. */
+/**
+ * Temperature bounds, step, and unit for target-temperature control.
+ *
+ * [excludedValues] preserves the profile's `write_values.except` list: target
+ * temperatures the device explicitly rejects even though they lie inside
+ * [min]..[max] on the [step] grid. The parser guarantees every entry is finite.
+ * [allows] is the single shared gate any adapter uses before sending a
+ * temperature command; it rejects NaN/infinite values, out-of-bounds values,
+ * off-step values, and excluded values.
+ */
 data class TemperatureCapability(
     val min: Double,
     val max: Double,
     val step: Double,
     val unit: TemperatureUnit,
-)
+    val excludedValues: Set<Double> = emptySet(),
+) {
+    /**
+     * True only when [value] is a real, finite temperature this device accepts
+     * as a written target: within [min]..[max] (with [epsilon] tolerance),
+     * exactly on the [step] grid from [min], and not listed in
+     * [excludedValues]. A capability that is not itself finite with a positive
+     * [step] never admits any command.
+     */
+    fun allows(value: Double, epsilon: Double = 1e-9): Boolean {
+        if (!value.isFinite()) return false
+        if (!min.isFinite() || !max.isFinite() || !step.isFinite() || step <= 0.0) return false
+        if (value < min - epsilon || value > max + epsilon) return false
+        if (excludedValues.any { abs(it - value) <= epsilon }) return false
+        val quotient = (value - min) / step
+        return abs(quotient - round(quotient)) <= epsilon
+    }
+}
 
 /**
  * Profile-derived control capability. Only `true`/non-empty entries are offered
  * in the Device UI; unsupported or absent properties never produce enabled
  * controls.
+ *
+ * [temperatureUnit] is exactly the unit of the surfaced [targetTemperature]
+ * capability, so the two can never disagree. A profile that exposes several
+ * units (for example Celsius and Fahrenheit) still surfaces a single preferred
+ * unit here; the data layer retains the other units internally only to convert
+ * a requested command into a unit the returned profile actually provides, and
+ * never enables a unit absent from this profile.
  */
 data class AcControls(
     val powerWritable: Boolean,

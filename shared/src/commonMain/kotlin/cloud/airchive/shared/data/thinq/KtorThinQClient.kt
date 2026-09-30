@@ -80,6 +80,10 @@ import kotlinx.serialization.json.putJsonObject
  *   or command outcome; server error bodies are reduced to a fixed phrase.
  * - No retries are performed inside this client; an ambiguous send is reported
  *   [CommandStatus.UNCONFIRMED] and never auto-resent.
+ * - Commands are validated against the fresh parsed profile before any POST:
+ *   values the profile does not explicitly permit (unknown/absent properties,
+ *   unknown enum values, out-of-bounds/off-step/excluded temperatures) are
+ *   rejected locally as [CommandFailure.INVALID_REQUEST].
  * - A verified read never claims control authority; 1308 on a command is the
  *   distinct [CommandFailure.NO_CONTROL_AUTHORITY] response.
  */
@@ -406,15 +410,18 @@ class KtorThinQClient(
     private fun temperatureBody(profile: ParsedAcProfile, command: AcCommand.SetTargetTemperature): String? {
         val requestedUnit = command.unit
         val direct = profile.temperatureByUnit[requestedUnit]
-        if (direct != null && command.value.inCapability(direct)) {
+        if (direct != null && direct.allows(command.value)) {
             return temperatureJson(command.value, requestedUnit)
         }
         // Fallback: a profile that supports exactly one other unit accepts a
-        // converted value and reports it in that unit.
+        // converted value and reports it in that unit. The body always reports
+        // in a unit the profile itself provides and never enables a unit absent
+        // from the returned profile. `allows` also enforces the profile's
+        // write_values.except exclusions, so an excluded value is never POSTed.
         if (profile.temperatureByUnit.size == 1) {
             val (onlyUnit, onlyCap) = profile.temperatureByUnit.entries.first()
             val converted = convertTemperature(command.value, requestedUnit, onlyUnit)
-            if (converted.inCapability(onlyCap)) return temperatureJson(converted, onlyUnit)
+            if (onlyCap.allows(converted)) return temperatureJson(converted, onlyUnit)
         }
         return null
     }

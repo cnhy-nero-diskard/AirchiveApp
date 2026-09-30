@@ -28,7 +28,7 @@
 ## 4. Implement live AC state and the four controls
 
 - [x] 4.1 Build the narrow Ktor ThinQ client for list, profile, live state, and command requests using the official SDK’s routing/header/payload contract; verify sanitized request fixtures and error-code classification, including no-control-authority and rate-limit responses.
-- [ ] 4.2 Parse this AC’s profile into writable power, target-temperature, mode, and fan capabilities with allowed values and temperature bounds; verify unsupported or absent properties never produce enabled controls.
+- [x] 4.2 Parse this AC’s profile into writable power, target-temperature, mode, and fan capabilities with allowed values and temperature bounds; verify unsupported or absent properties never produce enabled controls.
 - [ ] 4.3 Implement live state retrieval on Device entry and explicit refresh, keeping its timestamp separate from Firestore sample age; verify stale or failed LG reads never appear as current state.
 - [ ] 4.4 Implement one-at-a-time command submission and sending/accepted/confirmed/failed/unconfirmed states; verify duplicate taps and ambiguous timeouts do not resend commands automatically.
 - [ ] 4.5 After an accepted command, perform a bounded fresh state check and confirm only matching state; verify mismatches, offline reads, and no-control-authority responses show actionable outcomes without changing telemetry records.
