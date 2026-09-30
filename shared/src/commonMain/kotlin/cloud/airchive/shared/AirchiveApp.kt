@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,8 @@ import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
 import cloud.airchive.shared.contract.history.SyncMetadata
+import cloud.airchive.shared.contract.owner.OwnerAccessState
+import cloud.airchive.shared.contract.owner.SignInFailure
 import cloud.airchive.shared.contract.owner.SignInResult
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
 import cloud.airchive.shared.contract.telemetry.CollectorStatus
@@ -53,15 +56,19 @@ import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
+import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.fakes.FakeProviders
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlin.time.Clock
 
 @Composable
 fun AirchiveApp(
     providers: FakeProviders? = null,
     onManualRefresh: (() -> Unit)? = null,
+    ownerAccessController: OwnerAccessCoordinator? = null,
+    ownerAuthConfigurationMessage: String? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -86,7 +93,13 @@ fun AirchiveApp(
                     message = "The local fake providers could not load their sample data. No account or network is required.",
                 )
 
-                is DemoHomeState.Ready -> DemoHomeContent(activeProviders, state.context, onManualRefresh)
+                is DemoHomeState.Ready -> DemoHomeContent(
+                    providers = activeProviders,
+                    context = state.context,
+                    onManualRefresh = onManualRefresh,
+                    ownerAccessController = ownerAccessController,
+                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                )
             }
         }
     }
@@ -122,6 +135,8 @@ private fun DemoHomeContent(
     providers: FakeProviders,
     context: DemoHomeContext,
     onManualRefresh: (() -> Unit)?,
+    ownerAccessController: OwnerAccessCoordinator?,
+    ownerAuthConfigurationMessage: String?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -150,6 +165,8 @@ private fun DemoHomeContent(
         summary = summary,
         historySync = presentHistorySync(history, nowEpochMillis),
         onManualRefresh = onManualRefresh,
+        ownerAccessController = ownerAccessController,
+        ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
     )
 }
 
@@ -194,6 +211,8 @@ private fun DemoHome(
     summary: DemoSummary,
     historySync: HistorySyncPresentation,
     onManualRefresh: (() -> Unit)?,
+    ownerAccessController: OwnerAccessCoordinator?,
+    ownerAuthConfigurationMessage: String?,
 ) {
     Box(
         modifier = Modifier
@@ -212,6 +231,8 @@ private fun DemoHome(
         ) {
             Text("Airchive", style = MaterialTheme.typography.headlineMedium)
             Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
+
+            OwnerAccessCard(ownerAccessController, ownerAuthConfigurationMessage)
 
             SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
                 Text(
@@ -235,8 +256,8 @@ private fun DemoHome(
             }
 
             SummaryCard("Demo mode") {
-                Text("This screen uses in-memory sample data only.")
-                Text("No Google account, Firebase project, network, or LG credential is connected.")
+                Text("Energy history, AC state, and collector health on this screen use local demo fixtures.")
+                Text("They are not live readings. The ThinQ credential store is fake and contains no real token.")
             }
 
             SummaryCard("AC state · simulated") {
@@ -280,6 +301,89 @@ private fun DemoHome(
                 Text(if (summary.credential.present) "ThinQ credential configured in fake store." else "No ThinQ credential configured.")
                 Text("The demo never saves or displays a real token.")
             }
+        }
+    }
+}
+
+@Composable
+private fun OwnerAccessCard(
+    controller: OwnerAccessCoordinator?,
+    configurationMessage: String?,
+) {
+    if (controller == null) {
+        SummaryCard("Google history access") {
+            Text(
+                configurationMessage
+                    ?: "This demo build has no Google account connected. Configure Firebase client options to enable owner sign-in.",
+            )
+        }
+        return
+    }
+
+    var state by remember(controller) { mutableStateOf<OwnerAccessState?>(null) }
+    var busy by remember(controller) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(controller) {
+        state = controller.restore()
+    }
+
+    fun launchAction(action: suspend () -> OwnerAccessState) {
+        scope.launch {
+            busy = true
+            try {
+                state = action()
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    SummaryCard("Google history access") {
+        val current = state
+        val message = when (current) {
+            null -> "Restoring Firebase sign-in session…"
+            OwnerAccessState.SignedOut ->
+                "Sign in with Google to request history access. Sign-in alone does not grant Firestore access."
+            is OwnerAccessState.SignInFailed -> when (current.reason) {
+                SignInFailure.USER_CANCELLED -> "Google sign-in was cancelled. You can try again when ready."
+                SignInFailure.NETWORK -> "Google sign-in could not reach Firebase. Check the connection and retry."
+                SignInFailure.PLATFORM -> "Google sign-in is not configured for this app build."
+                SignInFailure.UNKNOWN -> "Google sign-in failed. Retry or check the app setup."
+            }
+            is OwnerAccessState.AccessPending ->
+                "Signed in as ${current.session.uid}, but Firestore access is pending or denied. Ask the operator to enroll this exact UID, then retry."
+            is OwnerAccessState.AccessCheckFailed ->
+                "Could not verify Airchive access (${current.safeErrorCode}). Your sign-in remains active; retry the read."
+            is OwnerAccessState.Authorized ->
+                "History access verified for ${current.device.alias}. Signed-in UID: ${current.session.uid}."
+        }
+        Text(
+            message,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+
+        when (current) {
+            null -> Unit
+            OwnerAccessState.SignedOut,
+            is OwnerAccessState.SignInFailed,
+            -> Button(
+                enabled = !busy,
+                onClick = { launchAction(controller::signIn) },
+            ) {
+                Text(if (busy) "Signing in…" else "Continue with Google")
+            }
+
+            is OwnerAccessState.AccessPending,
+            is OwnerAccessState.AccessCheckFailed,
+            -> Button(
+                enabled = !busy,
+                onClick = { launchAction(controller::retryHistoryAccess) },
+            ) {
+                Text(if (busy) "Checking access…" else "Retry history access")
+            }
+
+            is OwnerAccessState.Authorized -> Unit
         }
     }
 }

@@ -19,7 +19,7 @@
 
 ## 3. Implement owner and ThinQ onboarding
 
-- [ ] 3.1 Add Android Google sign-in and session restore using the existing Firebase project; verify a fresh sign-in yields a UID while denied Firestore access produces an access-pending screen rather than a crash.
+- [x] 3.1 Add Android Google sign-in and session restore using the existing Firebase project; verify a fresh sign-in yields a UID while denied Firestore access produces an access-pending screen rather than a crash.
 - [ ] 3.2 Build first-run steps for Google history access, a portal link and separate control-capable ThinQ PAT, editable country preset to `PH`, and initial history sync; verify progress and failure states with fake providers.
 - [ ] 3.3 Add Android Keystore-backed encrypted PAT storage and a stable per-install LG client ID; verify plaintext is absent from local history, logs, and backups/diagnostics, and a reopened app can use the stored token.
 - [ ] 3.4 Implement ThinQ token verification against the configured AC identity and profile, preserving the previous token on failed replacement; verify correct, wrong-account, invalid-token, and network-failure fixtures produce distinct outcomes.

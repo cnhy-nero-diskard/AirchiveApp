@@ -13,6 +13,24 @@ fun airchiveConfigValue(key: String): String = requireNotNull(airchiveConfig.get
     "Missing required non-secret mobile configuration: $key"
 }.trim()
 
+/**
+ * Optional configuration value: absent or blank properties become an empty
+ * string, so public Firebase client options (owner sign-in, task 3.1) can stay
+ * unconfigured without breaking the build. The owner-auth factory turns blanks
+ * into an actionable MissingOptions state.
+ */
+fun airchiveConfigValueOrBlank(key: String): String =
+    airchiveConfig.getProperty(key)?.trim().orEmpty()
+
+/** Renders a value as a safe Kotlin string literal for a BuildConfig field. */
+fun buildConfigStringLiteral(value: String): String = "\"" +
+    value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r") +
+    "\""
+
 android {
     namespace = "cloud.airchive.personal"
     compileSdk = 36
@@ -35,6 +53,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "AIRCHIVE_FIREBASE_PROJECT_ID", "\"${airchiveConfigValue("firebase.projectId")}\"")
+        buildConfigField(
+            "String",
+            "AIRCHIVE_FIREBASE_API_KEY",
+            buildConfigStringLiteral(airchiveConfigValueOrBlank("firebase.apiKey")),
+        )
+        buildConfigField(
+            "String",
+            "AIRCHIVE_FIREBASE_APPLICATION_ID",
+            buildConfigStringLiteral(airchiveConfigValueOrBlank("firebase.applicationId")),
+        )
+        buildConfigField(
+            "String",
+            "AIRCHIVE_GOOGLE_WEB_CLIENT_ID",
+            buildConfigStringLiteral(airchiveConfigValueOrBlank("firebase.googleWebClientId")),
+        )
         buildConfigField("String", "AIRCHIVE_DEVICE_ID", "\"${airchiveConfigValue("device.id")}\"")
         buildConfigField("String", "AIRCHIVE_DAY_TIME_ZONE", "\"${airchiveConfigValue("day.timeZone")}\"")
         buildConfigField("int", "AIRCHIVE_FIRESTORE_MAX_PAGE_SIZE", airchiveConfigValue("firestore.maxPageSize"))
@@ -73,6 +106,11 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    // Current official Google sign-in stack: AndroidX Credential Manager +
+    // GetGoogleIdOption + GoogleIdTokenCredential (no legacy GoogleSignInClient).
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
