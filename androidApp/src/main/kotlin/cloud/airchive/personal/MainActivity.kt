@@ -11,6 +11,7 @@ import cloud.airchive.shared.data.sync.IncrementalSyncCoordinator
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -50,7 +51,14 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (!::foregroundRefresh.isInitialized) return
         lifecycleScope.launch {
-            foregroundRefresh.onForeground(System.currentTimeMillis())
+            try {
+                foregroundRefresh.onForeground(System.currentTimeMillis())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The coordinator persists a safe error code with the cached
+                // rows/watermarks; the screen renders that state without crash.
+            }
         }
     }
 
@@ -58,7 +66,13 @@ class MainActivity : ComponentActivity() {
     fun onManualRefresh() {
         if (!::foregroundRefresh.isInitialized) return
         lifecycleScope.launch {
-            foregroundRefresh.onManualRefresh(System.currentTimeMillis())
+            try {
+                foregroundRefresh.onManualRefresh(System.currentTimeMillis())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The cache-first UI observes the persisted failure state.
+            }
         }
     }
 }

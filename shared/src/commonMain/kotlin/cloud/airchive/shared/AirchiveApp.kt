@@ -24,17 +24,21 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
-import cloud.airchive.shared.contract.history.CoveredRange
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
+import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.owner.SignInResult
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
 import cloud.airchive.shared.contract.telemetry.CollectorStatus
@@ -48,8 +52,11 @@ import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
+import cloud.airchive.shared.data.sync.HistorySyncPresentation
+import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.fakes.FakeProviders
 import kotlinx.coroutines.flow.first
+import kotlin.time.Clock
 
 @Composable
 fun AirchiveApp(
@@ -63,7 +70,7 @@ fun AirchiveApp(
 
     LaunchedEffect(activeProviders) {
         screenState = try {
-            DemoHomeState.Ready(loadDemoHome(activeProviders))
+            DemoHomeState.Ready(loadDemoHomeContext(activeProviders))
         } catch (_: Exception) {
             DemoHomeState.Failed
         }
@@ -79,7 +86,7 @@ fun AirchiveApp(
                     message = "The local fake providers could not load their sample data. No account or network is required.",
                 )
 
-                is DemoHomeState.Ready -> DemoHome(state.summary, onManualRefresh)
+                is DemoHomeState.Ready -> DemoHomeContent(activeProviders, state.context, onManualRefresh)
             }
         }
     }
@@ -88,8 +95,16 @@ fun AirchiveApp(
 private sealed interface DemoHomeState {
     data object Loading : DemoHomeState
     data object Failed : DemoHomeState
-    data class Ready(val summary: DemoSummary) : DemoHomeState
+    data class Ready(val context: DemoHomeContext) : DemoHomeState
 }
+
+private data class DemoHomeContext(
+    val partition: HistoryPartition,
+    val device: ThinQDevice,
+    val profile: ThinQDeviceProfile,
+    val liveState: ThinQLiveState,
+    val credential: ThinQCredentialState,
+)
 
 private data class DemoSummary(
     val history: HistorySnapshot,
@@ -102,7 +117,43 @@ private data class DemoSummary(
     val credential: ThinQCredentialState,
 )
 
-private suspend fun loadDemoHome(providers: FakeProviders): DemoSummary {
+@Composable
+private fun DemoHomeContent(
+    providers: FakeProviders,
+    context: DemoHomeContext,
+    onManualRefresh: (() -> Unit)?,
+) {
+    val initialHistory = remember(context.partition) {
+        HistorySnapshot(
+            partition = context.partition,
+            observations = emptyList(),
+            dailyTotals = emptyList(),
+            coveredRanges = emptyList(),
+            sync = SyncMetadata(),
+        )
+    }
+    val history by remember(providers, context.partition) {
+        providers.localHistory.observe(context.partition)
+    }.collectAsState(initial = initialHistory)
+    val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
+    val summary = DemoSummary(
+        history = history,
+        latestObservation = history.observations.maxByOrNull { it.intervalStartEpochMillis },
+        finalizedTotal = history.dailyTotals.maxByOrNull { it.dayStartEpochMillis },
+        collectorHealth = history.collectorHealth ?: CollectorHealth(status = CollectorStatus.UNKNOWN),
+        device = context.device,
+        profile = context.profile,
+        liveState = context.liveState,
+        credential = context.credential,
+    )
+    DemoHome(
+        summary = summary,
+        historySync = presentHistorySync(history, nowEpochMillis),
+        onManualRefresh = onManualRefresh,
+    )
+}
+
+private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeContext {
     val owner = when (val result = providers.ownerIdentity.signIn()) {
         is SignInResult.Success -> result.session
         else -> error("The deterministic demo identity did not sign in.")
@@ -115,31 +166,8 @@ private suspend fun loadDemoHome(providers: FakeProviders): DemoSummary {
         ownerUid = owner.uid,
         deviceId = device.deviceId,
     )
-    val observations = providers.telemetry.latestObservations(
-        sinceEpochMillis = 0L,
-        pageSize = 24,
-    ).items
-    val totals = providers.telemetry.latestFinalizedTotals(limit = 1)
-    val collectorHealth = providers.telemetry.collectorHealth()
-
-    providers.localHistory.upsertObservations(partition, observations)
-    providers.localHistory.upsertDailyTotals(partition, totals)
-    providers.localHistory.upsertCollectorHealth(partition, collectorHealth)
-    if (observations.isNotEmpty()) {
-        providers.localHistory.upsertCoveredRange(
-            partition,
-            CoveredRange(
-                fromEpochMillis = observations.minOf { it.intervalStartEpochMillis },
-                toEpochMillis = observations.maxOf { it.intervalEndEpochMillis },
-            ),
-        )
-    }
-
-    return DemoSummary(
-        history = providers.localHistory.observe(partition).first(),
-        latestObservation = observations.firstOrNull(),
-        finalizedTotal = totals.firstOrNull(),
-        collectorHealth = collectorHealth,
+    return DemoHomeContext(
+        partition = partition,
         device = device,
         profile = providers.thinQ.profile(device.deviceId),
         liveState = providers.thinQ.liveState(device.deviceId),
@@ -162,7 +190,11 @@ private fun DemoMessage(title: String, message: String? = null) {
 }
 
 @Composable
-private fun DemoHome(summary: DemoSummary, onManualRefresh: (() -> Unit)?) {
+private fun DemoHome(
+    summary: DemoSummary,
+    historySync: HistorySyncPresentation,
+    onManualRefresh: (() -> Unit)?,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -180,9 +212,25 @@ private fun DemoHome(summary: DemoSummary, onManualRefresh: (() -> Unit)?) {
         ) {
             Text("Airchive", style = MaterialTheme.typography.headlineMedium)
             Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
-            onManualRefresh?.let { refresh ->
-                Button(onClick = refresh) {
-                    Text("Refresh history now")
+
+            SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
+                Text(
+                    historySync.message,
+                    modifier = if (historySync.shouldAnnounceUpdate) {
+                        Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    } else {
+                        Modifier
+                    },
+                )
+                Text(
+                    historySync.lastSuccessfulAgeMillis?.let { "Last successful sync: ${it.ageLabel()} ago." }
+                        ?: "Last successful sync: not yet.",
+                )
+                historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${it.ageLabel()} ago.") }
+                onManualRefresh?.let { refresh ->
+                    Button(onClick = refresh) {
+                        Text(historySync.retryLabel)
+                    }
                 }
             }
 
@@ -248,6 +296,13 @@ private fun SummaryCard(title: String, content: @Composable ColumnScope.() -> Un
             },
         )
     }
+}
+
+private fun Long.ageLabel(): String = when {
+    this < 60_000L -> "less than a minute"
+    this < 60 * 60_000L -> "${this / 60_000L} minutes"
+    this < 24 * 60 * 60_000L -> "${this / (60 * 60_000L)} hours"
+    else -> "${this / (24 * 60 * 60_000L)} days"
 }
 
 private fun EnergyUnit?.label(): String = when (this) {

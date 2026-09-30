@@ -8,6 +8,7 @@ import cloud.airchive.shared.contract.telemetry.DailyTotal
 import cloud.airchive.shared.contract.telemetry.DeviceIdentity
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.telemetry.TelemetryPage
+import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
 import cloud.airchive.shared.data.telemetry.AirchiveReadPaths
 import cloud.airchive.shared.data.telemetry.DEFAULT_DAY_TIME_ZONE
 import cloud.airchive.shared.data.telemetry.TelemetryReadCursor
@@ -25,8 +26,10 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import java.util.Date
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -78,6 +81,13 @@ import kotlinx.coroutines.withContext
  * - `persistedAt`/`reconciledAt` survive normalization and are the sort fields
  *   of the incremental streams (task 2.6); this adapter adds no writes or
  *   watchers.
+ * - Firestore read failures are classified into the shared safe
+ *   [TelemetryReadFailure] categories: `PERMISSION_DENIED`/`UNAUTHENTICATED`
+ *   become [TelemetryReadFailure.AccessDenied], `UNAVAILABLE`/
+ *   `DEADLINE_EXCEEDED` become [TelemetryReadFailure.Offline], and any other
+ *   Firestore failure becomes [TelemetryReadFailure.RemoteFailure]. The
+ *   original exception is kept only as the cause for in-process handling; the
+ *   sync layer persists solely the stable code (task 2.9).
  *
  * Whole Firestore documents may carry `raw`/`state` payload blocks; this
  * adapter recursively normalizes only `Timestamp`/`Date` values to epoch
@@ -341,11 +351,48 @@ class FirebaseAirchiveTelemetry private constructor(
         try {
             Tasks.await(this)
         } catch (e: ExecutionException) {
-            throw e.cause ?: e
+            throw classifyFirestoreFailure(e.cause ?: e)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             throw CancellationException("Firestore read interrupted.", e)
         }
+
+    /**
+     * Classifies a failed Firestore read into the shared, safe
+     * [TelemetryReadFailure] category used for sync-error persistence:
+     *
+     *  - `PERMISSION_DENIED` / `UNAUTHENTICATED` -> [TelemetryReadFailure.AccessDenied]
+     *  - `UNAVAILABLE` / `DEADLINE_EXCEEDED` -> [TelemetryReadFailure.Offline]
+     *  - any other Firestore failure -> [TelemetryReadFailure.RemoteFailure]
+     *
+     * The original adapter exception is preserved only as the typed failure's
+     * in-process cause so live handlers can still recover it; the sync layer
+     * persists only the stable code, never a raw message. Nested task-wrapping
+     * exceptions are unwrapped first. Non-Firestore failures (adapter logic
+     * errors, cancellations, parser failures) pass through untouched.
+     */
+    private fun classifyFirestoreFailure(error: Throwable): Throwable {
+        var current = error
+        while (
+            (current is ExecutionException || current is CompletionException) &&
+            current.cause != null
+        ) {
+            current = current.cause!!
+        }
+        return when (current) {
+            is TelemetryReadFailure -> current
+            is FirebaseFirestoreException -> when (current.code) {
+                FirebaseFirestoreException.Code.PERMISSION_DENIED,
+                FirebaseFirestoreException.Code.UNAUTHENTICATED,
+                -> TelemetryReadFailure.AccessDenied(current)
+                FirebaseFirestoreException.Code.UNAVAILABLE,
+                FirebaseFirestoreException.Code.DEADLINE_EXCEEDED,
+                -> TelemetryReadFailure.Offline(current)
+                else -> TelemetryReadFailure.RemoteFailure(current)
+            }
+            else -> current
+        }
+    }
 
     companion object {
         /** Demo project used only by the local Firebase Emulator Suite. */

@@ -10,8 +10,10 @@ import cloud.airchive.shared.contract.telemetry.EnergyUnit
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.telemetry.ObservationQuality
 import cloud.airchive.shared.contract.telemetry.TelemetryPage
+import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeLocalHistory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -376,10 +378,14 @@ class IncrementalSyncCoordinatorTest {
         assertEquals(listOf("cached-before-failure"), snapshot.observations.map { it.sampleId })
         assertEquals(persistedWatermark, snapshot.sync?.persistedAtWatermarkEpochMillis)
         assertEquals(persistedWatermark, snapshot.sync?.reconciledAtWatermarkEpochMillis)
+        // The failure was recorded as a safe stable code (never a raw message),
+        // preserving the prior rows/watermarks; last-success stays untouched.
+        assertEquals(nowEpochMillis, snapshot.sync?.lastErrorEpochMillis)
+        assertEquals("REMOTE_FAILURE", snapshot.sync?.lastError)
 
         // A retry (no injected failure) converges: it re-reads the same bounded
-        // window, merges idempotently, and advances the watermarks from the
-        // returned server timestamps.
+        // window, merges idempotently, advances the watermarks from the
+        // returned server timestamps, and clears the prior error.
         server.failPersistedOnCall = null
         val result = coordinator(server, local).syncIncremental(nowEpochMillis = nowEpochMillis)
 
@@ -388,6 +394,8 @@ class IncrementalSyncCoordinatorTest {
         assertEquals(289, snapshot.observations.size)
         assertEquals(nowEpochMillis, snapshot.sync?.persistedAtWatermarkEpochMillis)
         assertEquals(nowEpochMillis, snapshot.sync?.reconciledAtWatermarkEpochMillis)
+        assertNull(snapshot.sync?.lastErrorEpochMillis)
+        assertNull(snapshot.sync?.lastError)
     }
 
     @Test
@@ -431,13 +439,21 @@ class IncrementalSyncCoordinatorTest {
         }
 
         // Both remote streams completed, but the atomic local API failed. The
-        // old cache and the complete old sync record—including prior error—stay
-        // untouched, so retry reuses the same overlap lower bounds.
+        // old cache, last-success, and watermarks stay untouched — a failed
+        // atomic observation+metadata commit must not advance the watermarks —
+        // and the separate safe error update touched ONLY the error fields
+        // (a stable code, never the raw message), so retry reuses the same
+        // overlap lower bounds.
         assertEquals(listOf(persistedWatermark - IncrementalSyncCoordinator.OVERLAP_MILLIS), telemetry.persistedSinceRequests)
         assertEquals(listOf(reconciledWatermark - IncrementalSyncCoordinator.OVERLAP_MILLIS), telemetry.reconciledSinceRequests)
         var snapshot = local.observe(partition).first()
         assertEquals(listOf(prior), snapshot.observations)
-        assertEquals(priorSync, snapshot.sync)
+        val syncAfterFailedCommit = assertNotNull(snapshot.sync)
+        assertEquals(priorSync.lastSuccessfulSyncEpochMillis, syncAfterFailedCommit.lastSuccessfulSyncEpochMillis)
+        assertEquals(persistedWatermark, syncAfterFailedCommit.persistedAtWatermarkEpochMillis)
+        assertEquals(reconciledWatermark, syncAfterFailedCommit.reconciledAtWatermarkEpochMillis)
+        assertEquals(nowEpochMillis, syncAfterFailedCommit.lastErrorEpochMillis)
+        assertEquals("REMOTE_FAILURE", syncAfterFailedCommit.lastError)
 
         local.injectAtomicRefreshFailure = null
         val result = coordinator(telemetry, local).syncIncremental(nowEpochMillis = nowEpochMillis)
@@ -449,6 +465,109 @@ class IncrementalSyncCoordinatorTest {
         assertNull(snapshot.sync?.lastError)
         assertEquals(fresh.persistedAtEpochMillis, snapshot.sync?.persistedAtWatermarkEpochMillis)
         assertEquals(fresh.reconciledAtEpochMillis, snapshot.sync?.reconciledAtWatermarkEpochMillis)
+    }
+
+    // --------------------------------- typed errors persist as safe codes
+
+    @Test
+    fun accessDeniedIsPersistedAsSafeCodeAndPreservesCacheWatermarksAndLastSuccess() = runBlocking {
+        val persistedWatermark = nowEpochMillis - 1_000_000L
+        val reconciledWatermark = nowEpochMillis - 900_000L
+        val lastSuccess = nowEpochMillis - 5 * 60 * 1000L
+        val cached = sample(
+            id = "cached",
+            persistedAt = persistedWatermark,
+            reconciledAt = reconciledWatermark,
+        )
+        val server = RecordingIncrementalTelemetry(
+            FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis, observations = emptyList()),
+        ).apply {
+            persistedFailure = TelemetryReadFailure.AccessDenied()
+        }
+        val local = FakeLocalHistory().apply {
+            replace(
+                partition,
+                FakeLocalHistory.syncedSnapshotFor(
+                    partition,
+                    observations = listOf(cached),
+                    sync = SyncMetadata(
+                        lastSuccessfulSyncEpochMillis = lastSuccess,
+                        persistedAtWatermarkEpochMillis = persistedWatermark,
+                        reconciledAtWatermarkEpochMillis = reconciledWatermark,
+                    ),
+                ),
+            )
+        }
+
+        val error = assertFailsWith<TelemetryReadFailure.AccessDenied> {
+            coordinator(server, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        }
+        assertEquals("ACCESS_DENIED", error.code)
+
+        // The read was denied, but the cached rows, last-success, and both
+        // watermarks stayed fully intact; the only metadata change is the safe,
+        // stable error code plus its timestamp — never a raw exception message.
+        val snapshot = local.observe(partition).first()
+        assertEquals(listOf(cached), snapshot.observations)
+        val sync = assertNotNull(snapshot.sync)
+        assertEquals(lastSuccess, sync.lastSuccessfulSyncEpochMillis)
+        assertEquals(persistedWatermark, sync.persistedAtWatermarkEpochMillis)
+        assertEquals(reconciledWatermark, sync.reconciledAtWatermarkEpochMillis)
+        assertEquals(nowEpochMillis, sync.lastErrorEpochMillis)
+        assertEquals("ACCESS_DENIED", sync.lastError)
+
+        // A retry with the denial resolved converges and clears the prior error.
+        server.persistedFailure = null
+        coordinator(server, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        val recovered = assertNotNull(local.observe(partition).first().sync)
+        assertNull(recovered.lastErrorEpochMillis)
+        assertNull(recovered.lastError)
+        assertEquals(nowEpochMillis, recovered.lastSuccessfulSyncEpochMillis)
+    }
+
+    @Test
+    fun offlineIsPersistedAsSafeCodePreservingWatermarks() = runBlocking {
+        // The persisted stream reads cleanly; the reconciled stream goes
+        // offline, so the failure surfaces on the second stream.
+        val server = RecordingIncrementalTelemetry(
+            FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis, observations = emptyList()),
+        ).apply {
+            reconciledFailure = TelemetryReadFailure.Offline()
+        }
+        val local = FakeLocalHistory()
+
+        assertFailsWith<TelemetryReadFailure.Offline> {
+            coordinator(server, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        }
+
+        val snapshot = local.observe(partition).first()
+        assertTrue(snapshot.observations.isEmpty())
+        assertNull(snapshot.sync?.lastSuccessfulSyncEpochMillis)
+        assertNull(snapshot.sync?.persistedAtWatermarkEpochMillis)
+        assertEquals(nowEpochMillis, snapshot.sync?.lastErrorEpochMillis)
+        assertEquals("OFFLINE", snapshot.sync?.lastError)
+    }
+
+    @Test
+    fun cancellationPropagatesWithoutBeingRecordedAsASyncError() = runBlocking {
+        val server = RecordingIncrementalTelemetry(
+            FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis, observations = emptyList()),
+        ).apply {
+            persistedFailure = CancellationException("cancelled by caller")
+        }
+        val local = FakeLocalHistory()
+
+        assertFailsWith<CancellationException> {
+            coordinator(server, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        }
+
+        // Cancellation is not a sync failure: nothing — not even the error
+        // fields — was recorded, and last-success/watermarks stay absent.
+        val sync = local.observe(partition).first().sync
+        assertNull(sync?.lastErrorEpochMillis)
+        assertNull(sync?.lastError)
+        assertNull(sync?.lastSuccessfulSyncEpochMillis)
+        assertNull(sync?.persistedAtWatermarkEpochMillis)
     }
 
     // ------------------------------------------------------------ page bound
@@ -510,6 +629,10 @@ class IncrementalSyncCoordinatorTest {
         assertTrue(snapshot.observations.isEmpty())
         assertNull(snapshot.sync?.lastSuccessfulSyncEpochMillis)
         assertNull(snapshot.sync?.persistedAtWatermarkEpochMillis)
+        // The guard failure is still a sync failure: only its stable code and
+        // timestamp are recorded; watermarks and last-success stay absent.
+        assertEquals(nowEpochMillis, snapshot.sync?.lastErrorEpochMillis)
+        assertEquals("REMOTE_FAILURE", snapshot.sync?.lastError)
     }
 
     // ----------------------------------------------------------------- helpers
@@ -556,6 +679,14 @@ private class RecordingIncrementalTelemetry(
     val persistedCursorRequests = mutableListOf<String?>()
     val reconciledCursorRequests = mutableListOf<String?>()
 
+    /**
+     * When set, the next call to the respective stream throws this exact
+     * failure (e.g. a typed [TelemetryReadFailure]) instead of delegating, so
+     * tests can inject access-denied/offline/cancellation deterministically.
+     */
+    var persistedFailure: Throwable? = null
+    var reconciledFailure: Throwable? = null
+
     private var persistedCall = 0
     private var reconciledCall = 0
 
@@ -568,6 +699,7 @@ private class RecordingIncrementalTelemetry(
         persistedPageSizesRequested += pageSize
         persistedCursorRequests += cursor
         persistedCall += 1
+        persistedFailure?.let { throw it }
         if (failPersistedOnCall == persistedCall) {
             throw IllegalStateException("injected persistedAt stream failure on call $persistedCall")
         }
@@ -583,6 +715,7 @@ private class RecordingIncrementalTelemetry(
         reconciledPageSizesRequested += pageSize
         reconciledCursorRequests += cursor
         reconciledCall += 1
+        reconciledFailure?.let { throw it }
         if (failReconciledOnCall == reconciledCall) {
             throw IllegalStateException("injected reconciledAt stream failure on call $reconciledCall")
         }

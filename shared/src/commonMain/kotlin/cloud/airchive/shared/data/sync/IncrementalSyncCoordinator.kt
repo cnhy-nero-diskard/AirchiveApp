@@ -6,7 +6,9 @@ import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.telemetry.AirchiveTelemetryPort
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.telemetry.TelemetryPage
+import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
 import cloud.airchive.shared.data.telemetry.TelemetryReadKind
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.first
 
 /**
@@ -52,6 +54,16 @@ import kotlinx.coroutines.flow.first
  *  - **No cursor loops.** Each opaque cursor is consumed at most once; a
  *    repeated cursor aborts with [IllegalStateException] instead of paging
  *    forever, and an oversized page is rejected the same way.
+ *  - **Durable, safe sync-error bookkeeping.** Any non-cancellation failure
+ *    (stream read or the atomic local commit) leaves the cached rows, the
+ *    last-success timestamp, and both watermarks fully intact, and records a
+ *    stable [TelemetryReadFailure.code] plus `lastErrorEpochMillis` in the sync
+ *    metadata as the only side effect — never a raw exception message. A
+ *    failure of that bookkeeping itself never masks the original sync failure,
+ *    and cancellation propagates without being recorded. A later success clears
+ *    the prior error. A failed atomic observation+metadata commit must not
+ *    advance the watermarks, so its error record preserves them (only the
+ *    error fields change).
  *
  * [ForegroundRefreshController] owns app-open/resume and explicit manual trigger
  * policy; this coordinator performs exactly one bounded sync attempt per call.
@@ -77,7 +89,9 @@ class IncrementalSyncCoordinator(
      *   adapter repeats an opaque cursor (both would otherwise loop).
      * @throws Throwable any adapter or local-store failure; because both streams
      *   are fully read before the first local write, such a failure leaves the
-     *   previous cache and watermarks untouched.
+     *   previous cache, last-success timestamp, and watermarks untouched and
+     *   records a safe stable error code in the sync metadata (see class docs).
+     *   Cancellation propagates without being recorded.
      */
     suspend fun syncIncremental(
         nowEpochMillis: Long,
@@ -85,8 +99,34 @@ class IncrementalSyncCoordinator(
     ): IncrementalSyncResult {
         AirchiveTelemetryPort.requireValidPageSize(pageSize)
 
-        // ---- 1. Durable watermarks -> bounded, overlapped lower bounds. ----
+        // The durable metadata is captured before any read so an error record
+        // (below) can preserve the prior watermarks and last-success timestamp.
         val previous = local.observe(partition).first().sync ?: SyncMetadata()
+        return try {
+            syncIncrementalInternal(nowEpochMillis, pageSize, previous)
+        } catch (failure: Throwable) {
+            if (failure is CancellationException) throw failure
+            // Preserve cached rows, last-success, and watermarks; record only a
+            // safe, stable error code — never a raw exception message. If the
+            // record itself fails, it is swallowed so it cannot mask the
+            // original sync failure.
+            recordSyncError(
+                local = local,
+                partition = partition,
+                previous = previous,
+                failure = TelemetryReadFailure.classify(failure),
+                nowEpochMillis = nowEpochMillis,
+            )
+            throw failure
+        }
+    }
+
+    private suspend fun syncIncrementalInternal(
+        nowEpochMillis: Long,
+        pageSize: Int,
+        previous: SyncMetadata,
+    ): IncrementalSyncResult {
+        // ---- 1. Durable watermarks -> bounded, overlapped lower bounds. ----
         val persistedLowerBound = lowerBound(previous.persistedAtWatermarkEpochMillis, nowEpochMillis)
         val reconciledLowerBound = lowerBound(previous.reconciledAtWatermarkEpochMillis, nowEpochMillis)
 
@@ -205,6 +245,38 @@ class IncrementalSyncCoordinator(
 
         /** Bounded recent window used when no durable watermark exists yet. */
         const val RECENT_WINDOW_MILLIS: Long = 24L * 60 * 60 * 1000
+    }
+}
+
+/**
+ * Best-effort, side-channel persistence of a safe sync error (task 2.9).
+ *
+ * Only the two error fields of [previous] change — `lastErrorEpochMillis` and
+ * the stable [TelemetryReadFailure.code] in `lastError` — so cached rows, the
+ * last-success timestamp, and both watermarks are fully preserved, including
+ * after a failed atomic observation+metadata commit (task 2.7: a failed commit
+ * must not advance the watermarks). No raw exception message is ever written.
+ *
+ * A failure of this bookkeeping is swallowed: recording the error must never
+ * mask the original sync failure that is already propagating.
+ */
+internal suspend fun recordSyncError(
+    local: LocalHistoryPort,
+    partition: HistoryPartition,
+    previous: SyncMetadata,
+    failure: TelemetryReadFailure,
+    nowEpochMillis: Long,
+) {
+    try {
+        local.recordSync(
+            partition,
+            previous.copy(
+                lastErrorEpochMillis = nowEpochMillis,
+                lastError = failure.code,
+            ),
+        )
+    } catch (ignored: Throwable) {
+        // Never mask the original sync failure with a bookkeeping failure.
     }
 }
 

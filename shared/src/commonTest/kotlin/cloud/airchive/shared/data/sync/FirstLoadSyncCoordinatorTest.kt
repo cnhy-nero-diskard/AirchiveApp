@@ -12,6 +12,7 @@ import cloud.airchive.shared.contract.telemetry.EnergyUnit
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.telemetry.ObservationQuality
 import cloud.airchive.shared.contract.telemetry.TelemetryPage
+import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import kotlinx.coroutines.flow.first
@@ -233,6 +234,76 @@ class FirstLoadSyncCoordinatorTest {
         assertTrue(snapshot.observations.isEmpty(), "a failed page must not leave a partial initial window")
         assertEquals(emptyList(), snapshot.dailyTotals)
         assertNull(snapshot.sync?.lastSuccessfulSyncEpochMillis)
+        // The failure is still recorded as a safe, actionable error code: a
+        // fresh install shows an error while no cache exists, with no
+        // last-success or watermark invented.
+        assertEquals(nowEpochMillis, snapshot.sync?.lastErrorEpochMillis)
+        assertEquals("REMOTE_FAILURE", snapshot.sync?.lastError)
+        assertNull(snapshot.sync?.persistedAtWatermarkEpochMillis)
+    }
+
+    // -------------------------------- actionable failed first loads
+
+    @Test
+    fun accessDeniedDuringFirstLoadLeavesActionableErrorWithoutAnyCache() = runBlocking {
+        val base = nowEpochMillis - FirstLoadSyncCoordinator.INITIAL_WINDOW_MILLIS + 100L
+        val telemetry = StubTelemetry(
+            pages = listOf(
+                TelemetryPage(items = listOf(sample("a", from = base)), nextCursor = null),
+            ),
+            failOnCallNumber = 1,
+            failure = TelemetryReadFailure.AccessDenied(),
+        )
+        val local = FakeLocalHistory()
+
+        val error = assertFailsWith<TelemetryReadFailure.AccessDenied> {
+            coordinator(telemetry, local).syncFirstLoad(nowEpochMillis = nowEpochMillis)
+        }
+        assertEquals("ACCESS_DENIED", error.code)
+
+        // No cache exists yet and none was invented: an actionable error state
+        // (safe stable code + timestamp) with no last-success and no watermarks.
+        val snapshot = local.observe(partition).first()
+        assertTrue(snapshot.observations.isEmpty())
+        assertEquals(emptyList(), snapshot.dailyTotals)
+        assertNull(snapshot.collectorHealth)
+        val sync = assertNotNull(snapshot.sync)
+        assertNull(sync.lastSuccessfulSyncEpochMillis)
+        assertNull(sync.persistedAtWatermarkEpochMillis)
+        assertNull(sync.reconciledAtWatermarkEpochMillis)
+        assertEquals(nowEpochMillis, sync.lastErrorEpochMillis)
+        assertEquals("ACCESS_DENIED", sync.lastError)
+    }
+
+    @Test
+    fun failedFirstLoadRetryConvergesAndClearsTheError() = runBlocking {
+        val base = nowEpochMillis - FirstLoadSyncCoordinator.INITIAL_WINDOW_MILLIS + 100L
+        val page = TelemetryPage(
+            items = listOf(sample("a", from = base), sample("b", from = base + 300_000)),
+            nextCursor = null,
+        )
+        val telemetry = StubTelemetry(pages = listOf(page), failOnCallNumber = 1)
+        val local = FakeLocalHistory()
+
+        assertFailsWith<IllegalStateException> {
+            coordinator(telemetry, local).syncFirstLoad(nowEpochMillis = nowEpochMillis)
+        }
+        // The failed attempt left an error but no partial cache.
+        assertNotNull(local.observe(partition).first().sync?.lastError)
+        assertTrue(local.observe(partition).first().observations.isEmpty())
+
+        // A retry once the remote has recovered converges and clears the error.
+        telemetry.failOnCallNumber = null
+        telemetry.failure = null
+        val result = coordinator(telemetry, local).syncFirstLoad(nowEpochMillis = nowEpochMillis)
+        assertEquals(2, result.observationsPersisted)
+        val snapshot = local.observe(partition).first()
+        assertEquals(2, snapshot.observations.size)
+        val sync = assertNotNull(snapshot.sync)
+        assertEquals(nowEpochMillis, sync.lastSuccessfulSyncEpochMillis)
+        assertEquals(nowEpochMillis, sync.persistedAtWatermarkEpochMillis)
+        assertNull(sync.lastErrorEpochMillis)
+        assertNull(sync.lastError)
     }
 
     // ------------------------------------------------------- window faithfulness
@@ -389,10 +460,12 @@ private class RecordingTelemetry(
 private class StubTelemetry(
     private val pages: List<TelemetryPage<Observation>>,
     private val totals: List<DailyTotal> = defaultTotals(),
-    private val failOnCallNumber: Int? = null,
+    var failOnCallNumber: Int? = null,
+    var failure: Throwable? = null,
 ) : AirchiveTelemetryPort {
 
     val cursorRequests = mutableListOf<String?>()
+
     private var latestCallCount = 0
 
     override suspend fun latestObservations(
@@ -403,7 +476,7 @@ private class StubTelemetry(
         cursorRequests += cursor
         latestCallCount += 1
         if (failOnCallNumber == latestCallCount) {
-            throw IllegalStateException("injected page failure on call $latestCallCount")
+            throw failure ?: IllegalStateException("injected page failure on call $latestCallCount")
         }
         return pages.getOrElse(latestCallCount - 1) { pages.last() }
     }

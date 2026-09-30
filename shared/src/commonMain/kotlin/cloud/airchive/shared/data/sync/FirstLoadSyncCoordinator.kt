@@ -7,6 +7,9 @@ import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.telemetry.AirchiveTelemetryPort
 import cloud.airchive.shared.contract.telemetry.DailyTotal
 import cloud.airchive.shared.contract.telemetry.Observation
+import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.flow.first
 
 /**
  * Orchestrates the bounded **first-load** synchronization for one
@@ -35,10 +38,19 @@ import cloud.airchive.shared.contract.telemetry.Observation
  *    forever.
  *  - **Honest nulls.** Null interval energy stays null; it is never coerced to a
  *    measured zero anywhere in the projection.
-  *  - **Durable bookkeeping.** A successful load records the full queried
-  *    24-hour range (including gaps with no documents) plus sync metadata and
-  *    the initial `persistedAt`/`reconciledAt` watermarks, capped by what the
-  *    loaded samples actually carried.
+ *  - **Durable bookkeeping.** A successful load records the full queried
+ *    24-hour range (including gaps with no documents) plus sync metadata and
+ *    the initial `persistedAt`/`reconciledAt` watermarks, capped by what the
+ *    loaded samples actually carried.
+ *  - **Actionable failed first loads.** On any non-cancellation failure the
+ *    buffered pages guarantee no partial initial window is left behind, and the
+ *    sync metadata records a safe stable [TelemetryReadFailure.code] with
+ *    `lastErrorEpochMillis` so a fresh install shows an actionable error while
+ *    no cache exists. A failed load never marks `lastSuccessfulSyncEpochMillis`
+ *    or the watermarks, cancels only via [CancellationException] (which is never
+ *    recorded as a sync error), and a failure of the error record itself never
+ *    masks the original sync failure. A later successful load clears the prior
+ *    error.
  *
  * Deterministic [FirstLoadProgress] reports are delivered through [onProgress]:
  * once after every observation page, before and after the daily-totals fetch,
@@ -76,6 +88,10 @@ class FirstLoadSyncCoordinator(
      * @throws IllegalArgumentException if [pageSize] is outside `1..250`.
      * @throws IllegalStateException if a page exceeds [pageSize] or the telemetry
      *   adapter repeats an opaque cursor (both would otherwise loop).
+     * @throws Throwable any adapter or local-store failure; the buffered pages
+     *   guarantee no partial initial window is written, the sync metadata
+     *   records a safe stable error code (never `lastSuccess`/watermarks), and
+     *   cancellation propagates without being recorded.
      */
     suspend fun syncFirstLoad(
         nowEpochMillis: Long,
@@ -84,6 +100,10 @@ class FirstLoadSyncCoordinator(
     ): FirstLoadResult {
         AirchiveTelemetryPort.requireValidPageSize(pageSize)
 
+        // Captured before any read so an error record can preserve prior
+        // last-success/watermarks (or leave them null on a true first attempt).
+        val previous = local.observe(partition).first().sync
+        return try {
         val windowFromEpochMillis = nowEpochMillis - INITIAL_WINDOW_MILLIS
         val windowToEpochMillis = nowEpochMillis
 
@@ -190,7 +210,7 @@ class FirstLoadSyncCoordinator(
             ),
         )
 
-        return FirstLoadResult(
+        FirstLoadResult(
             observationPagesFetched = pagesFetched,
             observationsPersisted = observations.size,
             dailyTotalsPersisted = totals.size,
@@ -198,6 +218,20 @@ class FirstLoadSyncCoordinator(
             coveredRange = coveredRange,
             syncMetadata = syncMetadata,
         )
+        } catch (failure: Throwable) {
+            if (failure is CancellationException) throw failure
+            // A failed first load leaves no partial cache behind (buffered
+            // pages) and records only a safe, stable error code — never a raw
+            // exception message and never a last-success or watermark.
+            recordSyncError(
+                local = local,
+                partition = partition,
+                previous = previous ?: SyncMetadata(),
+                failure = TelemetryReadFailure.classify(failure),
+                nowEpochMillis = nowEpochMillis,
+            )
+            throw failure
+        }
     }
 
     companion object {
