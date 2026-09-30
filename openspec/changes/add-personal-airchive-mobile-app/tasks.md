@@ -13,7 +13,7 @@
 - [x] 2.4 Implement first-load synchronization for the latest 24 hours plus 30 available finalized daily totals; verify a 288-sample fixture paginates, reports progress, and stores no older five-minute samples before explicit selection.
 - [x] 2.5 Implement on-demand historical range fetch and durable range coverage; verify revisiting a covered range reads Room without repeating the full Firestore query.
 - [x] 2.6 Implement incremental `persistedAt` and `reconciledAt` queries with overlap, de-duplication, and server-timestamp high-water marks; verify a new sample, completeness upgrade, and older rollover patch each update the local row.
-- [ ] 2.7 Make both query streams and their Room upserts commit before watermarks advance; verify injected page and local-commit failures leave watermarks recoverable and a retry converges.
+- [x] 2.7 Make both query streams and their Room upserts commit before watermarks advance; verify injected page and local-commit failures leave watermarks recoverable and a retry converges.
 - [ ] 2.8 Trigger refresh on app open/resume only after ten minutes and on manual request regardless of age, with no continuous listener or background worker; verify a counting fake observes those exact triggers.
 - [ ] 2.9 Show cached history with last-success and error age offline or after authorization failure; verify offline restart retains the prior owner’s rows and a fresh offline install shows an actionable empty state.
 

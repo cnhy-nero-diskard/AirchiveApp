@@ -191,6 +191,22 @@ interface LocalHistoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun replaceSync(row: SyncEntity)
 
+    /**
+     * Commits one bounded incremental refresh atomically: replaces the
+     * [rows] and the [sync] row (last-success age + both watermarks) inside a
+     * single transaction. If the sync write fails after the observation write
+     * began (or any statement errors), the whole transaction rolls back, so
+     * the watermarks never advance past observation rows that did not commit.
+     */
+    @Transaction
+    suspend fun replaceObservationsAndSync(
+        rows: List<ObservationEntity>,
+        sync: SyncEntity,
+    ) {
+        replaceObservations(rows)
+        replaceSync(sync)
+    }
+
     @Query(
         "DELETE FROM sync_metadata " +
             "WHERE firebase_project_id = :firebaseProjectId AND owner_uid = :ownerUid AND device_id = :deviceId",

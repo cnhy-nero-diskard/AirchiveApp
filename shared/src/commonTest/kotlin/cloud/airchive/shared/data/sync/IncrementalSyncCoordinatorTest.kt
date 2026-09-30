@@ -390,6 +390,67 @@ class IncrementalSyncCoordinatorTest {
         assertEquals(nowEpochMillis, snapshot.sync?.reconciledAtWatermarkEpochMillis)
     }
 
+    @Test
+    fun injectedAtomicLocalCommitFailureLeavesRowsAndWatermarksRecoverable() = runBlocking {
+        val persistedWatermark = nowEpochMillis - 10 * 60 * 1000L
+        val reconciledWatermark = nowEpochMillis - 12 * 60 * 1000L
+        val prior = sample(
+            id = "cached-before-local-failure",
+            persistedAt = persistedWatermark,
+            reconciledAt = reconciledWatermark,
+        )
+        val fresh = sample(
+            id = "fresh-after-retry",
+            persistedAt = nowEpochMillis - 5 * 60 * 1000L,
+            reconciledAt = nowEpochMillis - 4 * 60 * 1000L,
+        )
+        val telemetry = RecordingIncrementalTelemetry(
+            FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis, observations = listOf(fresh)),
+        )
+        val priorSync = SyncMetadata(
+            lastSuccessfulSyncEpochMillis = nowEpochMillis - 20 * 60 * 1000L,
+            lastErrorEpochMillis = nowEpochMillis - 15 * 60 * 1000L,
+            lastError = "prior-sync-error",
+            persistedAtWatermarkEpochMillis = persistedWatermark,
+            reconciledAtWatermarkEpochMillis = reconciledWatermark,
+        )
+        val local = FakeLocalHistory().apply {
+            replace(
+                partition,
+                FakeLocalHistory.syncedSnapshotFor(
+                    partition,
+                    observations = listOf(prior),
+                    sync = priorSync,
+                ),
+            )
+            injectAtomicRefreshFailure = IllegalStateException("injected atomic local commit failure")
+        }
+
+        assertFailsWith<IllegalStateException> {
+            coordinator(telemetry, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        }
+
+        // Both remote streams completed, but the atomic local API failed. The
+        // old cache and the complete old sync record—including prior error—stay
+        // untouched, so retry reuses the same overlap lower bounds.
+        assertEquals(listOf(persistedWatermark - IncrementalSyncCoordinator.OVERLAP_MILLIS), telemetry.persistedSinceRequests)
+        assertEquals(listOf(reconciledWatermark - IncrementalSyncCoordinator.OVERLAP_MILLIS), telemetry.reconciledSinceRequests)
+        var snapshot = local.observe(partition).first()
+        assertEquals(listOf(prior), snapshot.observations)
+        assertEquals(priorSync, snapshot.sync)
+
+        local.injectAtomicRefreshFailure = null
+        val result = coordinator(telemetry, local).syncIncremental(nowEpochMillis = nowEpochMillis)
+        snapshot = local.observe(partition).first()
+        assertEquals(1, result.observationsMerged)
+        assertEquals(listOf(prior, fresh), snapshot.observations)
+        assertEquals(nowEpochMillis, snapshot.sync?.lastSuccessfulSyncEpochMillis)
+        assertNull(snapshot.sync?.lastErrorEpochMillis)
+        assertNull(snapshot.sync?.lastError)
+        assertEquals(fresh.persistedAtEpochMillis, snapshot.sync?.persistedAtWatermarkEpochMillis)
+        assertEquals(fresh.reconciledAtEpochMillis, snapshot.sync?.reconciledAtWatermarkEpochMillis)
+    }
+
     // ------------------------------------------------------------ page bound
 
     @Test

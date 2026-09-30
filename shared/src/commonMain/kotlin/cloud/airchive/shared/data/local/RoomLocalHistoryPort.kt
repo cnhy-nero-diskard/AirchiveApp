@@ -66,6 +66,17 @@ class RoomLocalHistoryPort(private val database: AirchiveDatabase) : LocalHistor
         dao.replaceObservations(observations.map { it.toEntity(partition) })
     }
 
+    override suspend fun upsertObservationsAndRecordSync(
+        partition: HistoryPartition,
+        observations: List<Observation>,
+        metadata: SyncMetadata,
+    ) {
+        dao.replaceObservationsAndSync(
+            rows = observations.map { it.toEntity(partition) },
+            sync = metadata.toEntity(partition),
+        )
+    }
+
     override suspend fun upsertDailyTotals(partition: HistoryPartition, totals: List<DailyTotal>) {
         dao.replaceDailyTotals(totals.map { it.toEntity(partition) })
     }

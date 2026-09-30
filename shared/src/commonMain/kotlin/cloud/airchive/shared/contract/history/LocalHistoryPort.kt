@@ -33,6 +33,21 @@ interface LocalHistoryPort {
     /** Inserts or replaces [observations] in [partition], merged by `sampleId`. */
     suspend fun upsertObservations(partition: HistoryPartition, observations: List<Observation>)
 
+    /**
+     * Commits one bounded incremental refresh atomically: [observations] are
+     * upserted (merged by `sampleId`) and [metadata] — last-success age plus
+     * both mutation watermarks — is recorded in the same durable commit.
+     * Either both land or neither does, so the watermarks can never advance
+     * past observation rows that were not written. Prefer this over a
+     * [upsertObservations] + [recordSync] pair for incremental refresh; the
+     * separate methods stay for every other workflow.
+     */
+    suspend fun upsertObservationsAndRecordSync(
+        partition: HistoryPartition,
+        observations: List<Observation>,
+        metadata: SyncMetadata,
+    )
+
     /** Inserts or replaces [totals] in [partition], merged by `totalId`. */
     suspend fun upsertDailyTotals(partition: HistoryPartition, totals: List<DailyTotal>)
 

@@ -18,10 +18,8 @@ import kotlinx.coroutines.flow.first
  *
  * This is the *read-and-cache* path only. It never writes through the read-only
  * [AirchiveTelemetryPort], never constructs a Firestore path, never schedules
- * background work (task 2.8 owns triggers), and adds **no** new Room API or
- * transaction: task 2.7 turns the two local writes into one atomic commit, so
- * this coordinator deliberately calls only the existing [LocalHistoryPort]
- * operations.
+ * background work (task 2.8 owns triggers), and commits observations plus their
+ * sync metadata through one atomic [LocalHistoryPort] operation.
  *
  * ## Guarantees provided here
  *
@@ -141,9 +139,8 @@ class IncrementalSyncCoordinator(
             reconciledAtWatermarkEpochMillis = newReconciledAt,
         )
 
-        // ---- 4. Upsert rows, then record the advanced watermarks. ----
-        local.upsertObservations(partition, observations)
-        local.recordSync(partition, updatedMetadata)
+        // ---- 4. Commit rows and watermarks atomically. ----
+        local.upsertObservationsAndRecordSync(partition, observations, updatedMetadata)
 
         return IncrementalSyncResult(
             persistedPagesFetched = persistedStream.pagesFetched,

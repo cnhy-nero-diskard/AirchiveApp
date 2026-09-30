@@ -51,6 +51,36 @@ class FakeLocalHistory : LocalHistoryPort {
             publish(partition, current.copy(observations = merged))
         }
 
+    /**
+     * Atomic incremental-refresh commit: merges [observations] by `sampleId`
+     * and records [metadata] (last-success age + both watermarks) in the same
+     * snapshot publish. If [injectAtomicRefreshFailure] is set, the whole
+     * commit is abandoned **before** any state is touched —
+     * mirrors the Room transaction rollback where neither rows nor watermarks
+     * advance on a mid-commit failure.
+     */
+    override suspend fun upsertObservationsAndRecordSync(
+        partition: HistoryPartition,
+        observations: List<Observation>,
+        metadata: SyncMetadata,
+    ) = mutex.withLock {
+        injectAtomicRefreshFailure?.let { throw it }
+        val current = flowFor(partition).value
+        val merged = current.observations
+            .map { existing -> observations.firstOrNull { it.sampleId == existing.sampleId } ?: existing } +
+            observations.filter { new -> current.observations.none { it.sampleId == new.sampleId } }
+        publish(partition, current.copy(observations = merged, sync = metadata))
+    }
+
+    /**
+     * Test-only failure injection point for the atomic refresh commit. When
+     * non-null, [upsertObservationsAndRecordSync] throws it
+     * without modifying any rows or metadata, proving the atomic contract:
+     * a mid-commit failure leaves the store fully untouched. The calling test
+     * clears it (or sets it to `null`) before the retry.
+     */
+    var injectAtomicRefreshFailure: Throwable? = null
+
     override suspend fun upsertDailyTotals(partition: HistoryPartition, totals: List<DailyTotal>) =
         mutex.withLock {
             val current = flowFor(partition).value
