@@ -1,6 +1,5 @@
 package cloud.airchive.shared.data.onboarding
 
-import cloud.airchive.shared.contract.credentials.SaveThinQResult
 import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
@@ -11,6 +10,7 @@ import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
 import cloud.airchive.shared.contract.owner.OwnerAccessState
 import cloud.airchive.shared.contract.telemetry.AirchiveTelemetryPort
 import cloud.airchive.shared.contract.telemetry.TelemetryReadFailure
+import cloud.airchive.shared.contract.thinq.ThinQCredentialVerifier
 import cloud.airchive.shared.data.sync.FirstLoadPhase
 import cloud.airchive.shared.data.sync.FirstLoadProgress
 import cloud.airchive.shared.data.sync.FirstLoadSyncCoordinator
@@ -75,12 +75,19 @@ import kotlinx.coroutines.sync.withLock
 class FirstRunOnboardingController(
     private val ownerAccess: OwnerAccessCoordinator,
     private val credentialStore: ThinQCredentialStore,
+    private val credentialVerifier: ThinQCredentialVerifier,
     private val telemetry: AirchiveTelemetryPort,
     private val local: LocalHistoryPort,
     private val firebaseProjectId: String,
     private val configuredDeviceId: String,
     private val demoOnly: Boolean = false,
 ) {
+
+    private val credentialSetup = ThinQCredentialSetupCoordinator(
+        credentialStore = credentialStore,
+        verifier = credentialVerifier,
+        configuredDeviceId = configuredDeviceId,
+    )
 
     private val _state = MutableStateFlow(
         FirstRunOnboardingState(
@@ -108,15 +115,18 @@ class FirstRunOnboardingController(
     suspend fun retryAccess() = refreshFromAccess(ownerAccess.retryHistoryAccess())
 
     /**
-     * Validates and stores a ThinQ PAT. Only callable while
+     * Verifies and stores a ThinQ PAT. Only callable while
      * [OwnerAccessState.Authorized]; otherwise the call fails with
      * [IllegalStateException] (a UI/flow contract violation, not an owner error).
      *
      * The country is normalized to two uppercase letters (`ph` becomes `PH`);
      * a blank token or a country that is not exactly two alphabetic letters is
      * rejected with [ThinQCredentialSaveFailure.INVALID_INPUT] **before** the
-     * store is touched. On success only the masked [ThinQCredentialState] is
-     * published; the raw token never enters this controller's state.
+     * verifier/store is touched. On success only the masked
+     * [ThinQCredentialState] is published; the raw token never enters this
+     * controller's state. A token is persisted only after the configured AC
+     * identity and profile were read successfully; this read check does **not**
+     * establish command/control authority.
      */
     suspend fun saveThinQCredential(rawToken: String, country: String) {
         val current = _state.value
@@ -124,25 +134,30 @@ class FirstRunOnboardingController(
         check(access is OwnerAccessState.Authorized) {
             "ThinQ credential setup requires authorized owner access; current state is $access"
         }
-        val normalizedCountry = country.trim().uppercase()
-        if (rawToken.isBlank() || !COUNTRY_PATTERN.matches(normalizedCountry)) {
-            _state.value = current.copy(credentialFailure = ThinQCredentialSaveFailure.INVALID_INPUT)
-            return
-        }
-        when (val result = credentialStore.save(rawToken, normalizedCountry)) {
-            is SaveThinQResult.Success -> {
-                val credential = credentialStore.observe().first()
+        when (val result = credentialSetup.setup(rawToken, country)) {
+            is ThinQCredentialSetupResult.Success -> {
                 _state.value = current.copy(
-                    step = deriveStep(access, credential, current.history),
-                    credential = credential,
+                    step = deriveStep(access, result.credential, current.history),
+                    credential = result.credential,
                     credentialFailure = null,
+                    credentialSetupFailure = null,
                 )
             }
 
-            is SaveThinQResult.Failure -> {
-                // A failed save leaves the last valid credential untouched; only
-                // the failure reason is surfaced (KEY_UNAVAILABLE vs UNKNOWN).
-                _state.value = current.copy(credentialFailure = result.reason)
+            is ThinQCredentialSetupResult.Failure -> {
+                // Every verifier/store failure preserves the previous masked
+                // credential; the UI receives a typed reason, never a raw
+                // token or adapter exception message.
+                _state.value = current.copy(
+                    credential = result.credential,
+                    credentialFailure = when (result) {
+                        is ThinQCredentialSetupResult.Failure.MalformedInput -> ThinQCredentialSaveFailure.INVALID_INPUT
+                        is ThinQCredentialSetupResult.Failure.StoreKeyUnavailable -> ThinQCredentialSaveFailure.KEY_UNAVAILABLE
+                        is ThinQCredentialSetupResult.Failure.StoreSaveFailure -> ThinQCredentialSaveFailure.UNKNOWN
+                        else -> null
+                    },
+                    credentialSetupFailure = result,
+                )
             }
         }
     }
@@ -244,6 +259,7 @@ class FirstRunOnboardingController(
                 is OwnerAccessState.AccessCheckFailed -> access.safeErrorCode
                 else -> null
             },
+            credentialSetupFailure = null,
             demoOnly = demoOnly,
         )
     }
@@ -283,7 +299,6 @@ class FirstRunOnboardingController(
                 "Do NOT enter a real LG ThinQ Personal Access Token. " +
                 "Use only the synthetic fixture tokens this demo accepts."
 
-        private val COUNTRY_PATTERN = Regex("^[A-Za-z]{2}$")
     }
 }
 
@@ -319,6 +334,7 @@ data class FirstRunOnboardingState(
     val firstLoadProgress: FirstLoadProgress? = null,
     val safeErrorCode: String? = null,
     val credentialFailure: ThinQCredentialSaveFailure? = null,
+    val credentialSetupFailure: ThinQCredentialSetupResult.Failure? = null,
     val demoOnly: Boolean = false,
     val demoWarning: String? = if (demoOnly) FirstRunOnboardingController.DEMO_MEMORY_ONLY_WARNING else null,
 )

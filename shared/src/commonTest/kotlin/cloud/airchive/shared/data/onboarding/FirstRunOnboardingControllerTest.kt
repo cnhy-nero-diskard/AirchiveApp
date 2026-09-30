@@ -16,6 +16,7 @@ import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
+import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -62,6 +63,7 @@ class FirstRunOnboardingControllerTest {
     ) = FirstRunOnboardingController(
         ownerAccess = OwnerAccessCoordinator(identity, telemetry),
         credentialStore = credentialStore,
+        credentialVerifier = FakeThinQCredentialVerifier(deviceId),
         telemetry = telemetry,
         local = local,
         firebaseProjectId = PROJECT_ID,

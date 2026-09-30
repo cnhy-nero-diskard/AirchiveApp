@@ -16,6 +16,7 @@ import cloud.airchive.shared.data.sync.IncrementalSyncCoordinator
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
+import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
         firstRunOnboardingController = FirstRunOnboardingController(
             ownerAccess = onboardingAccess,
             credentialStore = demoProviders.thinQCredentialStore,
+            credentialVerifier = FakeThinQCredentialVerifier(onboardingDeviceId),
             telemetry = onboardingTelemetry,
             local = demoProviders.localHistory,
             firebaseProjectId = onboardingProjectId,

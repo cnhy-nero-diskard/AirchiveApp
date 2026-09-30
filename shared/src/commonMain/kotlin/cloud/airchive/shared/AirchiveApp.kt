@@ -42,7 +42,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
@@ -67,8 +66,10 @@ import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingStep
+import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
+import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -181,6 +182,7 @@ private fun DemoHomeContent(
             ownerAccess = ownerAccessController
                 ?: OwnerAccessCoordinator(FakeOwnerIdentity(), providers.telemetry),
             credentialStore = providers.thinQCredentialStore,
+            credentialVerifier = FakeThinQCredentialVerifier(context.device.deviceId),
             telemetry = providers.telemetry,
             local = providers.localHistory,
             firebaseProjectId = context.partition.firebaseProjectId,
@@ -427,7 +429,8 @@ private fun FirstRunOnboardingCard(
 
             FirstRunOnboardingStep.THINQ_CREDENTIAL -> {
                 Text(
-                    "Create a separate control-capable LG ThinQ PAT. Do not reuse the collector’s read-only token.",
+                    "Create a separate control-capable LG ThinQ PAT. Do not reuse the collector’s read-only token. " +
+                        "The app will verify this account can read the configured AC identity and profile.",
                 )
                 TextButton(
                     enabled = !busy,
@@ -465,16 +468,30 @@ private fun FirstRunOnboardingCard(
                     supportingText = { Text("Two-letter country code · prefills with PH") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 )
-                state.credentialFailure?.let { failure ->
+                state.credentialSetupFailure?.let { failure ->
                     Text(
                         when (failure) {
-                            ThinQCredentialSaveFailure.INVALID_INPUT -> "Enter a token and a two-letter country code."
-                            ThinQCredentialSaveFailure.KEY_UNAVAILABLE -> "Protected credential storage is unavailable. Retry setup without replacing a saved token."
-                            ThinQCredentialSaveFailure.UNKNOWN -> "The credential could not be saved. Retry setup."
+                            is ThinQCredentialSetupResult.Failure.MalformedInput ->
+                                "Enter a token and a two-letter country code."
+                            is ThinQCredentialSetupResult.Failure.InvalidToken ->
+                                "LG rejected this token. Check that it is current and retry; any prior token stays active."
+                            is ThinQCredentialSetupResult.Failure.WrongAccount ->
+                                "This ThinQ account does not include the configured AC. The prior token stays active."
+                            is ThinQCredentialSetupResult.Failure.DeviceUnavailable ->
+                                "The configured AC or its profile is unavailable. Retry when it is reachable."
+                            is ThinQCredentialSetupResult.Failure.NetworkFailure ->
+                                "LG could not be reached. This does not prove the token is invalid; retry when online."
+                            is ThinQCredentialSetupResult.Failure.RemoteFailure ->
+                                "LG could not verify this token right now. Retry without losing the prior token."
+                            is ThinQCredentialSetupResult.Failure.StoreKeyUnavailable ->
+                                "Protected credential storage is unavailable. Retry setup without replacing a saved token."
+                            is ThinQCredentialSetupResult.Failure.StoreSaveFailure ->
+                                "The verified token could not be stored. The prior token remains active."
                         },
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
+                Text("A successful read check does not prove LG will accept control commands.")
                 Button(
                     enabled = !busy,
                     onClick = {
@@ -483,7 +500,13 @@ private fun FirstRunOnboardingCard(
                         launchAction { controller.saveThinQCredential(submittedToken, country) }
                     },
                 ) {
-                    Text(if (busy) "Saving…" else if (state.demoOnly) "Save synthetic token" else "Save PAT")
+                    Text(
+                        when {
+                            busy -> "Verifying…"
+                            state.demoOnly -> "Verify synthetic token"
+                            else -> "Verify and save PAT"
+                        },
+                    )
                 }
             }
 
