@@ -2,6 +2,9 @@ package cloud.airchive.shared.data.thinq
 
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.contract.thinq.ThinQPort
+import cloud.airchive.shared.contract.thinq.CommandFailure
+import cloud.airchive.shared.contract.thinq.CommandOutcome
+import cloud.airchive.shared.contract.thinq.CommandStatus
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -132,6 +135,71 @@ class ThinQLiveStateController(
                 state = live,
                 profileVerified = profileVerified,
             )
+        }
+    }
+
+    /**
+     * Reconciles the controller with the state read already carried by one
+     * command outcome. [KtorThinQClient] performs its bounded confirmation GET
+     * before returning; consuming that same read here prevents a redundant
+     * second LG read after every command.
+     *
+     * A returned, device-matching [CommandOutcome.observedState] becomes the
+     * current snapshot for CONFIRMED or UNCONFIRMED outcomes (a mismatched
+     * command can still have a fresh, valid read of the actual device state).
+     * ACCEPTED or UNCONFIRMED without a read downgrades the last-known state to
+     * stale/unavailable, because the command may have changed the AC and the
+     * controller has no fresh observation to publish. A definite FAILED command
+     * leaves the prior live snapshot alone because the adapter says no command
+     * was sent. This method issues no network request itself.
+     */
+    suspend fun acceptCommandOutcome(outcome: CommandOutcome) {
+        mutex.withLock {
+            if (outcome.deviceId != configuredDeviceId) return@withLock
+            when (outcome.status) {
+                CommandStatus.SENDING,
+                CommandStatus.FAILED,
+                -> Unit
+
+                CommandStatus.ACCEPTED,
+                CommandStatus.CONFIRMED,
+                CommandStatus.UNCONFIRMED,
+                -> {
+                    val observed = outcome.observedState
+                    if (observed != null && observed.deviceId == configuredDeviceId) {
+                        val lastKnown = lastKnownState(mutableState.value)
+                        // Both timestamps are LG read times; preserve an even
+                        // newer, concurrently completed explicit refresh.
+                        if (lastKnown == null || observed.observedAtEpochMillis >= lastKnown.observedAtEpochMillis) {
+                            val profileVerified = try {
+                                hasVerifiedProfile()
+                            } catch (_: Exception) {
+                                false
+                            }
+                            mutableState.value = ThinQLiveRefreshState.Current(
+                                state = observed,
+                                profileVerified = profileVerified,
+                            )
+                        }
+                    } else {
+                        val prior = mutableState.value
+                        val errorKind = outcome.failure?.toRefreshFailureKind() ?: ThinQRefreshFailureKind.UNKNOWN
+                        val lastKnown = lastKnownState(prior)
+                        mutableState.value = if (lastKnown != null) {
+                            ThinQLiveRefreshState.Stale(
+                                lastKnownState = lastKnown,
+                                errorKind = errorKind,
+                                failedAtEpochMillis = nowEpochMillis(),
+                            )
+                        } else {
+                            ThinQLiveRefreshState.Unavailable(
+                                errorKind = errorKind,
+                                failedAtEpochMillis = nowEpochMillis(),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -277,4 +345,16 @@ internal fun ThinQReadFailure.toRefreshFailureKind(): ThinQRefreshFailureKind = 
     ThinQReadFailure.TRANSIENT -> ThinQRefreshFailureKind.TRANSIENT
     ThinQReadFailure.INVALID_REQUEST -> ThinQRefreshFailureKind.INVALID_REQUEST
     ThinQReadFailure.UNKNOWN -> ThinQRefreshFailureKind.UNKNOWN
+}
+
+/** Projection of one safe command failure onto a live-state failure category. */
+private fun CommandFailure.toRefreshFailureKind(): ThinQRefreshFailureKind = when (this) {
+    CommandFailure.NO_CONTROL_AUTHORITY -> ThinQRefreshFailureKind.NO_CONTROL_AUTHORITY
+    CommandFailure.RATE_LIMITED -> ThinQRefreshFailureKind.RATE_LIMITED
+    CommandFailure.INVALID_REQUEST -> ThinQRefreshFailureKind.INVALID_REQUEST
+    CommandFailure.TOKEN_REJECTED -> ThinQRefreshFailureKind.INVALID_TOKEN
+    CommandFailure.NETWORK -> ThinQRefreshFailureKind.NETWORK
+    CommandFailure.TIMEOUT -> ThinQRefreshFailureKind.TIMEOUT
+    CommandFailure.DEVICE_UNAVAILABLE -> ThinQRefreshFailureKind.DEVICE_UNAVAILABLE
+    CommandFailure.UNKNOWN -> ThinQRefreshFailureKind.UNKNOWN
 }

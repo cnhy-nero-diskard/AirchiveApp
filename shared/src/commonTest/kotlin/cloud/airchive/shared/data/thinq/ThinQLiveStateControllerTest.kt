@@ -2,7 +2,9 @@ package cloud.airchive.shared.data.thinq
 
 import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.contract.thinq.AcOperatingMode
+import cloud.airchive.shared.contract.thinq.CommandFailure
 import cloud.airchive.shared.contract.thinq.CommandOutcome
+import cloud.airchive.shared.contract.thinq.CommandStatus
 import cloud.airchive.shared.contract.thinq.FanSpeed
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
@@ -219,6 +221,123 @@ class ThinQLiveStateControllerTest {
         val verifiedCurrent = assertIs<ThinQLiveRefreshState.Current>(verified.state.value)
         assertTrue(verifiedCurrent.profileVerified)
         assertTrue(verifiedCurrent.canIssueCommands, "Current enables commands only with a separately verified profile")
+    }
+
+    @Test
+    fun acceptedCommandConsumesItsAlreadyFetchedObservedStateWithoutAnotherRead() = runBlocking {
+        val port = ScriptedThinQPort(deviceId).also { it.enqueueResult(liveState(adapterReadAt)) }
+        val controller = ThinQLiveStateController(
+            port,
+            deviceId,
+            nowEpochMillis = { handsetNow },
+            hasVerifiedProfile = { true },
+        )
+        controller.onDeviceOpened()
+        assertEquals(1, port.liveStateCalls.size)
+
+        val command = AcCommand.SetPower(requestedAtEpochMillis = handsetNow, powerOn = false)
+        val outcome = CommandOutcome(
+            commandId = "cmd-safe-1",
+            deviceId = deviceId,
+            command = command,
+            status = CommandStatus.CONFIRMED,
+            submittedAtEpochMillis = handsetNow,
+            observedAtEpochMillis = adapterReadAt + 10,
+            observedState = liveState(adapterReadAt + 10).copy(powerOn = false),
+        )
+        controller.acceptCommandOutcome(outcome)
+
+        val current = assertIs<ThinQLiveRefreshState.Current>(controller.state.value)
+        assertEquals(adapterReadAt + 10, current.state.observedAtEpochMillis)
+        assertFalse(current.state.powerOn)
+        assertTrue(current.canIssueCommands)
+        assertEquals(1, port.liveStateCalls.size, "a command outcome's fresh read is reused, not repeated")
+    }
+
+    @Test
+    fun unconfirmedCommandWithFreshObservedMismatchStillUpdatesToThatCurrentRead() = runBlocking {
+        val port = ScriptedThinQPort(deviceId).also { it.enqueueResult(liveState(adapterReadAt)) }
+        val controller = ThinQLiveStateController(port, deviceId, hasVerifiedProfile = { true })
+        controller.onDeviceOpened()
+        val command = AcCommand.SetPower(requestedAtEpochMillis = handsetNow, powerOn = false)
+        val actual = liveState(adapterReadAt + 20).copy(powerOn = true)
+
+        controller.acceptCommandOutcome(
+            CommandOutcome(
+                commandId = "cmd-mismatch-1",
+                deviceId = deviceId,
+                command = command,
+                status = CommandStatus.UNCONFIRMED,
+                submittedAtEpochMillis = handsetNow,
+                observedAtEpochMillis = actual.observedAtEpochMillis,
+                observedState = actual,
+            ),
+        )
+
+        val current = assertIs<ThinQLiveRefreshState.Current>(controller.state.value)
+        assertTrue(current.state.powerOn, "the actual fresh device report replaces the pre-command state")
+        assertEquals(adapterReadAt + 20, current.state.observedAtEpochMillis)
+        assertEquals(1, port.liveStateCalls.size, "no redundant confirmation GET is issued")
+    }
+
+    @Test
+    fun acceptedCommandWithoutObservedStateDowngradesPreviousSnapshotToStale() = runBlocking {
+        val port = ScriptedThinQPort(deviceId).also { it.enqueueResult(liveState(adapterReadAt)) }
+        val controller = ThinQLiveStateController(port, deviceId, nowEpochMillis = { handsetNow })
+        controller.onDeviceOpened()
+        val command = AcCommand.SetPower(requestedAtEpochMillis = handsetNow, powerOn = false)
+
+        controller.acceptCommandOutcome(
+            CommandOutcome(
+                commandId = "cmd-accepted-unknown-1",
+                deviceId = deviceId,
+                command = command,
+                status = CommandStatus.UNCONFIRMED,
+                submittedAtEpochMillis = handsetNow,
+                failure = CommandFailure.TIMEOUT,
+                observedState = null,
+            ),
+        )
+
+        val stale = assertIs<ThinQLiveRefreshState.Stale>(controller.state.value)
+        assertEquals(adapterReadAt, stale.lastKnownState.observedAtEpochMillis)
+        assertEquals(ThinQRefreshFailureKind.TIMEOUT, stale.errorKind)
+        assertFalse(stale.canIssueCommands)
+        assertEquals(1, port.liveStateCalls.size, "ambiguous command state is not auto-read/retried")
+    }
+
+    @Test
+    fun definiteFailedCommandKeepsPriorLiveSnapshotAndUnrelatedDeviceIsIgnored() = runBlocking {
+        val port = ScriptedThinQPort(deviceId).also { it.enqueueResult(liveState(adapterReadAt)) }
+        val controller = ThinQLiveStateController(port, deviceId)
+        controller.onDeviceOpened()
+        val before = assertIs<ThinQLiveRefreshState.Current>(controller.state.value)
+        val command = AcCommand.SetPower(requestedAtEpochMillis = handsetNow, powerOn = false)
+
+        controller.acceptCommandOutcome(
+            CommandOutcome(
+                commandId = "cmd-failed-1",
+                deviceId = deviceId,
+                command = command,
+                status = CommandStatus.FAILED,
+                submittedAtEpochMillis = handsetNow,
+                failure = CommandFailure.NO_CONTROL_AUTHORITY,
+            ),
+        )
+        assertEquals(before, controller.state.value, "a definite rejection does not invalidate unchanged current state")
+
+        controller.acceptCommandOutcome(
+            CommandOutcome(
+                commandId = "cmd-other-device-1",
+                deviceId = "other-device",
+                command = command,
+                status = CommandStatus.CONFIRMED,
+                submittedAtEpochMillis = handsetNow,
+                observedState = liveState(adapterReadAt + 1).copy(deviceId = "other-device"),
+            ),
+        )
+        assertEquals(before, controller.state.value, "foreign-device command observations never enter the state")
+        assertEquals(1, port.liveStateCalls.size)
     }
 
     // -------------------------------------------------------- cancellation

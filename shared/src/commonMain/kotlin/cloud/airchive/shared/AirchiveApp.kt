@@ -72,6 +72,7 @@ import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
+import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingStep
@@ -94,6 +95,7 @@ fun AirchiveApp(
     onboardingController: FirstRunOnboardingController? = null,
     ownerSettingsController: OwnerSettingsController? = null,
     liveDeviceStateController: ThinQLiveStateController? = null,
+    acCommandController: AcCommandController? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -128,6 +130,7 @@ fun AirchiveApp(
                     onboardingController = onboardingController,
                     ownerSettingsController = ownerSettingsController,
                     liveDeviceStateController = liveDeviceStateController,
+                    acCommandController = acCommandController,
                 )
             }
         }
@@ -177,6 +180,7 @@ private fun DemoRouteShell(
     onboardingController: FirstRunOnboardingController?,
     ownerSettingsController: OwnerSettingsController?,
     liveDeviceStateController: ThinQLiveStateController?,
+    acCommandController: AcCommandController?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -235,6 +239,15 @@ private fun DemoRouteShell(
         liveDeviceStateController ?: ThinQLiveStateController(
             thinQ = providers.thinQ,
             configuredDeviceId = context.device.deviceId,
+            // The default graph uses its explicitly simulated fixture profile.
+            // A real graph must supply a controller tied to a verified profile.
+            hasVerifiedProfile = { context.profile.deviceId == context.device.deviceId },
+        )
+    }
+    val activeAcCommandController = remember(providers, context.device.deviceId, acCommandController) {
+        acCommandController ?: AcCommandController(
+            thinQ = providers.thinQ,
+            configuredDeviceId = context.device.deviceId,
         )
     }
     val liveDeviceStateIsSimulated = liveDeviceStateController == null
@@ -275,6 +288,7 @@ private fun DemoRouteShell(
                     device = context.device,
                     profile = context.profile,
                     liveDeviceStateController = activeLiveDeviceStateController,
+                    acCommandController = activeAcCommandController,
                     liveDeviceStateIsSimulated = liveDeviceStateIsSimulated,
                     onBackToHome = { route = DemoRoute.HOME },
                 )
@@ -538,6 +552,7 @@ private fun DemoDeviceRoute(
     device: ThinQDevice,
     profile: ThinQDeviceProfile,
     liveDeviceStateController: ThinQLiveStateController,
+    acCommandController: AcCommandController,
     liveDeviceStateIsSimulated: Boolean,
     onBackToHome: () -> Unit,
 ) {
@@ -560,10 +575,13 @@ private fun DemoDeviceRoute(
             simulated = liveDeviceStateIsSimulated,
         )
 
-        SummaryCard("Supported controls · from the verified profile") {
-            Text(profile.controls.supportedControlSummary(), style = MaterialTheme.typography.bodyMedium)
-            Text("Control commands are not enabled in this build yet. A successful state read does not make commands usable.")
-        }
+        DeviceControlsCard(
+            profile = profile,
+            liveStateController = liveDeviceStateController,
+            commandController = acCommandController,
+            simulated = liveDeviceStateIsSimulated,
+            onCommandOutcome = { outcome -> liveDeviceStateController.acceptCommandOutcome(outcome) },
+        )
 
         Button(
             onClick = onBackToHome,
@@ -859,15 +877,6 @@ private fun AcControls.supportedControlNames(): String = buildList {
  * describes capability only; the route separately states that commands are not
  * enabled in this build, so a successful state read never implies command use.
  */
-private fun AcControls.supportedControlSummary(): String = buildList {
-    if (powerWritable) add("power")
-    targetTemperature?.let { cap ->
-        add("target temperature ${cap.min}..${cap.max} ${cap.unit.label()}")
-    }
-    if (allowedModes.isNotEmpty()) add("modes: ${allowedModes.joinToString { it.name.lowercase() }}")
-    if (allowedFanSpeeds.isNotEmpty()) add("fan speeds: ${allowedFanSpeeds.joinToString { it.name.lowercase() }}")
-}.joinToString(" · ").ifEmpty { "none" }
-
 private fun TemperatureUnit.label(): String = when (this) {
     TemperatureUnit.CELSIUS -> "°C"
     TemperatureUnit.FAHRENHEIT -> "°F"
