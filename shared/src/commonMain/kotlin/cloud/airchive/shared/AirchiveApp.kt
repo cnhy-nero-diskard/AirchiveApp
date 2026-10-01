@@ -49,7 +49,6 @@ import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
 import cloud.airchive.shared.contract.owner.OwnerAccessState
 import cloud.airchive.shared.contract.owner.SignInFailure
-import cloud.airchive.shared.contract.owner.SignInResult
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
 import cloud.airchive.shared.contract.telemetry.CollectorStatus
 import cloud.airchive.shared.contract.telemetry.DailyTotal
@@ -61,9 +60,9 @@ import cloud.airchive.shared.contract.thinq.AcControls
 import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
-import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
+import cloud.airchive.shared.data.thinq.ThinQLiveStateController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
 import cloud.airchive.shared.data.onboarding.FirstRunOnboardingStep
 import cloud.airchive.shared.data.onboarding.OwnerSettingsController
@@ -83,6 +82,7 @@ fun AirchiveApp(
     ownerAuthConfigurationMessage: String? = null,
     onboardingController: FirstRunOnboardingController? = null,
     ownerSettingsController: OwnerSettingsController? = null,
+    liveDeviceStateController: ThinQLiveStateController? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -116,6 +116,7 @@ fun AirchiveApp(
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     onboardingController = onboardingController,
                     ownerSettingsController = ownerSettingsController,
+                    liveDeviceStateController = liveDeviceStateController,
                 )
             }
         }
@@ -132,7 +133,6 @@ private data class DemoHomeContext(
     val partition: HistoryPartition,
     val device: ThinQDevice,
     val profile: ThinQDeviceProfile,
-    val liveState: ThinQLiveState,
     val credential: ThinQCredentialState,
 )
 
@@ -143,7 +143,6 @@ private data class DemoSummary(
     val collectorHealth: CollectorHealth,
     val device: ThinQDevice,
     val profile: ThinQDeviceProfile,
-    val liveState: ThinQLiveState,
 )
 
 @Composable
@@ -156,6 +155,7 @@ private fun DemoHomeContent(
     ownerAuthConfigurationMessage: String?,
     onboardingController: FirstRunOnboardingController?,
     ownerSettingsController: OwnerSettingsController?,
+    liveDeviceStateController: ThinQLiveStateController?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -180,7 +180,6 @@ private fun DemoHomeContent(
         collectorHealth = history.collectorHealth ?: CollectorHealth(status = CollectorStatus.UNKNOWN),
         device = context.device,
         profile = context.profile,
-        liveState = context.liveState,
     )
     val activeOnboardingController = remember(providers, context.partition, ownerAccessController, onboardingController) {
             onboardingController ?: FirstRunOnboardingController(
@@ -206,6 +205,15 @@ private fun DemoHomeContent(
             configuredDeviceId = context.device.deviceId,
         )
     }
+    val activeLiveDeviceStateController = remember(providers, context.device.deviceId, liveDeviceStateController) {
+        // Default the visible demo to its labeled in-memory fake. A future
+        // production graph can explicitly provide the Ktor-backed controller;
+        // the demo never silently falls through to a live service.
+        liveDeviceStateController ?: ThinQLiveStateController(
+            thinQ = providers.thinQ,
+            configuredDeviceId = context.device.deviceId,
+        )
+    }
     DemoHome(
         summary = summary,
         historySync = presentHistorySync(history, nowEpochMillis),
@@ -213,6 +221,8 @@ private fun DemoHomeContent(
         googleSignInIsSimulated = googleSignInIsSimulated,
         onboardingController = activeOnboardingController,
         ownerSettingsController = activeSettingsController,
+        liveDeviceStateController = activeLiveDeviceStateController,
+        liveDeviceStateIsSimulated = liveDeviceStateController == null,
         credentialState = credential,
         ownerAccessState = onboardingState.ownerAccess,
         ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
@@ -234,7 +244,6 @@ private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeConte
         partition = partition,
         device = device,
         profile = providers.thinQ.profile(device.deviceId),
-        liveState = providers.thinQ.liveState(device.deviceId),
         credential = providers.thinQCredentialStore.observe().first(),
     )
 }
@@ -261,6 +270,8 @@ private fun DemoHome(
     googleSignInIsSimulated: Boolean,
     onboardingController: FirstRunOnboardingController,
     ownerSettingsController: OwnerSettingsController,
+    liveDeviceStateController: ThinQLiveStateController,
+    liveDeviceStateIsSimulated: Boolean,
     credentialState: ThinQCredentialState,
     ownerAccessState: OwnerAccessState,
     ownerAuthConfigurationMessage: String?,
@@ -319,15 +330,12 @@ private fun DemoHome(
                 Text("They are not live readings. The ThinQ credential store is fake and contains no real token.")
             }
 
-            SummaryCard("AC state · simulated") {
-                Text(summary.device.alias, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Power ${if (summary.liveState.powerOn) "on" else "off"} · " +
-                        "${summary.liveState.targetTemperature ?: "—"} °C",
-                )
-                Text("Simulated ThinQ read, separate from Airchive sample time.")
-                Text("Profile-gated controls in this fixture: ${summary.profile.controls.supportedControlNames()}.")
-            }
+            DeviceLiveStateCard(
+                controller = liveDeviceStateController,
+                device = summary.device,
+                profile = summary.profile,
+                simulated = liveDeviceStateIsSimulated,
+            )
 
             SummaryCard("Recent sampled energy") {
                 Text(
