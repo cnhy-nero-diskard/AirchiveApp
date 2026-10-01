@@ -2,6 +2,7 @@ package cloud.airchive.shared
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,8 +36,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -176,7 +181,7 @@ fun EnergyRoute(
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Energy", style = MaterialTheme.typography.headlineMedium)
+        Text("Energy", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
         Text(
             "Five-minute sampled AC energy by local calendar day. Day boundaries use the " +
                 "$zoneId zone; nothing is fetched automatically.",
@@ -210,7 +215,7 @@ fun EnergyRoute(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Units and conversions", style = MaterialTheme.typography.titleMedium)
+                Text("Units and conversions", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Interval values keep each source's recorded unit. Wh conversions are shown only for " +
                         "recognized units (Wh verbatim, kWh × 1000). An unknown or absent unit is labeled " +
@@ -266,7 +271,7 @@ private fun EnergyPeriodNavigation(
     onNavigate: (LocalDate) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(periodRangeTitle(period), style = MaterialTheme.typography.titleMedium)
+        Text(periodRangeTitle(period), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
                 onClick = { onNavigate(navigateAnchor(period.periodType, period.selectedDate, -1)) },
@@ -322,7 +327,7 @@ private fun EnergyLoadCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Fetch sampled intervals", style = MaterialTheme.typography.titleMedium)
+            Text("Fetch sampled intervals", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
                 "Select a period and press the button to load and cache its five-minute intervals. " +
                     "Revisiting an already-fetched period reads the local cache with zero remote reads.",
@@ -377,7 +382,7 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Period summary", style = MaterialTheme.typography.titleMedium)
+            Text("Period summary", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
 
             // ---- Sampled interval sum (only from recognized units). ----
             Text("Sampled five-minute interval energy", style = MaterialTheme.typography.labelLarge)
@@ -476,6 +481,7 @@ private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
                 } else {
                     "Daily energy measures"
                 },
+                modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
             val colors = EnergyLegendColors(MaterialTheme.colorScheme)
@@ -520,8 +526,9 @@ private fun LegendItem(color: Color, label: String) {
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
-                .background(color, CircleShape),
+            .size(10.dp)
+                .background(color, CircleShape)
+                .clearAndSetSemantics {},
         )
         Text(label, style = MaterialTheme.typography.labelSmall)
     }
@@ -540,7 +547,9 @@ private fun IntervalStrip(day: EnergyDaySummary, colors: EnergyLegendColors) {
         modifier = Modifier
             .fillMaxWidth()
             .height(64.dp)
+            .focusable()
             .semantics(mergeDescendants = true) {
+                role = Role.Image
                 contentDescription = day.stripContentDescription()
             },
     ) {
@@ -557,9 +566,10 @@ private fun IntervalStrip(day: EnergyDaySummary, colors: EnergyLegendColors) {
 }
 
 private fun EnergyDaySummary.stripContentDescription(): String =
-    "Day strip of $expectedSlotCount five-minute slots. usable $usableSlotCount, gaps $missingSlotCount, " +
-        "anomalous $anomalousSlotCount, unknown-unit $unusableUnitSlotCount. Exact values appear in the " +
-        "day details below."
+        "Day strip of $expectedSlotCount five-minute slots: usable $usableSlotCount, gaps $missingSlotCount, " +
+            "anomalous $anomalousSlotCount, unknown-unit $unusableUnitSlotCount. The strip represents slot " +
+            "status only; the day summary below gives exact aggregate values and counts, not a substitute for " +
+            "each interval's precise value."
 
 private fun EnergyIntervalPoint.statusColor(colors: EnergyLegendColors): Color = when {
     energyValueWh != null -> colors.usable
@@ -592,7 +602,9 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
         modifier = Modifier
             .fillMaxWidth()
             .height(96.dp)
+            .focusable()
             .semantics(mergeDescendants = true) {
+                role = Role.Image
                 contentDescription =
                     "Daily energy chart for ${days.size} days. Grouped bars show sampled five-minute sums, " +
                         "finalized LG daily totals, or local interval sums in Wh on one relative scale. " +
@@ -653,7 +665,7 @@ private fun EnergyDailySections(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("No days in this period", style = MaterialTheme.typography.titleMedium)
+                Text("No days in this period", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             }
         }
         return
@@ -675,7 +687,7 @@ private fun DayDetailCard(day: EnergyDaySummary) {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(dayHeading(day), style = MaterialTheme.typography.titleMedium)
+            Text(dayHeading(day), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             slotCountsText(day)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
 
             day.usableEnergyValueWh?.let { value ->

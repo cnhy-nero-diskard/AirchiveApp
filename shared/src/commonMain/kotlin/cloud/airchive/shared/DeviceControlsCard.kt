@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -145,7 +146,7 @@ fun DeviceControlsCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Device controls", style = MaterialTheme.typography.titleMedium)
+            Text("Device controls", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
 
             if (simulated) {
                 Text(
@@ -463,7 +464,7 @@ private fun <T> OptionRow(
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleSmall)
+    Text(text, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleSmall)
 }
 
 // ------------------------------------------------------------------ state text

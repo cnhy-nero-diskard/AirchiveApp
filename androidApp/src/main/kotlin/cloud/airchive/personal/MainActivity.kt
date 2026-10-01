@@ -21,11 +21,14 @@ import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var demoProviders: FakeProviders
     private lateinit var foregroundRefresh: ForegroundRefreshController
+    private val historySyncInProgress = MutableStateFlow(false)
+    private var activeHistoryRefreshes: Int = 0
     private var ownerAccessController: OwnerAccessCoordinator? = null
     private lateinit var firstRunOnboardingController: FirstRunOnboardingController
     private lateinit var ownerSettingsController: OwnerSettingsController
@@ -109,6 +112,7 @@ class MainActivity : ComponentActivity() {
                 ownerSettingsController = ownerSettingsController,
                 ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                 onManualRefresh = ::onManualRefresh,
+                historySyncInProgress = historySyncInProgress,
             )
         }
     }
@@ -119,7 +123,9 @@ class MainActivity : ComponentActivity() {
         if (!::foregroundRefresh.isInitialized) return
         lifecycleScope.launch {
             try {
-                foregroundRefresh.onForeground(System.currentTimeMillis())
+                withHistoryRefreshProgress {
+                    foregroundRefresh.onForeground(System.currentTimeMillis())
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -134,12 +140,26 @@ class MainActivity : ComponentActivity() {
         if (!::foregroundRefresh.isInitialized) return
         lifecycleScope.launch {
             try {
-                foregroundRefresh.onManualRefresh(System.currentTimeMillis())
+                withHistoryRefreshProgress {
+                    foregroundRefresh.onManualRefresh(System.currentTimeMillis())
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 // The cache-first UI observes the persisted failure state.
             }
+        }
+    }
+
+    /** Publishes a balanced foreground/manual refresh count to the shared UI. */
+    private suspend fun <T> withHistoryRefreshProgress(action: suspend () -> T): T {
+        activeHistoryRefreshes += 1
+        historySyncInProgress.value = true
+        try {
+            return action()
+        } finally {
+            activeHistoryRefreshes = (activeHistoryRefreshes - 1).coerceAtLeast(0)
+            historySyncInProgress.value = activeHistoryRefreshes > 0
         }
     }
 }

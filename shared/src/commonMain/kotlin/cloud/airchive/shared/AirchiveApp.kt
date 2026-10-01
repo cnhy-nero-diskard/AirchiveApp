@@ -47,6 +47,8 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -83,6 +85,7 @@ import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeProviders
 import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -97,6 +100,7 @@ fun AirchiveApp(
     ownerSettingsController: OwnerSettingsController? = null,
     liveDeviceStateController: ThinQLiveStateController? = null,
     acCommandController: AcCommandController? = null,
+    historySyncInProgress: StateFlow<Boolean>? = null,
 ) {
     val activeProviders = providers ?: remember { FakeProviders() }
     var screenState by remember(activeProviders) {
@@ -132,6 +136,7 @@ fun AirchiveApp(
                     ownerSettingsController = ownerSettingsController,
                     liveDeviceStateController = liveDeviceStateController,
                     acCommandController = acCommandController,
+                    historySyncInProgress = historySyncInProgress,
                 )
             }
         }
@@ -164,11 +169,11 @@ private data class DemoSummary(
 private enum class DemoRoute { HOME, DEVICE, ENERGY, HISTORY, SETTINGS }
 
 /**
- * Route shell for Home and Device (task 5.1). Holds every controller once so
- * the same [ThinQLiveStateController] instance travels Home<->Device and a
- * later failed live read can still show its stale last success. The bottom
- * [NavigationBar] is text-labeled and stays clear of the scrollable content
- * via [Scaffold] insets/padding.
+ * Main route shell for Home, Device, Energy, History, and Settings. Holds each
+ * controller once so the same [ThinQLiveStateController] instance travels
+ * Home<->Device and a later failed live read can still show its stale last
+ * success. The bottom [NavigationBar] is text-labeled and stays clear of the
+ * scrollable content via [Scaffold] insets/padding.
  */
 @Composable
 private fun DemoRouteShell(
@@ -182,6 +187,7 @@ private fun DemoRouteShell(
     ownerSettingsController: OwnerSettingsController?,
     liveDeviceStateController: ThinQLiveStateController?,
     acCommandController: AcCommandController?,
+    historySyncInProgress: StateFlow<Boolean>?,
 ) {
     val initialHistory = remember(context.partition) {
         HistorySnapshot(
@@ -200,6 +206,9 @@ private fun DemoRouteShell(
     val credential by remember(providers) {
         providers.thinQCredentialStore.observe()
     }.collectAsState(initial = context.credential)
+    val historySyncState = historySyncInProgress?.collectAsState(initial = false)
+        ?: remember { mutableStateOf(false) }
+    val isHistorySyncing by historySyncState
     val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
     val latestDailyTotalDayStart = history.dailyTotals.maxOfOrNull { it.dayStartEpochMillis }
     val summary = DemoSummary(
@@ -276,6 +285,7 @@ private fun DemoRouteShell(
                 DemoRoute.HOME -> DemoHome(
                     summary = summary,
                     historySync = presentHistorySync(history, nowEpochMillis),
+                    isHistorySyncing = isHistorySyncing,
                     nowEpochMillis = nowEpochMillis,
                     onManualRefresh = onManualRefresh,
                     googleSignInIsSimulated = googleSignInIsSimulated,
@@ -307,6 +317,7 @@ private fun DemoRouteShell(
                     snapshot = history,
                     nowEpochMillis = nowEpochMillis,
                     onRefresh = onManualRefresh,
+                    isRefreshing = isHistorySyncing,
                 )
 
                 DemoRoute.SETTINGS -> SettingsRoute(
@@ -318,6 +329,7 @@ private fun DemoRouteShell(
                     partition = context.partition,
                     history = history,
                     syncPresentation = presentHistorySync(history, nowEpochMillis),
+                    isHistorySyncing = isHistorySyncing,
                     nowEpochMillis = nowEpochMillis,
                     onManualRefresh = onManualRefresh,
                 )
@@ -381,7 +393,7 @@ private fun DestinationGlyph(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Canvas(Modifier.size(24.dp)) {
+    Canvas(Modifier.size(24.dp).clearAndSetSemantics {}) {
         val scale = size.minDimension / 24f
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         when (destination) {
@@ -523,6 +535,7 @@ private fun DemoMessage(title: String, message: String? = null) {
 private fun DemoHome(
     summary: DemoSummary,
     historySync: HistorySyncPresentation,
+    isHistorySyncing: Boolean,
     nowEpochMillis: Long,
     onManualRefresh: (() -> Unit)?,
     googleSignInIsSimulated: Boolean,
@@ -539,7 +552,11 @@ private fun DemoHome(
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Airchive", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "Airchive",
+            modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.headlineMedium,
+        )
         Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
 
         SummaryCard("Configured AC") {
@@ -640,8 +657,12 @@ private fun DemoHome(
 
         SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
             Text(
-                historySync.message,
-                modifier = if (historySync.shouldAnnounceUpdate) {
+                if (isHistorySyncing) {
+                    "Syncing Airchive history… Cached rows remain visible. ${historySync.message}"
+                } else {
+                    historySync.message
+                },
+                modifier = if (isHistorySyncing || historySync.shouldAnnounceUpdate) {
                     Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 } else {
                     Modifier
@@ -653,8 +674,12 @@ private fun DemoHome(
             )
             historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${it.ageLabel()} ago.") }
             onManualRefresh?.let { refresh ->
-                Button(onClick = refresh) {
-                    Text(historySync.retryLabel)
+                Button(
+                    enabled = !isHistorySyncing,
+                    onClick = refresh,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(if (isHistorySyncing) "Syncing history…" else historySync.retryLabel)
                 }
             }
         }
@@ -691,7 +716,7 @@ private fun DemoDeviceRoute(
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Device", style = MaterialTheme.typography.headlineMedium)
+        Text("Device", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
         Text(device.alias, style = MaterialTheme.typography.titleMedium)
 
         DeviceLiveStateCard(
@@ -958,7 +983,7 @@ private fun SummaryCard(title: String, content: @Composable ColumnScope.() -> Un
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             content = {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
                 content()
             },
         )

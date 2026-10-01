@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -85,6 +86,7 @@ fun SettingsRoute(
     partition: HistoryPartition,
     history: HistorySnapshot,
     syncPresentation: HistorySyncPresentation,
+    isHistorySyncing: Boolean,
     nowEpochMillis: Long,
     onManualRefresh: (() -> Unit)?,
 ) {
@@ -112,6 +114,7 @@ fun SettingsRoute(
             sync = history.sync,
             nowEpochMillis = nowEpochMillis,
             onManualRefresh = onManualRefresh,
+            isHistorySyncing = isHistorySyncing,
         )
         LocalDiagnosticsCard(
             partition = partition,
@@ -135,7 +138,7 @@ private fun SettingsHeaderCard() {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Settings", style = MaterialTheme.typography.titleLarge)
+            Text("Settings", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
             Text(
                 "Account, ThinQ credential, history access, sync, and local cache for this device. " +
                     "Cached state is shown without automatic network work. History refresh and ThinQ credential " +
@@ -157,7 +160,7 @@ private fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("History access", style = MaterialTheme.typography.titleMedium)
+            Text("History access", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             // Only fixed copy per state: the reason, error code, and session
             // identity details of the sealed state are deliberately never
             // interpolated into UI strings.
@@ -197,19 +200,24 @@ private fun SyncStatusCard(
     sync: SyncMetadata?,
     nowEpochMillis: Long,
     onManualRefresh: (() -> Unit)?,
+    isHistorySyncing: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Sync status", style = MaterialTheme.typography.titleMedium)
+            Text("Sync status", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             // One polite live region, limited to sync-status changes the
             // presentation flags as worth announcing (denied/offline/remote
             // failure transitions), so the screen never over-announces.
             Text(
-                presentation.message,
-                modifier = if (presentation.shouldAnnounceUpdate) {
+                if (isHistorySyncing) {
+                    "Syncing Airchive history… Cached rows remain available. ${presentation.message}"
+                } else {
+                    presentation.message
+                },
+                modifier = if (isHistorySyncing || presentation.shouldAnnounceUpdate) {
                     Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 } else {
                     Modifier
@@ -239,12 +247,13 @@ private fun SyncStatusCard(
 
             onManualRefresh?.let { refresh ->
                 Button(
+                    enabled = !isHistorySyncing,
                     onClick = refresh,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
                 ) {
-                    Text(presentation.retryLabel)
+                    Text(if (isHistorySyncing) "Syncing history…" else presentation.retryLabel)
                 }
             }
         }
@@ -276,7 +285,7 @@ private fun LocalDiagnosticsCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Local diagnostics · nonsecret", style = MaterialTheme.typography.titleMedium)
+            Text("Local diagnostics · nonsecret", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             // Nonsecret configuration only; the owner UID is deliberately never
             // shown here.
             Text(

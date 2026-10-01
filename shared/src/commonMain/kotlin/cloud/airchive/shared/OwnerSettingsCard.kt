@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -82,7 +83,11 @@ fun OwnerSettingsCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Settings · account and credentials", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Settings · account and credentials",
+                modifier = Modifier.semantics { heading() },
+                style = MaterialTheme.typography.titleMedium,
+            )
             if (demoOnly) {
                 Text(
                     "Demo settings use an in-memory credential store. Do not enter a real PAT; saved fixture credentials disappear on restart.",
@@ -270,7 +275,7 @@ private fun ConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(title) },
+        title = { Text(title, modifier = Modifier.semantics { heading() }) },
         text = { Text(message) },
         confirmButton = {
             Button(enabled = !busy, onClick = onConfirm) { Text("Confirm") }

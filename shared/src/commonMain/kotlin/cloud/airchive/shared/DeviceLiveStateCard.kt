@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -57,6 +58,7 @@ fun DeviceLiveStateCard(
         ) {
             Text(
                 if (simulated) "AC state · simulated" else "AC live state",
+                modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(device.alias, style = MaterialTheme.typography.bodyLarge)

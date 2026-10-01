@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.history.CoveredRange
@@ -95,6 +96,7 @@ fun HistoryHealthRoute(
     snapshot: HistorySnapshot,
     nowEpochMillis: Long,
     onRefresh: (() -> Unit)? = null,
+    isRefreshing: Boolean = false,
 ) {
     // Stable error code persisted by the sync layer; never a raw server message.
     val syncPresentation = presentHistorySync(snapshot, nowEpochMillis)
@@ -131,6 +133,7 @@ fun HistoryHealthRoute(
                     coveredRanges = snapshot.coveredRanges,
                     nowEpochMillis = nowEpochMillis,
                     onRefresh = onRefresh,
+                    isRefreshing = isRefreshing,
                 )
             }
             item(key = "health") {
@@ -155,6 +158,7 @@ fun HistoryHealthRoute(
                 item(key = "list-header") {
                     Text(
                         "Cached observations (newest first)",
+                        modifier = Modifier.semantics { heading() },
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
@@ -182,7 +186,7 @@ fun HistoryHealthRoute(
 @Composable
 private fun HistoryHeader() {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("History & health", style = MaterialTheme.typography.headlineMedium)
+         Text("History & health", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
         Text(
             "Cached Airchive observations and collector quality for this AC. This screen reads only " +
                 "the local cached snapshot; it refreshes when the app runs a history sync.",
@@ -202,18 +206,23 @@ private fun SyncContextCard(
     coveredRanges: List<CoveredRange>,
     nowEpochMillis: Long,
     onRefresh: (() -> Unit)?,
+    isRefreshing: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Cache & sync", style = MaterialTheme.typography.titleMedium)
+            Text("Cache & sync", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             // One concise polite live region: only announces when sync status
             // changes to an error state (denied/offline/remote failure).
             Text(
-                presentation.message,
-                modifier = if (presentation.shouldAnnounceUpdate) {
+                if (isRefreshing) {
+                    "Refreshing Airchive history… Cached observations remain visible. ${presentation.message}"
+                } else {
+                    presentation.message
+                },
+                modifier = if (isRefreshing || presentation.shouldAnnounceUpdate) {
                     Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 } else {
                     Modifier
@@ -249,12 +258,13 @@ private fun SyncContextCard(
 
             onRefresh?.let { refresh ->
                 Button(
+                    enabled = !isRefreshing,
                     onClick = refresh,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp),
                 ) {
-                    Text(presentation.retryLabel)
+                    Text(if (isRefreshing) "Syncing history…" else presentation.retryLabel)
                 }
             }
         }
@@ -290,7 +300,7 @@ private fun CollectorHealthCard(health: CollectorHealth?, nowEpochMillis: Long) 
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Collector health", style = MaterialTheme.typography.titleMedium)
+            Text("Collector health", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             if (health == null) {
                 Text(
                     "No collector health is cached for this partition yet. It appears once the collector " +
@@ -390,7 +400,7 @@ private fun SampleCountersCard(counters: SampleCounters) {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("Cached samples", style = MaterialTheme.typography.titleMedium)
+            Text("Cached samples", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             if (counters.total == 0) {
                 Text(
                     "No samples are cached yet. Use the retry action below to try loading Airchive history data.",
@@ -428,7 +438,7 @@ private fun SampleLegendCard() {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("What each sample status means", style = MaterialTheme.typography.titleMedium)
+            Text("What each sample status means", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
                 "NORMAL — the collector did not flag an anomaly. The energy value may still be missing or " +
                     "carry an unknown unit; only finite values with a recognized unit count as usable energy.",
@@ -459,7 +469,7 @@ private fun EmptyHistoryCard(onRefresh: (() -> Unit)?, retryLabel: String) {
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("No cached observations yet", style = MaterialTheme.typography.titleMedium)
+            Text("No cached observations yet", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
                 "Nothing is cached for this device yet. Use refresh/retry to load Airchive history; once rows " +
                     "exist they remain available offline.",
@@ -490,7 +500,7 @@ private fun NoUsableMeasurementsCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Cached, but no usable measurements yet", style = MaterialTheme.typography.titleMedium)
+            Text("Cached, but no usable measurements yet", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
                 "${counters.total} sample(s) are cached, but none carries a usable energy value (normal quality " +
                     "with a recognized unit and no energy-read failure). Gaps, anomalous values, and unknown-unit " +
@@ -741,7 +751,7 @@ private fun ObservationDetailDialog(row: ObservationRowUi, onDismiss: () -> Unit
     val sample = row.sample
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Sample detail") },
+        title = { Text("Sample detail", modifier = Modifier.semantics { heading() }) },
         text = {
             Column(
                 modifier = Modifier
