@@ -31,7 +31,7 @@
 - [x] 4.2 Parse this AC’s profile into writable power, target-temperature, mode, and fan capabilities with allowed values and temperature bounds; verify unsupported or absent properties never produce enabled controls.
 - [x] 4.3 Implement live state retrieval on Device entry and explicit refresh, keeping its timestamp separate from Firestore sample age; verify stale or failed LG reads never appear as current state.
 - [x] 4.4 Implement one-at-a-time command submission and sending/accepted/confirmed/failed/unconfirmed states; verify duplicate taps and ambiguous timeouts do not resend commands automatically.
-- [ ] 4.5 After an accepted command, perform a bounded fresh state check and confirm only matching state; verify mismatches, offline reads, and no-control-authority responses show actionable outcomes without changing telemetry records.
+- [x] 4.5 After an accepted command, perform a bounded fresh state check and confirm only matching state; verify mismatches, offline reads, and no-control-authority responses show actionable outcomes without changing telemetry records.
 - [ ] 4.6 Validate each of the four permitted command types on the real AC through deliberate manual actions after a control-capable PAT is configured; record profile support, requested value, API result, and observed state, and remove or disable any unsupported option.
 
 ## 5. Build the full owner experience

@@ -793,6 +793,26 @@ class KtorThinQClientTest {
         assertEquals(1, requests.count { it.method == HttpMethod.Post })
     }
 
+    @Test
+    fun acceptedCommandFollowedByOfflineDeviceReadStaysUnconfirmedAndIsNotResent() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val thinq = client(requests, stored()) {
+            when (requests.size) {
+                1 -> jsonOk(profileJson)
+                2 -> jsonOk("""{"accepted":true}""")
+                else -> jsonError("1222", "device is offline", HttpStatusCode.ServiceUnavailable)
+            }
+        }
+
+        val outcome = thinq.setState(AcCommand.SetPower(REQUESTED_AT, powerOn = true))
+
+        assertEquals(CommandStatus.UNCONFIRMED, outcome.status, "the accepted POST remains ambiguous when LG is offline")
+        assertEquals(CommandFailure.DEVICE_UNAVAILABLE, outcome.failure)
+        assertTrue(outcome.message.orEmpty().contains("reports the device unavailable"))
+        assertEquals(3, requests.size, "profile + one control POST + one bounded fresh-state GET")
+        assertEquals(1, requests.count { it.method == HttpMethod.Post }, "no retry after an offline confirm read")
+    }
+
     // ------------------------------------------ sanitization proof (task gate)
 
     @Test
