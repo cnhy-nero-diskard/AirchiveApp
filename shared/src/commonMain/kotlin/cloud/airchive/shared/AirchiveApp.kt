@@ -160,8 +160,8 @@ private data class DemoSummary(
     val profile: ThinQDeviceProfile,
 )
 
-/** Current destinations; History/Health and Settings are added in tasks 5.4–5.5. */
-private enum class DemoRoute { HOME, DEVICE, ENERGY }
+/** Current destinations; Settings becomes a dedicated route in task 5.5. */
+private enum class DemoRoute { HOME, DEVICE, ENERGY, HISTORY }
 
 /**
  * Route shell for Home and Device (task 5.1). Holds every controller once so
@@ -204,7 +204,9 @@ private fun DemoRouteShell(
     val latestDailyTotalDayStart = history.dailyTotals.maxOfOrNull { it.dayStartEpochMillis }
     val summary = DemoSummary(
         history = history,
-        latestObservation = history.observations.maxByOrNull { it.intervalStartEpochMillis },
+        latestObservation = history.observations.maxWithOrNull(
+            compareBy<Observation> { it.intervalStartEpochMillis }.thenBy { it.intervalEndEpochMillis },
+        ),
         latestDayTotals = latestDailyTotalDayStart?.let { dayStart ->
             history.dailyTotals.filter { it.dayStartEpochMillis == dayStart }
         }.orEmpty(),
@@ -303,6 +305,12 @@ private fun DemoRouteShell(
                     local = providers.localHistory,
                     partition = context.partition,
                 )
+
+                DemoRoute.HISTORY -> HistoryHealthRoute(
+                    snapshot = history,
+                    nowEpochMillis = nowEpochMillis,
+                    onRefresh = onManualRefresh,
+                )
             }
         }
     }
@@ -333,6 +341,13 @@ private fun DemoBottomNavigation(
             onClick = { onSelect(DemoRoute.ENERGY) },
             icon = { DestinationGlyph(DemoRoute.ENERGY, selected = current == DemoRoute.ENERGY) },
             label = { Text("Energy") },
+            alwaysShowLabel = true,
+        )
+        NavigationBarItem(
+            selected = current == DemoRoute.HISTORY,
+            onClick = { onSelect(DemoRoute.HISTORY) },
+            icon = { DestinationGlyph(DemoRoute.HISTORY, selected = current == DemoRoute.HISTORY) },
+            label = { Text("History") },
             alwaysShowLabel = true,
         )
     }
@@ -411,6 +426,25 @@ private fun DestinationGlyph(
                         topLeft = androidx.compose.ui.geometry.Offset(x * scale, top * scale),
                         size = androidx.compose.ui.geometry.Size(3f * scale, (21f - top) * scale),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f * scale),
+                    )
+                }
+            }
+
+            DemoRoute.HISTORY -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(5f * scale, 3f * scale),
+                    size = androidx.compose.ui.geometry.Size(14f * scale, 18f * scale),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f * scale),
+                    style = stroke,
+                )
+                listOf(8f, 12f, 16f).forEach { y ->
+                    drawLine(
+                        color = color,
+                        start = androidx.compose.ui.geometry.Offset(8f * scale, y * scale),
+                        end = androidx.compose.ui.geometry.Offset(16f * scale, y * scale),
+                        strokeWidth = 1.5f * scale,
+                        cap = StrokeCap.Round,
                     )
                 }
             }
@@ -878,7 +912,7 @@ private fun String.onboardingErrorMessage(): String = when (this) {
     "ACCESS_DENIED" -> "Airchive access is pending or denied. Keep this account and retry after UID enrollment."
     "OFFLINE" -> "The history service is offline. Retry when the device is connected."
     "REMOTE_FAILURE" -> "The history request failed. Cached rows remain available; retry when ready."
-    else -> "Setup could not complete ($this). Retry this step."
+    else -> "Setup could not complete. Retry this step when ready."
 }
 
 @Composable
