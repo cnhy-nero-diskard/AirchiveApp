@@ -23,8 +23,9 @@ import kotlinx.coroutines.sync.withLock
  *
  * Owns the Settings surface for the single owner: the signed-in Google
  * session, the masked ThinQ credential status, the owner-local cache + sync
- * metadata, and the confirmed destructive actions (remove credential, sign out,
- * change account). It builds on the same boundaries as onboarding —
+ * metadata, and the confirmed destructive actions (remove credential, clear the
+ * local cache, sign out, change account). It builds on the same boundaries as
+ * onboarding —
  * [OwnerIdentityPort] for the session, [ThinQCredentialStore] for protected PAT
  * storage, [LocalHistoryPort] for owner-scoped rows, and
  * [ThinQCredentialSetupCoordinator] for verified replacement — but never holds
@@ -45,10 +46,11 @@ import kotlinx.coroutines.sync.withLock
  * ## Explicit confirmation before destructive actions
  *
  * The UI must not call the destructive `*Confirmed()` methods directly. It
- * calls [requestRemoveCredential], [requestSignOut], or [requestChangeAccount]
- * first, which publishes the matching [OwnerSettingsConfirmStep]; the UI shows
- * its confirmation dialog from that step and only when the owner confirms calls
- * the matching `*Confirmed()` method. A call whose step does not match is
+ * calls [requestRemoveCredential], [requestClearCache], [requestSignOut], or
+ * [requestChangeAccount] first, which publishes the matching
+ * [OwnerSettingsConfirmStep]; the UI shows its confirmation dialog from that
+ * step and only when the owner confirms calls the matching `*Confirmed()`
+ * method. A call whose step does not match is
  * rejected with [IllegalStateException] (a UI/flow contract violation, matching
  * the onboarding controller's precondition checks). [dismissConfirmation] (or
  * any completed action) returns the state to [OwnerSettingsConfirmStep.NONE].
@@ -62,6 +64,8 @@ import kotlinx.coroutines.sync.withLock
  *
  *  - [removeCredentialConfirmed] deletes only the PAT and preserves the owner's
  *    rows and sync metadata.
+ *  - [clearCacheConfirmed] deletes only the active UID's partition rows and sync
+ *    markers and preserves the Google session, the PAT, and its client ID.
  *  - [signOutConfirmed] clears the active UID's partition + PAT, then calls
  *    [OwnerIdentityPort.signOut].
  *  - [changeAccountConfirmed] clears the prior UID's partition + PAT, then
@@ -130,6 +134,15 @@ class OwnerSettingsController(
      */
     fun requestChangeAccount() {
         _state.value = _state.value.copy(confirmStep = OwnerSettingsConfirmStep.CHANGE_ACCOUNT)
+    }
+
+    /**
+     * Publishes [OwnerSettingsConfirmStep.CLEAR_CACHE] so the UI can show a
+     * "clear this account's local cache?" dialog before [clearCacheConfirmed].
+     * The Google session and the ThinQ PAT are explicitly **not** touched.
+     */
+    fun requestClearCache() {
+        _state.value = _state.value.copy(confirmStep = OwnerSettingsConfirmStep.CLEAR_CACHE)
     }
 
     /** Cancels a pending confirmation; returns to [OwnerSettingsConfirmStep.NONE]. */
@@ -228,6 +241,33 @@ class OwnerSettingsController(
                     OwnerSettingsActionResult.Success(session = null)
                 }
             }
+        }
+        publishAfter(result)
+        result
+    }
+
+    /**
+     * Confirmed cache-only clear. Removes **only** the active owner's exact
+     * (project, UID, device) partition from [LocalHistoryPort] — observations,
+     * daily totals, covered ranges, and sync markers — while the signed-in
+     * Google session and the ThinQ PAT (and its client ID) stay completely
+     * untouched. A local clear failure leaves the session, PAT, and rows intact
+     * and returns [OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED]; no
+     * identity switch or account change ever happens and no exception text is
+     * exposed.
+     */
+    suspend fun clearCacheConfirmed(): OwnerSettingsActionResult = actionMutex.withLock {
+        checkConfirmStep(OwnerSettingsConfirmStep.CLEAR_CACHE)
+        val session = identity.currentSession
+        // A stale confirmation must not be reported as success if the owner was
+        // signed out while the dialog was open. No partition is cleared without
+        // an active session.
+        val result = if (session == null) {
+            OwnerSettingsActionResult.Failure(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED)
+        } else {
+            clearPartitionSafely(partitionFor(session))
+                ?.let { OwnerSettingsActionResult.Failure(it) }
+                ?: OwnerSettingsActionResult.Success(session)
         }
         publishAfter(result)
         result
@@ -427,6 +467,9 @@ enum class OwnerSettingsConfirmStep {
 
     /** The owner is being asked before [OwnerSettingsController.changeAccountConfirmed]. */
     CHANGE_ACCOUNT,
+
+    /** The owner is being asked before [OwnerSettingsController.clearCacheConfirmed]. */
+    CLEAR_CACHE,
 }
 
 /**
@@ -439,10 +482,10 @@ sealed interface OwnerSettingsActionResult {
 
     /**
      * The action completed. [session] is the session active afterwards: the
-     * same owner after [OwnerSettingsController.removeCredentialConfirmed],
-     * the new owner after a successful
-     * [OwnerSettingsController.changeAccountConfirmed], and `null` after a
-     * successful [OwnerSettingsController.signOutConfirmed].
+     * same owner after [OwnerSettingsController.removeCredentialConfirmed] or
+     * [OwnerSettingsController.clearCacheConfirmed], the new owner after a
+     * successful [OwnerSettingsController.changeAccountConfirmed], and `null`
+     * after a successful [OwnerSettingsController.signOutConfirmed].
      */
     data class Success(val session: OwnerSession? = null) : OwnerSettingsActionResult
 

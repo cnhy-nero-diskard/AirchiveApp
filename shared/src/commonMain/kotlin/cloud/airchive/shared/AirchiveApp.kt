@@ -160,8 +160,8 @@ private data class DemoSummary(
     val profile: ThinQDeviceProfile,
 )
 
-/** Current destinations; Settings becomes a dedicated route in task 5.5. */
-private enum class DemoRoute { HOME, DEVICE, ENERGY, HISTORY }
+/** Main destinations for Home, device, energy, history, and account settings. */
+private enum class DemoRoute { HOME, DEVICE, ENERGY, HISTORY, SETTINGS }
 
 /**
  * Route shell for Home and Device (task 5.1). Holds every controller once so
@@ -280,9 +280,6 @@ private fun DemoRouteShell(
                     onManualRefresh = onManualRefresh,
                     googleSignInIsSimulated = googleSignInIsSimulated,
                     onboardingController = activeOnboardingController,
-                    ownerSettingsController = activeSettingsController,
-                    credentialState = credential,
-                    ownerAccessState = onboardingState.ownerAccess,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     onOpenDevice = { route = DemoRoute.DEVICE },
                 )
@@ -310,6 +307,19 @@ private fun DemoRouteShell(
                     snapshot = history,
                     nowEpochMillis = nowEpochMillis,
                     onRefresh = onManualRefresh,
+                )
+
+                DemoRoute.SETTINGS -> SettingsRoute(
+                    controller = activeSettingsController,
+                    credentialState = credential,
+                    ownerAccessState = onboardingState.ownerAccess,
+                    demoOnly = onboardingState.demoOnly,
+                    afterSettingsAction = { activeOnboardingController.restore() },
+                    partition = context.partition,
+                    history = history,
+                    syncPresentation = presentHistorySync(history, nowEpochMillis),
+                    nowEpochMillis = nowEpochMillis,
+                    onManualRefresh = onManualRefresh,
                 )
             }
         }
@@ -348,6 +358,13 @@ private fun DemoBottomNavigation(
             onClick = { onSelect(DemoRoute.HISTORY) },
             icon = { DestinationGlyph(DemoRoute.HISTORY, selected = current == DemoRoute.HISTORY) },
             label = { Text("History") },
+            alwaysShowLabel = true,
+        )
+        NavigationBarItem(
+            selected = current == DemoRoute.SETTINGS,
+            onClick = { onSelect(DemoRoute.SETTINGS) },
+            icon = { DestinationGlyph(DemoRoute.SETTINGS, selected = current == DemoRoute.SETTINGS) },
+            label = { Text("Settings") },
             alwaysShowLabel = true,
         )
     }
@@ -448,6 +465,35 @@ private fun DestinationGlyph(
                     )
                 }
             }
+
+            DemoRoute.SETTINGS -> {
+                val center = androidx.compose.ui.geometry.Offset(12f * scale, 12f * scale)
+                drawCircle(
+                    color = color,
+                    radius = 5f * scale,
+                    center = center,
+                    style = stroke,
+                )
+                val spokes = listOf(
+                    androidx.compose.ui.geometry.Offset(12f, 2f) to androidx.compose.ui.geometry.Offset(12f, 5f),
+                    androidx.compose.ui.geometry.Offset(12f, 19f) to androidx.compose.ui.geometry.Offset(12f, 22f),
+                    androidx.compose.ui.geometry.Offset(2f, 12f) to androidx.compose.ui.geometry.Offset(5f, 12f),
+                    androidx.compose.ui.geometry.Offset(19f, 12f) to androidx.compose.ui.geometry.Offset(22f, 12f),
+                    androidx.compose.ui.geometry.Offset(4.9f, 4.9f) to androidx.compose.ui.geometry.Offset(7f, 7f),
+                    androidx.compose.ui.geometry.Offset(17f, 17f) to androidx.compose.ui.geometry.Offset(19.1f, 19.1f),
+                    androidx.compose.ui.geometry.Offset(17f, 7f) to androidx.compose.ui.geometry.Offset(19.1f, 4.9f),
+                    androidx.compose.ui.geometry.Offset(4.9f, 19.1f) to androidx.compose.ui.geometry.Offset(7f, 17f),
+                )
+                spokes.forEach { (start, end) ->
+                    drawLine(
+                        color = color,
+                        start = androidx.compose.ui.geometry.Offset(start.x * scale, start.y * scale),
+                        end = androidx.compose.ui.geometry.Offset(end.x * scale, end.y * scale),
+                        strokeWidth = 2f * scale,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
         }
     }
 }
@@ -481,9 +527,6 @@ private fun DemoHome(
     onManualRefresh: (() -> Unit)?,
     googleSignInIsSimulated: Boolean,
     onboardingController: FirstRunOnboardingController,
-    ownerSettingsController: OwnerSettingsController,
-    credentialState: ThinQCredentialState,
-    ownerAccessState: OwnerAccessState,
     ownerAuthConfigurationMessage: String?,
     onOpenDevice: () -> Unit,
 ) {
@@ -621,13 +664,6 @@ private fun DemoHome(
             Text("They are not live readings. The ThinQ credential store is fake and contains no real token.")
         }
 
-        OwnerSettingsCard(
-            controller = ownerSettingsController,
-            credentialState = credentialState,
-            ownerAccessState = ownerAccessState,
-            demoOnly = onboardingController.state.value.demoOnly,
-            afterSettingsAction = { onboardingController.restore() },
-        )
     }
 }
 

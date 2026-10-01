@@ -40,7 +40,7 @@
 - [x] 5.2 Implement Device with profile-derived power, temperature, mode, and fan controls plus pending/confirmed/error treatment; verify loading, unsupported, stale, and offline states on a narrow phone layout.
 - [x] 5.3 Implement Energy day/week/month views with `Asia/Manila` boundaries, interval gaps, coverage, recorded units, finalized daily totals, and interval-average power labels; verify null intervals never become zeros and finalized totals remain distinguishable from sampled sums.
 - [x] 5.4 Implement History/Health with observation status, quality explanations, source failures, collector health, and selected detail; verify anomalous and unavailable samples remain understandable without color alone.
-- [ ] 5.5 Implement Settings with account, credentials, sync status, manual refresh, local-cache deletion, and secret-free diagnostics; verify destructive local actions require confirmation and do not write Firestore.
+- [x] 5.5 Implement Settings with account, credentials, sync status, manual refresh, local-cache deletion, and secret-free diagnostics; verify destructive local actions require confirmation and do not write Firestore.
 - [ ] 5.6 Review all five routes in representative ready, empty, offline, stale, denied, loading, and failure states with accessibility semantics and keyboard/screen-reader labels; verify the visible flows on an Android device or emulator.
 
 ## 6. Coordinate Airchive authorization and live data

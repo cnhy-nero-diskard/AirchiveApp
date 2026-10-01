@@ -38,11 +38,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
- * Cache/account settings surface used while the full route shell is built in
- * task 5.5. Every removal or account switch is guarded by a native confirmation
- * dialog. The only credential text shown is the platform store's masked form;
- * the PAT input is password-transformed and immediately passed to the
- * verify-before-save controller.
+ * Interactive account/credential settings card hosted by [SettingsRoute]. Every
+ * removal, cache clear, or account switch is guarded by a
+ * native confirmation dialog. The only credential text shown is the platform
+ * store's masked form; the PAT input is password-transformed and immediately
+ * passed to the verify-before-save controller.
  */
 @Composable
 fun OwnerSettingsCard(
@@ -113,7 +113,7 @@ fun OwnerSettingsCard(
                         ?: "No successful history sync yet.",
                 )
                 sync.lastError?.let { error ->
-                    Text("Last sync issue: $error · ${sync.lastErrorEpochMillis?.let(::sinceNowLabel) ?: "time unavailable"}.")
+                Text("Last sync issue: ${error.settingsErrorLabel()} · ${sync.lastErrorEpochMillis?.let(::sinceNowLabel) ?: "time unavailable"}.")
                 }
             }
 
@@ -176,6 +176,9 @@ fun OwnerSettingsCard(
                 Button(enabled = !busy, onClick = controller::requestChangeAccount) {
                     Text("Switch Google account")
                 }
+                Button(enabled = !busy, onClick = controller::requestClearCache) {
+                    Text("Clear local Airchive cache")
+                }
                 Button(enabled = !busy, onClick = controller::requestSignOut) {
                     Text("Sign out and clear this account's data")
                 }
@@ -196,6 +199,22 @@ fun OwnerSettingsCard(
                         is OwnerSettingsActionResult.Success -> "ThinQ PAT removed. Cached history was kept."
                         is OwnerSettingsActionResult.Failure -> result.failureMessage()
                         else -> "ThinQ PAT removal finished."
+                    }
+                    afterSettingsAction()
+                }
+            },
+        )
+        OwnerSettingsConfirmStep.CLEAR_CACHE -> ConfirmationDialog(
+            title = "Clear local Airchive cache?",
+            message = "This deletes only this Google account's cached Airchive history and sync markers on this device. Your Google sign-in and saved ThinQ PAT remain untouched, and refreshing can repopulate history from Airchive. The cleared cache cannot be restored.",
+            busy = busy,
+            onCancel = controller::dismissConfirmation,
+            onConfirm = {
+                launchAction {
+                    feedback = when (val result = controller.clearCacheConfirmed()) {
+                        is OwnerSettingsActionResult.Success -> "This account's local cache was cleared. You remain signed in; a refresh can repopulate the history."
+                        is OwnerSettingsActionResult.Failure -> result.failureMessage()
+                        else -> "Cache clear finished."
                     }
                     afterSettingsAction()
                 }
@@ -274,9 +293,16 @@ private fun ThinQCredentialSetupResult.Failure.failureMessage(): String = when (
 }
 
 private fun OwnerSettingsActionResult.Failure.failureMessage(): String = when (reason) {
-    OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED -> "Could not clear this account's local history. You remain signed in; retry cleanup."
+    OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED -> "Could not clear this account's local history. The cache, account, and ThinQ credential were not changed; retry cleanup."
     OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED -> "Could not remove the ThinQ PAT. You remain signed in; retry cleanup."
     OwnerSettingsActionFailure.SIGN_OUT_FAILED -> "Local data was cleared, but sign-out did not finish. Retry or restart the app."
+}
+
+private fun String.settingsErrorLabel(): String = when (this) {
+    "ACCESS_DENIED" -> "Access denied"
+    "OFFLINE" -> "Offline"
+    "REMOTE_FAILURE" -> "Remote failure"
+    else -> "Other sync error"
 }
 
 private fun sinceNowLabel(epochMillis: Long): String {

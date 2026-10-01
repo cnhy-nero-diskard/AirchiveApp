@@ -40,7 +40,9 @@ import kotlin.test.assertTrue
  * rows; that confirmed sign-out clears the active UID's rows + PAT and calls
  * sign-out exactly once; that confirmed account change clears the prior UID's
  * rows + PAT before the new sign-in (and another account never sees the prior
- * owner's rows or loses its own cache); that replacement persists only on
+ * owner's rows or loses its own cache); that a confirmed cache-only clear
+ * removes only the active UID's partition while the session and PAT survive and
+ * another UID's cache stays intact; that replacement persists only on
  * verifier success while the prior PAT survives every failed replacement and
  * cancellation; that published state and results always stay masked/secret-free;
  * that local-clear and store-clear failures block every identity switch and
@@ -270,6 +272,141 @@ class OwnerSettingsControllerTest {
         assertNull(after.credential)
         assertNull(after.history)
         assertEquals(OwnerSettingsConfirmStep.NONE, after.confirmStep)
+    }
+
+    // --------------------------------------------- confirmed cache-only clear
+
+    @Test
+    fun confirmedClearCacheClearsOnlyTheActiveUidCacheAndPreservesSessionAndPat() = runBlocking {
+        val identity = ScriptedOwnerIdentity(initialSession = firstSession)
+        val store = FakeThinQCredentialStore()
+        val local = FakeLocalHistory()
+        seedHistory(local, firstPartition, listOf("owner-a-1", "owner-a-2"))
+        seedHistory(local, secondPartition, listOf("owner-b-1"))
+        store.save(priorToken, "PH")
+
+        val controller = controller(identity, store, local = local)
+        controller.refresh()
+
+        controller.requestClearCache()
+        assertEquals(OwnerSettingsConfirmStep.CLEAR_CACHE, controller.state.value.confirmStep)
+        val result = controller.clearCacheConfirmed()
+
+        val success = assertIs<OwnerSettingsActionResult.Success>(result)
+        assertEquals(firstSession, success.session, "clearing the cache keeps the signed-in owner")
+
+        // Only the active UID's exact partition was cleared: rows, daily totals,
+        // covered ranges, and every sync marker are gone from it.
+        val cleared = local.observe(firstPartition).first()
+        assertTrue(cleared.observations.isEmpty(), "the active UID's observations must be cleared")
+        assertTrue(cleared.dailyTotals.isEmpty(), "the active UID's daily totals must be cleared")
+        assertTrue(cleared.coveredRanges.isEmpty(), "the active UID's covered ranges must be cleared")
+        assertNull(cleared.sync?.lastSuccessfulSyncEpochMillis, "the active UID's sync markers must be cleared")
+        assertNull(cleared.sync?.lastError)
+
+        // Another account's cache is neither read nor cleared.
+        val secondRows = local.observe(secondPartition).first()
+        assertEquals(listOf("owner-b-1"), secondRows.observations.map { it.sampleId })
+        assertEquals(nowEpochMillis - 60_000L, secondRows.sync?.lastSuccessfulSyncEpochMillis)
+
+        // The Google session and the ThinQ PAT (+ client ID) survive untouched.
+        assertEquals(0, identity.signOutCalls, "a cache clear must never sign out")
+        assertEquals(0, identity.signInCalls, "a cache clear must never start a new sign-in")
+        assertEquals(priorToken, store.readToken(), "the PAT survives a cache clear")
+        assertTrue(store.observe().first().present)
+        assertEquals("fake-lg-client-id", store.observe().first().clientId)
+
+        // The subsequent state re-snapshots the now-empty active cache while the
+        // signed-in session and masked credential remain.
+        val after = controller.state.value
+        assertEquals(firstSession, after.session)
+        val cache = requireNotNull(after.history)
+        assertEquals(0, cache.observations.size)
+        assertTrue(cache.dailyTotals.isEmpty())
+        assertTrue(cache.coveredRanges.isEmpty())
+        assertNull(cache.sync?.lastSuccessfulSyncEpochMillis)
+        assertTrue(after.credential!!.present)
+        assertFalse(after.toString().contains(priorToken), "the raw PAT must never leak")
+        assertFalse(cache.toString().contains("owner-a"), "the cleared active partition is re-snapshotted empty")
+        assertEquals(OwnerSettingsConfirmStep.NONE, after.confirmStep)
+    }
+
+    @Test
+    fun clearCacheFailurePreservesSessionAndPatAndReturnsSafeCode() = runBlocking {
+        val identity = ScriptedOwnerIdentity(initialSession = firstSession)
+        val delegate = FakeLocalHistory()
+        seedHistory(delegate, firstPartition, listOf("owner-a-1"))
+        val local = FailOnClearLocalHistory(delegate, failClear = IllegalStateException("secret cache-clear boom"))
+        val store = FakeThinQCredentialStore()
+        store.save(priorToken, "PH")
+
+        val controller = controller(identity, store, local = local)
+        controller.refresh()
+        controller.requestClearCache()
+        val result = controller.clearCacheConfirmed()
+
+        val failure = assertIs<OwnerSettingsActionResult.Failure>(result)
+        assertEquals(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED, failure.reason)
+
+        // No identity switch, no PAT change, and the rows stay for a retry.
+        assertEquals(0, identity.signOutCalls)
+        assertEquals(firstSession, identity.currentSession)
+        assertEquals(priorToken, store.readToken(), "the PAT is untouched when the cache could not be cleared")
+        assertEquals(
+            listOf("owner-a-1"),
+            delegate.observe(firstPartition).first().observations.map { it.sampleId },
+        )
+
+        // The exception message never reaches the result or the state.
+        assertFalse(result.toString().contains("secret cache-clear boom"))
+        assertFalse(controller.state.value.toString().contains("secret cache-clear boom"))
+        assertEquals(firstSession, controller.state.value.session)
+        assertEquals(OwnerSettingsConfirmStep.NONE, controller.state.value.confirmStep)
+    }
+
+    @Test
+    fun clearCacheNotInvokedBeforeItsConfirmationStep() = runBlocking {
+        val identity = ScriptedOwnerIdentity(initialSession = firstSession)
+        val local = RecordingLocalHistory(FakeLocalHistory())
+        val controller = controller(identity, local = local)
+        controller.refresh()
+
+        // A direct call without any request fails the confirmation gate and
+        // never touches the local store.
+        assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
+        assertEquals(0, local.clearCalls, "clear must not run before its confirmation step")
+
+        // A non-matching pending step (e.g. sign-out) is also rejected.
+        controller.requestSignOut()
+        assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
+        assertEquals(0, local.clearCalls)
+
+        // Only the matching CLEAR_CACHE step lets the clear run.
+        controller.dismissConfirmation()
+        controller.requestClearCache()
+        assertEquals(OwnerSettingsConfirmStep.CLEAR_CACHE, controller.state.value.confirmStep)
+        assertIs<OwnerSettingsActionResult.Success>(controller.clearCacheConfirmed())
+        assertEquals(1, local.clearCalls, "clear only runs once the explicit confirmation step matches")
+    }
+
+    @Test
+    fun staleCacheClearConfirmationAfterSignOutDoesNotReportSuccessOrClearAnyPartition() = runBlocking {
+        val identity = ScriptedOwnerIdentity(initialSession = firstSession)
+        val local = RecordingLocalHistory(FakeLocalHistory())
+        val controller = controller(identity, local = local)
+        controller.refresh()
+        controller.requestClearCache()
+
+        // Simulate the platform session disappearing while the confirmation is
+        // open. The stale dialog cannot become a successful no-op clear.
+        identity.signOut()
+        val result = controller.clearCacheConfirmed()
+
+        val failure = assertIs<OwnerSettingsActionResult.Failure>(result)
+        assertEquals(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED, failure.reason)
+        assertEquals(0, local.clearCalls)
+        assertNull(controller.state.value.session)
+        assertEquals(OwnerSettingsConfirmStep.NONE, controller.state.value.confirmStep)
     }
 
     // --------------------------------------------- verified credential replacement
@@ -538,11 +675,13 @@ class OwnerSettingsControllerTest {
         assertFailsWith<IllegalStateException> { controller.removeCredentialConfirmed() }
         assertFailsWith<IllegalStateException> { controller.signOutConfirmed() }
         assertFailsWith<IllegalStateException> { controller.changeAccountConfirmed() }
+        assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
 
         // A non-matching confirmation step is also rejected, and dismiss clears it.
         controller.requestSignOut()
         assertEquals(OwnerSettingsConfirmStep.SIGN_OUT, controller.state.value.confirmStep)
         assertFailsWith<IllegalStateException> { controller.removeCredentialConfirmed() }
+        assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
         controller.dismissConfirmation()
         assertEquals(OwnerSettingsConfirmStep.NONE, controller.state.value.confirmStep)
         assertFailsWith<IllegalStateException> { controller.changeAccountConfirmed() }
@@ -636,6 +775,24 @@ private class FailOnClearLocalHistory(
 
     override suspend fun clear(partition: HistoryPartition) {
         failClear?.let { throw it }
+        delegate.clear(partition)
+    }
+}
+
+/**
+ * Test-only [LocalHistoryPort] wrapper that records every [clear] call while
+ * delegating to the in-memory [FakeLocalHistory] — used to prove the cache-only
+ * clear action never touches the store before its confirmation step.
+ */
+private class RecordingLocalHistory(
+    private val delegate: FakeLocalHistory,
+) : LocalHistoryPort by delegate {
+
+    var clearCalls: Int = 0
+        private set
+
+    override suspend fun clear(partition: HistoryPartition) {
+        clearCalls += 1
         delegate.clear(partition)
     }
 }
