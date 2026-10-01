@@ -70,6 +70,7 @@ import cloud.airchive.shared.contract.thinq.AcControls
 import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
+import cloud.airchive.shared.data.energy.normalizeToWh
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.thinq.AcCommandController
@@ -153,14 +154,14 @@ private data class DemoHomeContext(
 private data class DemoSummary(
     val history: HistorySnapshot,
     val latestObservation: Observation?,
-    val finalizedTotal: DailyTotal?,
+    val latestDayTotals: List<DailyTotal>,
     val collectorHealth: CollectorHealth,
     val device: ThinQDevice,
     val profile: ThinQDeviceProfile,
 )
 
-/** The two destinations of the small demo route shell. */
-private enum class DemoRoute { HOME, DEVICE }
+/** Current destinations; History/Health and Settings are added in tasks 5.4–5.5. */
+private enum class DemoRoute { HOME, DEVICE, ENERGY }
 
 /**
  * Route shell for Home and Device (task 5.1). Holds every controller once so
@@ -200,10 +201,13 @@ private fun DemoRouteShell(
         providers.thinQCredentialStore.observe()
     }.collectAsState(initial = context.credential)
     val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
+    val latestDailyTotalDayStart = history.dailyTotals.maxOfOrNull { it.dayStartEpochMillis }
     val summary = DemoSummary(
         history = history,
         latestObservation = history.observations.maxByOrNull { it.intervalStartEpochMillis },
-        finalizedTotal = history.dailyTotals.maxByOrNull { it.dayStartEpochMillis },
+        latestDayTotals = latestDailyTotalDayStart?.let { dayStart ->
+            history.dailyTotals.filter { it.dayStartEpochMillis == dayStart }
+        }.orEmpty(),
         collectorHealth = history.collectorHealth ?: CollectorHealth(status = CollectorStatus.UNKNOWN),
         device = context.device,
         profile = context.profile,
@@ -292,6 +296,13 @@ private fun DemoRouteShell(
                     liveDeviceStateIsSimulated = liveDeviceStateIsSimulated,
                     onBackToHome = { route = DemoRoute.HOME },
                 )
+
+                DemoRoute.ENERGY -> EnergyRoute(
+                    snapshot = history,
+                    telemetry = providers.telemetry,
+                    local = providers.localHistory,
+                    partition = context.partition,
+                )
             }
         }
     }
@@ -315,6 +326,13 @@ private fun DemoBottomNavigation(
             onClick = { onSelect(DemoRoute.DEVICE) },
             icon = { DestinationGlyph(DemoRoute.DEVICE, selected = current == DemoRoute.DEVICE) },
             label = { Text("Device") },
+            alwaysShowLabel = true,
+        )
+        NavigationBarItem(
+            selected = current == DemoRoute.ENERGY,
+            onClick = { onSelect(DemoRoute.ENERGY) },
+            icon = { DestinationGlyph(DemoRoute.ENERGY, selected = current == DemoRoute.ENERGY) },
+            label = { Text("Energy") },
             alwaysShowLabel = true,
         )
     }
@@ -377,6 +395,24 @@ private fun DestinationGlyph(
                     strokeWidth = 1.5f * scale,
                     cap = StrokeCap.Round,
                 )
+            }
+
+            DemoRoute.ENERGY -> {
+                drawLine(
+                    color = color,
+                    start = androidx.compose.ui.geometry.Offset(3f * scale, 21f * scale),
+                    end = androidx.compose.ui.geometry.Offset(21f * scale, 21f * scale),
+                    strokeWidth = 2f * scale,
+                    cap = StrokeCap.Round,
+                )
+                listOf(7f to 12f, 12f to 6f, 17f to 9f).forEach { (x, top) ->
+                    drawRoundRect(
+                        color = color,
+                        topLeft = androidx.compose.ui.geometry.Offset(x * scale, top * scale),
+                        size = androidx.compose.ui.geometry.Size(3f * scale, (21f - top) * scale),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f * scale),
+                    )
+                }
             }
         }
     }
@@ -442,32 +478,52 @@ private fun DemoHome(
 
         SummaryCard("Energy snapshot · simulated") {
             Text("Based on ${summary.history.observations.size} cached observations.", style = MaterialTheme.typography.bodyMedium)
-            when (val observation = summary.latestObservation) {
-                null -> Text("No usable interval in this local sample.")
-                else -> {
-                    Text(
-                        observation.energyValue?.let { value -> "${value} ${observation.recordedUnit.label()}" }
-                            ?: "No usable value in this sample",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text("Five-minute sampled energy · not instantaneous wattage.")
-                    Text(
-                        "Latest sample interval ended " +
-                            "${Instant.fromEpochMilliseconds(observation.intervalEndEpochMillis)} UTC.",
-                    )
-                    Text("Sample quality: ${observation.quality.label()}.")
-                    observation.intervalStatus?.let { Text("Interval status: $it.") }
-                    Text("This sampled timestamp is independent of the history sync time shown below.")
+            val observation = summary.latestObservation
+            when {
+                observation == null -> Text("No cached sample is available yet.")
+                observation.quality == ObservationQuality.ANOMALOUS ->
+                    Text("Latest sample is flagged anomalous; its value is excluded from usable energy.")
+                observation.energySourceFailure?.ok == false ||
+                    (observation.energySourceFailure == null && observation.sourceFailure?.startsWith("energy:", ignoreCase = true) == true)
+                -> Text("The energy read failed for the latest interval; it is shown as a gap, not zero.")
+                observation.energyValue == null ->
+                    Text("The latest interval has no usable energy value; it is shown as a gap.")
+                observation.recordedUnit == null -> {
+                    val sourceValue = observation.intervalValue ?: observation.energyValue.toString()
+                    val rawUnit = observation.unitText?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                    Text("Source value $sourceValue$rawUnit · unit not recorded/unknown; excluded from totals.")
                 }
+                observation.isUsableEnergySample() -> {
+                    val valueText = observation.intervalValue ?: observation.energyValue.toString()
+                    Text("$valueText ${observation.recordedUnit.label()}", style = MaterialTheme.typography.titleMedium)
+                }
+                else -> Text("Latest sample is unavailable for energy totals.")
+            }
+            observation?.let { latest ->
+                Text("Five-minute sampled energy · not instantaneous wattage.")
+                Text(
+                    "Latest sample interval ended " +
+                        "${Instant.fromEpochMilliseconds(latest.intervalEndEpochMillis)} UTC.",
+                )
+                Text("Sample quality: ${latest.quality.label()}.")
+                latest.intervalStatus?.let { Text("Interval status: $it.") }
+                Text("This sampled timestamp is independent of the history sync time shown below.")
             }
         }
 
-        summary.finalizedTotal?.let { total ->
-            SummaryCard("Daily total · simulated") {
-                Text("${total.energyValue} ${total.recordedUnit.label()}", style = MaterialTheme.typography.titleMedium)
-                Text("${total.source.label()} · ${if (total.finalized) "finalized" else "not finalized"}.")
-                total.localDate?.let { Text("Cached local day: $it.") }
-                Text("Finalized totals are kept separate from interval samples.")
+        if (summary.latestDayTotals.isNotEmpty()) {
+            SummaryCard("Daily totals · simulated") {
+                summary.latestDayTotals.forEach { total ->
+                    val totalUnit = total.recordedUnit?.label()
+                        ?: total.unitText?.takeIf { it.isNotBlank() }
+                        ?: "unit not recorded/unknown"
+                    Text("${total.energyValue} $totalUnit · ${total.source.label()} · ${if (total.finalized) "finalized" else "not finalized"}.")
+                    total.localDate?.let { Text("Local day: $it.") }
+                    if (total.recordedUnit == null && !total.unitText.isNullOrBlank()) {
+                        Text("Source unit text: \"${total.unitText}\"; no conversion is inferred.")
+                    }
+                }
+                Text("Daily totals stay distinct from the sum of sampled intervals.")
             }
         }
 
@@ -865,6 +921,16 @@ private fun CollectorStatus.label(): String = name.lowercase().replace('_', ' ')
 
 private fun ObservationQuality.label(): String = name.lowercase().replace('_', ' ')
 
+/** Home highlights only finite, normal interval energy with a known unit and no energy-read failure. */
+private fun Observation.isUsableEnergySample(): Boolean {
+    val value = energyValue ?: return false
+    val unit = recordedUnit ?: return false
+    if (!value.isFinite() || quality != ObservationQuality.NORMAL) return false
+    if (energySourceFailure?.ok == false) return false
+    if (energySourceFailure == null && sourceFailure?.startsWith("energy:", ignoreCase = true) == true) return false
+    return normalizeToWh(value, unit) != null
+}
+
 private fun AcControls.supportedControlNames(): String = buildList {
     if (powerWritable) add("power")
     if (targetTemperature != null) add("temperature (${targetTemperature.unit.label()})")
@@ -872,11 +938,6 @@ private fun AcControls.supportedControlNames(): String = buildList {
     if (allowedFanSpeeds.isNotEmpty()) add("fan")
 }.joinToString().ifEmpty { "none" }
 
-/**
- * Profile-derived supported-controls summary shown on the Device route. It
- * describes capability only; the route separately states that commands are not
- * enabled in this build, so a successful state read never implies command use.
- */
 private fun TemperatureUnit.label(): String = when (this) {
     TemperatureUnit.CELSIUS -> "°C"
     TemperatureUnit.FAHRENHEIT -> "°F"
