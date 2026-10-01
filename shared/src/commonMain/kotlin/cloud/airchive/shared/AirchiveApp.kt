@@ -1,5 +1,6 @@
 package cloud.airchive.shared
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,8 +10,10 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -19,7 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +41,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -73,6 +83,7 @@ import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 @Composable
 fun AirchiveApp(
@@ -107,7 +118,7 @@ fun AirchiveApp(
                     message = "The local fake providers could not load their sample data. No account or network is required.",
                 )
 
-                is DemoHomeState.Ready -> DemoHomeContent(
+                is DemoHomeState.Ready -> DemoRouteShell(
                     providers = activeProviders,
                     context = state.context,
                     onManualRefresh = onManualRefresh,
@@ -145,8 +156,18 @@ private data class DemoSummary(
     val profile: ThinQDeviceProfile,
 )
 
+/** The two destinations of the small demo route shell. */
+private enum class DemoRoute { HOME, DEVICE }
+
+/**
+ * Route shell for Home and Device (task 5.1). Holds every controller once so
+ * the same [ThinQLiveStateController] instance travels Home<->Device and a
+ * later failed live read can still show its stale last success. The bottom
+ * [NavigationBar] is text-labeled and stays clear of the scrollable content
+ * via [Scaffold] insets/padding.
+ */
 @Composable
-private fun DemoHomeContent(
+private fun DemoRouteShell(
     providers: FakeProviders,
     context: DemoHomeContext,
     onManualRefresh: (() -> Unit)?,
@@ -166,6 +187,8 @@ private fun DemoHomeContent(
             sync = SyncMetadata(),
         )
     }
+    // All Home sample/history data renders from this already-observed local
+    // cache; the route shell performs no new Firestore or service reads.
     val history by remember(providers, context.partition) {
         providers.localHistory.observe(context.partition)
     }.collectAsState(initial = initialHistory)
@@ -214,19 +237,343 @@ private fun DemoHomeContent(
             configuredDeviceId = context.device.deviceId,
         )
     }
-    DemoHome(
-        summary = summary,
-        historySync = presentHistorySync(history, nowEpochMillis),
-        onManualRefresh = onManualRefresh,
-        googleSignInIsSimulated = googleSignInIsSimulated,
-        onboardingController = activeOnboardingController,
-        ownerSettingsController = activeSettingsController,
-        liveDeviceStateController = activeLiveDeviceStateController,
-        liveDeviceStateIsSimulated = liveDeviceStateController == null,
-        credentialState = credential,
-        ownerAccessState = onboardingState.ownerAccess,
-        ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-    )
+    val liveDeviceStateIsSimulated = liveDeviceStateController == null
+
+    var route by remember { mutableStateOf(DemoRoute.HOME) }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        bottomBar = {
+            DemoBottomNavigation(current = route, onSelect = { route = it })
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            when (route) {
+                DemoRoute.HOME -> DemoHome(
+                    summary = summary,
+                    historySync = presentHistorySync(history, nowEpochMillis),
+                    nowEpochMillis = nowEpochMillis,
+                    onManualRefresh = onManualRefresh,
+                    googleSignInIsSimulated = googleSignInIsSimulated,
+                    onboardingController = activeOnboardingController,
+                    ownerSettingsController = activeSettingsController,
+                    credentialState = credential,
+                    ownerAccessState = onboardingState.ownerAccess,
+                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    onOpenDevice = { route = DemoRoute.DEVICE },
+                )
+
+                // Composing DeviceLiveStateCard only while this route is active
+                // makes ThinQLiveStateController.onDeviceOpened() run on Device
+                // entry (and again on re-entry), never on Home.
+                DemoRoute.DEVICE -> DemoDeviceRoute(
+                    device = context.device,
+                    profile = context.profile,
+                    liveDeviceStateController = activeLiveDeviceStateController,
+                    liveDeviceStateIsSimulated = liveDeviceStateIsSimulated,
+                    onBackToHome = { route = DemoRoute.HOME },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DemoBottomNavigation(
+    current: DemoRoute,
+    onSelect: (DemoRoute) -> Unit,
+) {
+    NavigationBar {
+        NavigationBarItem(
+            selected = current == DemoRoute.HOME,
+            onClick = { onSelect(DemoRoute.HOME) },
+            icon = { DestinationGlyph(DemoRoute.HOME, selected = current == DemoRoute.HOME) },
+            label = { Text("Home") },
+            alwaysShowLabel = true,
+        )
+        NavigationBarItem(
+            selected = current == DemoRoute.DEVICE,
+            onClick = { onSelect(DemoRoute.DEVICE) },
+            icon = { DestinationGlyph(DemoRoute.DEVICE, selected = current == DemoRoute.DEVICE) },
+            label = { Text("Device") },
+            alwaysShowLabel = true,
+        )
+    }
+}
+
+/** Small vector-only destination glyphs; their adjacent visible labels name the controls. */
+@Composable
+private fun DestinationGlyph(
+    destination: DemoRoute,
+    selected: Boolean,
+) {
+    val color = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Canvas(Modifier.size(24.dp)) {
+        val scale = size.minDimension / 24f
+        val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (destination) {
+            DemoRoute.HOME -> {
+                val roof = Path().apply {
+                    moveTo(3f * scale, 11f * scale)
+                    lineTo(12f * scale, 3f * scale)
+                    lineTo(21f * scale, 11f * scale)
+                }
+                val body = Path().apply {
+                    moveTo(5f * scale, 10f * scale)
+                    lineTo(5f * scale, 21f * scale)
+                    lineTo(19f * scale, 21f * scale)
+                    lineTo(19f * scale, 10f * scale)
+                    moveTo(10f * scale, 21f * scale)
+                    lineTo(10f * scale, 15f * scale)
+                    lineTo(14f * scale, 15f * scale)
+                    lineTo(14f * scale, 21f * scale)
+                }
+                drawPath(roof, color, style = stroke)
+                drawPath(body, color, style = stroke)
+            }
+
+            DemoRoute.DEVICE -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(3f * scale, 5f * scale),
+                    size = androidx.compose.ui.geometry.Size(18f * scale, 14f * scale),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f * scale),
+                    style = stroke,
+                )
+                drawLine(
+                    color = color,
+                    start = androidx.compose.ui.geometry.Offset(7f * scale, 10f * scale),
+                    end = androidx.compose.ui.geometry.Offset(17f * scale, 10f * scale),
+                    strokeWidth = 1.5f * scale,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = color,
+                    start = androidx.compose.ui.geometry.Offset(7f * scale, 14f * scale),
+                    end = androidx.compose.ui.geometry.Offset(17f * scale, 14f * scale),
+                    strokeWidth = 1.5f * scale,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DemoMessage(title: String, message: String? = null) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(WindowInsets.safeDrawing.asPaddingValues())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        if (message != null) Text(message, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/**
+ * Home route. Leads with the configured AC and an actionable sample/history
+ * summary read purely from the local [HistorySnapshot] cache: the latest
+ * sampled interval end (with its unit/quality), the daily total source/unit,
+ * a collector-health summary, and a clearly sized action into Device/quick
+ * controls. The last history-sync time below stays distinct from sample data.
+ */
+@Composable
+private fun DemoHome(
+    summary: DemoSummary,
+    historySync: HistorySyncPresentation,
+    nowEpochMillis: Long,
+    onManualRefresh: (() -> Unit)?,
+    googleSignInIsSimulated: Boolean,
+    onboardingController: FirstRunOnboardingController,
+    ownerSettingsController: OwnerSettingsController,
+    credentialState: ThinQCredentialState,
+    ownerAccessState: OwnerAccessState,
+    ownerAuthConfigurationMessage: String?,
+    onOpenDevice: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 640.dp)
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Airchive", style = MaterialTheme.typography.headlineMedium)
+        Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
+
+        SummaryCard("Configured AC") {
+            Text(summary.device.alias, style = MaterialTheme.typography.titleMedium)
+            summary.device.modelName?.let { Text("Model: $it") }
+            Text("Device ID: ${summary.device.deviceId}")
+            Text(if (summary.device.online) "Reported online by the collector." else "Reported offline by the collector.")
+            Text(
+                "Profile supports: ${summary.profile.controls.supportedControlNames()}.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        SummaryCard("Energy snapshot · simulated") {
+            Text("Based on ${summary.history.observations.size} cached observations.", style = MaterialTheme.typography.bodyMedium)
+            when (val observation = summary.latestObservation) {
+                null -> Text("No usable interval in this local sample.")
+                else -> {
+                    Text(
+                        observation.energyValue?.let { value -> "${value} ${observation.recordedUnit.label()}" }
+                            ?: "No usable value in this sample",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text("Five-minute sampled energy · not instantaneous wattage.")
+                    Text(
+                        "Latest sample interval ended " +
+                            "${Instant.fromEpochMilliseconds(observation.intervalEndEpochMillis)} UTC.",
+                    )
+                    Text("Sample quality: ${observation.quality.label()}.")
+                    observation.intervalStatus?.let { Text("Interval status: $it.") }
+                    Text("This sampled timestamp is independent of the history sync time shown below.")
+                }
+            }
+        }
+
+        summary.finalizedTotal?.let { total ->
+            SummaryCard("Daily total · simulated") {
+                Text("${total.energyValue} ${total.recordedUnit.label()}", style = MaterialTheme.typography.titleMedium)
+                Text("${total.source.label()} · ${if (total.finalized) "finalized" else "not finalized"}.")
+                total.localDate?.let { Text("Cached local day: $it.") }
+                Text("Finalized totals are kept separate from interval samples.")
+            }
+        }
+
+        SummaryCard("Collector health · simulated") {
+            Text("${summary.collectorHealth.status.label()} status.")
+            summary.collectorHealth.lastSuccessEpochMillis?.let { last ->
+                Text("Last collector success: ${last.epochAgeLabel(nowEpochMillis)} ago.")
+            }
+            summary.collectorHealth.lastErrorClass?.let { Text("Last failure class: $it.") }
+            (summary.collectorHealth.consecutiveFailures ?: 0).takeIf { it > 0 }?.let { failures ->
+                Text("$failures consecutive failures.")
+            }
+            Text("Health is cached sample data; it does not describe a live collector connection.")
+        }
+
+        SummaryCard("Device") {
+            Text("Open the configured AC's state and quick controls.")
+            Button(
+                onClick = onOpenDevice,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+            ) {
+                Text("Open device & quick controls")
+            }
+        }
+
+        ownerAuthConfigurationMessage?.let { configurationMessage ->
+            SummaryCard("Firebase setup") {
+                Text(configurationMessage)
+            }
+        }
+        FirstRunOnboardingCard(
+            controller = onboardingController,
+            googleSignInIsSimulated = googleSignInIsSimulated,
+        )
+
+        SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
+            Text(
+                historySync.message,
+                modifier = if (historySync.shouldAnnounceUpdate) {
+                    Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                } else {
+                    Modifier
+                },
+            )
+            Text(
+                historySync.lastSuccessfulAgeMillis?.let { "Last successful sync: ${it.ageLabel()} ago." }
+                    ?: "Last successful sync: not yet.",
+            )
+            historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${it.ageLabel()} ago.") }
+            onManualRefresh?.let { refresh ->
+                Button(onClick = refresh) {
+                    Text(historySync.retryLabel)
+                }
+            }
+        }
+
+        SummaryCard("Demo mode") {
+            Text("Energy history, AC state, and collector health on this screen use local demo fixtures.")
+            Text("They are not live readings. The ThinQ credential store is fake and contains no real token.")
+        }
+
+        OwnerSettingsCard(
+            controller = ownerSettingsController,
+            credentialState = credentialState,
+            ownerAccessState = ownerAccessState,
+            demoOnly = onboardingController.state.value.demoOnly,
+            afterSettingsAction = { onboardingController.restore() },
+        )
+    }
+}
+
+/**
+ * Device route. Hosts the existing [DeviceLiveStateCard] so its entry read runs
+ * only when this route is opened; the card separates the exact live-read
+ * timestamp from Home's sample/history timestamps. Also presents the
+ * profile-derived supported-controls summary without implying commands work.
+ */
+@Composable
+private fun DemoDeviceRoute(
+    device: ThinQDevice,
+    profile: ThinQDeviceProfile,
+    liveDeviceStateController: ThinQLiveStateController,
+    liveDeviceStateIsSimulated: Boolean,
+    onBackToHome: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 640.dp)
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Device", style = MaterialTheme.typography.headlineMedium)
+        Text(device.alias, style = MaterialTheme.typography.titleMedium)
+
+        DeviceLiveStateCard(
+            controller = liveDeviceStateController,
+            device = device,
+            profile = profile,
+            simulated = liveDeviceStateIsSimulated,
+        )
+
+        SummaryCard("Supported controls · from the verified profile") {
+            Text(profile.controls.supportedControlSummary(), style = MaterialTheme.typography.bodyMedium)
+            Text("Control commands are not enabled in this build yet. A successful state read does not make commands usable.")
+        }
+
+        Button(
+            onClick = onBackToHome,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+        ) {
+            Text("Back to Home")
+        }
+    }
 }
 
 private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeContext {
@@ -246,133 +593,6 @@ private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeConte
         profile = providers.thinQ.profile(device.deviceId),
         credential = providers.thinQCredentialStore.observe().first(),
     )
-}
-
-@Composable
-private fun DemoMessage(title: String, message: String? = null) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(WindowInsets.safeDrawing.asPaddingValues())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
-        if (message != null) Text(message, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@Composable
-private fun DemoHome(
-    summary: DemoSummary,
-    historySync: HistorySyncPresentation,
-    onManualRefresh: (() -> Unit)?,
-    googleSignInIsSimulated: Boolean,
-    onboardingController: FirstRunOnboardingController,
-    ownerSettingsController: OwnerSettingsController,
-    liveDeviceStateController: ThinQLiveStateController,
-    liveDeviceStateIsSimulated: Boolean,
-    credentialState: ThinQCredentialState,
-    ownerAccessState: OwnerAccessState,
-    ownerAuthConfigurationMessage: String?,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(WindowInsets.safeDrawing.asPaddingValues()),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 640.dp)
-                .fillMaxWidth()
-                .fillMaxHeight()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Airchive", style = MaterialTheme.typography.headlineMedium)
-            Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
-
-            ownerAuthConfigurationMessage?.let { configurationMessage ->
-                SummaryCard("Firebase setup") {
-                    Text(configurationMessage)
-                }
-            }
-            FirstRunOnboardingCard(
-                controller = onboardingController,
-                googleSignInIsSimulated = googleSignInIsSimulated,
-            )
-
-            SummaryCard(if (historySync.hasCachedHistory) "History sync" else "History setup") {
-                Text(
-                    historySync.message,
-                    modifier = if (historySync.shouldAnnounceUpdate) {
-                        Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                    } else {
-                        Modifier
-                    },
-                )
-                Text(
-                    historySync.lastSuccessfulAgeMillis?.let { "Last successful sync: ${it.ageLabel()} ago." }
-                        ?: "Last successful sync: not yet.",
-                )
-                historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${it.ageLabel()} ago.") }
-                onManualRefresh?.let { refresh ->
-                    Button(onClick = refresh) {
-                        Text(historySync.retryLabel)
-                    }
-                }
-            }
-
-            SummaryCard("Demo mode") {
-                Text("Energy history, AC state, and collector health on this screen use local demo fixtures.")
-                Text("They are not live readings. The ThinQ credential store is fake and contains no real token.")
-            }
-
-            DeviceLiveStateCard(
-                controller = liveDeviceStateController,
-                device = summary.device,
-                profile = summary.profile,
-                simulated = liveDeviceStateIsSimulated,
-            )
-
-            SummaryCard("Recent sampled energy") {
-                Text(
-                    summary.latestObservation?.let { observation ->
-                        observation.energyValue?.let { value -> "${value} ${observation.recordedUnit.label()}" }
-                    } ?: "No usable interval in this sample",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text("Five-minute sampled energy · not instantaneous wattage.")
-                summary.latestObservation?.let { observation ->
-                    Text("Sample quality: ${observation.quality.label()}.")
-                    observation.intervalStatus?.let { Text("Interval status: $it.") }
-                }
-                Text("Cached observations: ${summary.history.observations.size}.")
-            }
-
-            summary.finalizedTotal?.let { total ->
-                SummaryCard("Finalized daily total · simulated") {
-                    Text("${total.energyValue} ${total.recordedUnit.label()}", style = MaterialTheme.typography.titleMedium)
-                    Text("${total.source.label()} · finalized separately from sampled intervals.")
-                }
-            }
-
-            SummaryCard("Collector health · simulated") {
-                Text("${summary.collectorHealth.status.label()} status.")
-                Text("Status is sample data; it does not describe a live collector connection.")
-            }
-
-            OwnerSettingsCard(
-                controller = ownerSettingsController,
-                credentialState = credentialState,
-                ownerAccessState = ownerAccessState,
-                demoOnly = onboardingController.state.value.demoOnly,
-                afterSettingsAction = { onboardingController.restore() },
-            )
-        }
-    }
 }
 
 @Composable
@@ -608,6 +828,10 @@ private fun Long.ageLabel(): String = when {
     else -> "${this / (24 * 60 * 60_000L)} days"
 }
 
+/** Turns an event epoch timestamp into a human "… ago" label against [nowEpochMillis]. */
+private fun Long.epochAgeLabel(nowEpochMillis: Long): String =
+    (nowEpochMillis - this).coerceAtLeast(0L).ageLabel()
+
 private fun EnergyUnit?.label(): String = when (this) {
     EnergyUnit.WH -> "Wh"
     EnergyUnit.KWH -> "kWh"
@@ -629,6 +853,20 @@ private fun AcControls.supportedControlNames(): String = buildList {
     if (allowedModes.isNotEmpty()) add("mode")
     if (allowedFanSpeeds.isNotEmpty()) add("fan")
 }.joinToString().ifEmpty { "none" }
+
+/**
+ * Profile-derived supported-controls summary shown on the Device route. It
+ * describes capability only; the route separately states that commands are not
+ * enabled in this build, so a successful state read never implies command use.
+ */
+private fun AcControls.supportedControlSummary(): String = buildList {
+    if (powerWritable) add("power")
+    targetTemperature?.let { cap ->
+        add("target temperature ${cap.min}..${cap.max} ${cap.unit.label()}")
+    }
+    if (allowedModes.isNotEmpty()) add("modes: ${allowedModes.joinToString { it.name.lowercase() }}")
+    if (allowedFanSpeeds.isNotEmpty()) add("fan speeds: ${allowedFanSpeeds.joinToString { it.name.lowercase() }}")
+}.joinToString(" · ").ifEmpty { "none" }
 
 private fun TemperatureUnit.label(): String = when (this) {
     TemperatureUnit.CELSIUS -> "°C"
