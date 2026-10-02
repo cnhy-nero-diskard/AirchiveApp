@@ -1,6 +1,7 @@
 package cloud.airchive.personal.data.firebase
 
 import cloud.airchive.personal.BuildConfig
+import cloud.airchive.personal.data.tasks.awaitCancellable
 import cloud.airchive.shared.contract.telemetry.AirchiveTelemetryPort
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
 import cloud.airchive.shared.contract.telemetry.CollectorStatus
@@ -20,7 +21,6 @@ import cloud.airchive.shared.data.telemetry.parseDailyTotal
 import cloud.airchive.shared.data.telemetry.parseDeviceIdentity
 import cloud.airchive.shared.data.telemetry.parseObservation
 import com.google.android.gms.tasks.Task
-import com.google.android.gms.tasks.Tasks
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
@@ -346,15 +346,14 @@ class FirebaseAirchiveTelemetry private constructor(
         return Timestamp(seconds, nanosInMillis.toInt() * NANOS_PER_MILLI)
     }
 
-    /** Suspends-blocking [Tasks.await] that unwraps and rethrows the real cause. */
-    private fun <T> Task<T>.awaitOrThrow(): T =
+    /** Cancellable, nonblocking wait that preserves safe Firestore failure classification. */
+    private suspend fun <T> Task<T>.awaitOrThrow(): T =
         try {
-            Tasks.await(this)
-        } catch (e: ExecutionException) {
-            throw classifyFirestoreFailure(e.cause ?: e)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw CancellationException("Firestore read interrupted.", e)
+            awaitCancellable()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            throw classifyFirestoreFailure(failure)
         }
 
     /**

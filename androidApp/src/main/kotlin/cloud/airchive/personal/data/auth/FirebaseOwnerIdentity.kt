@@ -1,10 +1,11 @@
 package cloud.airchive.personal.data.auth
 
+import android.util.Log
+import cloud.airchive.personal.data.tasks.awaitCancellable
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInFailure
 import cloud.airchive.shared.contract.owner.SignInResult
-import com.google.android.gms.tasks.Tasks
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -19,6 +20,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Android [OwnerIdentityPort] backed by the injected [FirebaseAuth] and a
@@ -92,18 +94,19 @@ class FirebaseOwnerIdentity(
     private suspend fun exchangeIdToken(idToken: String): SignInResult {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         return try {
-            val authResult = Tasks.await(auth.signInWithCredential(credential))
+            Log.d("AirchiveSignIn", "Exchanging Google credential with Firebase.")
+            val authResult = withTimeoutOrNull(30_000L) {
+                auth.signInWithCredential(credential).awaitCancellable()
+            } ?: return SignInResult.Failure(SignInFailure.NETWORK)
             val user = authResult.user
             if (user == null) {
                 SignInResult.Failure(SignInFailure.UNKNOWN)
             } else {
+                Log.d("AirchiveSignIn", "Firebase sign-in succeeded; history access check follows.")
                 SignInResult.Success(user.toOwnerSession())
             }
         } catch (e: ExecutionException) {
             SignInResult.Failure(classifyAuthFailure(e.cause ?: e))
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            SignInResult.Failure(SignInFailure.UNKNOWN)
         }
     }
 
