@@ -102,6 +102,7 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(libs.room.runtime)
     implementation(libs.activity.compose)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)

@@ -28,6 +28,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.Source
 import java.util.Date
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
@@ -41,6 +42,9 @@ import kotlinx.coroutines.withContext
  * [FirebaseFirestore] instances and the fixed, non-secret BuildConfig
  * project/device values. The only alternate project factory is an internal,
  * emulator-only `demo-*` project for local instrumentation tests.
+ * Reads explicitly require [Source.SERVER]; Room is the offline projection.
+ * SDK-cache hits must not masquerade as current authorization or successful
+ * server synchronization while the network is unavailable.
  *
  * ## Read boundary
  *
@@ -130,7 +134,7 @@ class FirebaseAirchiveTelemetry private constructor(
     override suspend fun deviceIdentity(): DeviceIdentity = withContext(ioDispatcher) {
         requireSignedInUser()
         val path = AirchiveReadPaths.identityDocument(configuredDeviceId)
-        val snapshot = firestore.document(path).get().awaitOrThrow()
+        val snapshot = firestore.document(path).get(Source.SERVER).awaitOrThrow()
         if (!snapshot.exists()) {
             throw IllegalStateException(
                 "Device identity document not found at '$path'. The collector has not written it yet.",
@@ -226,7 +230,7 @@ class FirebaseAirchiveTelemetry private constructor(
             .collection(AirchiveReadPaths.dailyTotalsCollection(configuredDeviceId))
             .orderBy(FIELD_LOCAL_DATE, Query.Direction.DESCENDING)
             .limit(limit.toLong())
-            .get()
+            .get(Source.SERVER)
             .awaitOrThrow()
         snapshot.documents.map { document ->
             parseDailyTotal(document.id, normalizeDocument(document.data ?: emptyMap()), dayTimeZone)
@@ -237,7 +241,7 @@ class FirebaseAirchiveTelemetry private constructor(
         requireSignedInUser()
         val snapshot = firestore
             .document(AirchiveReadPaths.collectorHealthDocument(configuredDeviceId))
-            .get()
+            .get(Source.SERVER)
             .awaitOrThrow()
         if (!snapshot.exists()) {
             // No runtime doc yet: an honest "unknown" heartbeat, not a fabricated one.
@@ -265,7 +269,7 @@ class FirebaseAirchiveTelemetry private constructor(
         kind: TelemetryReadKind,
         pageSize: Int,
     ): TelemetryPage<Observation> {
-        val snapshot = query.get().awaitOrThrow()
+        val snapshot = query.get(Source.SERVER).awaitOrThrow()
         val items = snapshot.documents.map { document ->
             parseObservation(document.id, normalizeDocument(document.data ?: emptyMap()), dayTimeZone)
         }
@@ -287,7 +291,7 @@ class FirebaseAirchiveTelemetry private constructor(
         }
         val anchorFieldName = anchorField(decoded.kind)
         val cursorPath = AirchiveReadPaths.telemetryDocument(configuredDeviceId, decoded.documentId)
-        val anchor = firestore.document(cursorPath).get().awaitOrThrow()
+        val anchor = firestore.document(cursorPath).get(Source.SERVER).awaitOrThrow()
         require(anchor.exists()) {
             "Telemetry cursor anchor '${decoded.documentId}' no longer exists; restart the bounded read."
         }
