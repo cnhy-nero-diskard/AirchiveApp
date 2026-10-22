@@ -59,6 +59,12 @@ Keep release signing material outside Git, document key backup and a repeatable 
 
 Use fake LG responses, Firestore emulator/rules fixtures, and local database tests for error states, data quality, reconciliation, and command state. Then install the private APK and verify owner sign-in, bounded reads, offline restart, denied client write, and the four permitted control commands against the actual AC. No automated test should actuate the household device without a deliberate manual step.
 
+### D7: Deliver real stored history before enabling ThinQ controls
+
+The owner authorized replacing the Android demo screens with the configured AC's real stored history on 2026-10-02. The sibling access rollout is complete: Google sign-in and persisted UID were verified, the required root identity was initialized with explicit approval, and exact-owner read-only rules were deployed and checked on the phone. Implement this as a history-only integration milestone: wire Firebase reads, owner/project/device-scoped Room storage, bootstrap, incremental/manual refresh, and the visible history/energy/health routes together. Missing Firebase setup or access must not silently fall back to fixture data. Display cached sampled data as history, never as live ThinQ state or evidence of current device connectivity.
+
+Do not require a ThinQ PAT to read history. Until real protected credential and validated live-control composition is separately integrated, the production UI must not accept PATs or enable simulated commands. Keep fixture providers available only in explicitly demo/test contexts. The full ThinQ, release, and offline/control acceptance requirements remain in scope for later tasks; this milestone does not mark those tasks complete.
+
 ## Risks / Trade-offs
 
 - [Direct authorized reads return whole telemetry documents, including `raw`] -> Restrict to one owner and one device, fetch only bounded pages, retain only normalized local fields, and record read volume during acceptance.
