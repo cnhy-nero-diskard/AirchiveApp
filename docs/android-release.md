@@ -75,7 +75,8 @@ Set-AirchiveSecret 'AIRCHIVE_RELEASE_STORE_PASSWORD' 'Keystore password'
 Set-AirchiveSecret 'AIRCHIVE_RELEASE_KEY_PASSWORD' 'Key password'
 ```
 
-Build the initial signed release (version code defaults to 1):
+The first signed release used version code 1. The default is now 2 for the
+same-key upgrade test. Build the signed release:
 
 ```powershell
 .\gradlew.bat --no-configuration-cache --no-daemon :androidApp:assembleRelease
@@ -130,7 +131,13 @@ control commands without explicit values/authorization. Increment
 
 ## Current boundary
 
-No signed release APK, Firebase release-certificate registration, or release
-upgrade has been verified. The current debug installation is not release
-acceptance. Keep tasks 7.1 and 7.2 open until the key is registered and the
-signed build/upgrade checks pass.
+The owner reports registering SHA-1 and SHA-256 in Firebase. The version-code-1
+release APK passed `apksigner verify` with a 4096-bit RSA release certificate
+(SHA-256 `2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202`),
+distinct from the debug certificate. After the approved debug uninstall, ADB
+installed and launched it on phone `9XDQCM6HLB5DO7YH`. The owner reported finishing
+sign-in, history sync, and PAT entry. No PAT was read by the assistant.
+
+The same-key version-code-2 update and post-update preservation checks have not
+yet run. This evidence alone does not complete 7.1's tracked-file secret scan
+or 7.2's upgrade and control acceptance requirements.

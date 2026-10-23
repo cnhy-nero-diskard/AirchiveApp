@@ -62,7 +62,7 @@ val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull
     val parsed = requireNotNull(raw.toIntOrNull()) { "airchive.versionCode must be a positive integer." }
     require(parsed > 0) { "airchive.versionCode must be a positive integer." }
     parsed
-} ?: 1
+} ?: 2
 
 val verifyPrivateReleaseSigning = tasks.register("verifyPrivateReleaseSigning") {
     group = "verification"
