@@ -2,6 +2,13 @@
 
 ## Signing setup status
 
+Android Studio's **Build → Generate Signed Bundle / APK → APK** wizard is
+also supported. Select the existing keystore and alias, enter the passwords
+locally, and choose **release**. There is no need to create another key or set
+PowerShell environment variables when using this wizard. AGP validates the
+wizard's signing credentials; the release preflight accepts its complete signing
+configuration and still rejects builds with no signing setup.
+
 Gradle is configured to sign a private release APK from these **process
 environment variables** (not BuildConfig, resources, or the APK):
 

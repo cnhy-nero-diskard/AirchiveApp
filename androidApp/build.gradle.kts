@@ -41,6 +41,23 @@ val releaseSigningEnvironment = mapOf(
     "AIRCHIVE_RELEASE_KEY_PASSWORD" to providers.environmentVariable("AIRCHIVE_RELEASE_KEY_PASSWORD").orNull.orEmpty(),
 )
 val hasPrivateReleaseSigning = releaseSigningEnvironment.values.all(String::isNotBlank)
+// Android Studio's Generate Signed APK wizard supplies these AGP properties.
+// Only presence and the non-secret file path are passed to our preflight task;
+// AGP itself consumes and validates the signing credentials.
+val studioSigningKeys = listOf(
+    "android.injected.signing.store.file",
+    "android.injected.signing.store.password",
+    "android.injected.signing.key.alias",
+    "android.injected.signing.key.password",
+)
+val hasStudioReleaseSigning = studioSigningKeys.all {
+    !providers.gradleProperty(it).orNull.isNullOrBlank()
+}
+val signingStorePath = if (hasStudioReleaseSigning) {
+    providers.gradleProperty("android.injected.signing.store.file").get()
+} else {
+    releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_FILE")
+}
 val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull?.let { raw ->
     val parsed = requireNotNull(raw.toIntOrNull()) { "airchive.versionCode must be a positive integer." }
     require(parsed > 0) { "airchive.versionCode must be a positive integer." }
@@ -50,20 +67,15 @@ val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull
 val verifyPrivateReleaseSigning = tasks.register("verifyPrivateReleaseSigning") {
     group = "verification"
     description = "Checks that private release signing is configured without printing credential values."
+    inputs.property("signingConfigured", hasStudioReleaseSigning || hasPrivateReleaseSigning)
+    inputs.property("signingStorePath", if (signingStorePath.isBlank()) "" else rootProject.file(signingStorePath).absolutePath)
     doLast {
-        val requiredEnvironment = listOf(
-            "AIRCHIVE_RELEASE_STORE_FILE",
-            "AIRCHIVE_RELEASE_STORE_PASSWORD",
-            "AIRCHIVE_RELEASE_KEY_ALIAS",
-            "AIRCHIVE_RELEASE_KEY_PASSWORD",
-        )
-        val missingEnvironment = requiredEnvironment.filter { System.getenv(it).isNullOrBlank() }
-        check(missingEnvironment.isEmpty()) {
-            "Release signing is not configured. Set AIRCHIVE_RELEASE_STORE_FILE, " +
+        check(inputs.properties["signingConfigured"] == true) {
+            "Release signing is not configured. Use Android Studio's Generate Signed APK wizard, or set AIRCHIVE_RELEASE_STORE_FILE, " +
                 "AIRCHIVE_RELEASE_STORE_PASSWORD, AIRCHIVE_RELEASE_KEY_ALIAS, and " +
                 "AIRCHIVE_RELEASE_KEY_PASSWORD in the build environment."
         }
-        check(File(System.getenv("AIRCHIVE_RELEASE_STORE_FILE")).isFile) {
+        check(File(inputs.properties.getValue("signingStorePath") as String).isFile) {
             "The configured release keystore file does not exist."
         }
     }
