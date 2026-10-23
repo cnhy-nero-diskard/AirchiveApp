@@ -3,13 +3,14 @@ name: followup
 description: Resolve review feedback on a GitHub pull request fully. Resolves the PR from a link or number (or asks the user to pick from open PRs), reads the review comments on the current head, implements every requested change on the PR branch, and commits and pushes with its own discretion. Use when the user asks to follow up on a PR review, address or resolve PR feedback/comments, or work through review comments on a pull request.
 allowed-tools: Bash(git:*, gh:*, ./gradlew:*, npm:*, powershell:*)
 license: MIT
-compatibility: Requires gh CLI (authenticated) and Git.
 metadata:
   author: cline
   version: "1.0"
 ---
 
 # Follow up on PR Review Feedback
+
+Requires gh CLI (authenticated) and Git.
 
 Take a PR (link or number), find the review/feedback comments on it, and resolve them
 fully on the PR's head branch â€” the agent commits and pushes on its own discretion.
@@ -133,11 +134,15 @@ For each in-scope or picked comment:
 3. Keep the change in the scope of the feedback â€” no drive-by refactors or
    unrelated edits.
 4. Verify before committing:
-   ```bash
-   ./gradlew :gamification:test :app:testDebugUnitTest   # when the Kotlin side changed
-   ./gradlew assembleDebug                               # compilation sanity, when warranted
-   npm --prefix functions run build                      # when functions/ changed
+   Use the checks appropriate to the changed AirchiveApp modules. On Windows:
+   ```powershell
+   .\gradlew.bat :shared:testAndroidHostTest              # shared Kotlin and host tests
+   .\gradlew.bat :androidApp:assembleDebug                # Android compilation, when warranted
+   .\gradlew.bat :androidApp:assembleDebugAndroidTest     # when instrumentation tests changed
    ```
+   Building the instrumentation APK does not execute device tests. Run relevant
+   device tests when needed and report any checks that could not be performed.
+   Verify iOS changes on a suitable macOS host when needed.
 
 If a comment demands behaviour that conflicts with a normative spec in
 `openspec/specs/`, stop and ask â€” spec-behaviour changes go through an OpenSpec

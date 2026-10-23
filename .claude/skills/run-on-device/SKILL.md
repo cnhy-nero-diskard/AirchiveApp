@@ -15,17 +15,11 @@ Rebuild the Android app, install the debug APK on a connected device, and launch
 ## Usage
 
 - `$run-on-device` — build + install + launch from the **current** repo directory.
-- `$run-on-device <worktree>` — build + install + launch from the named worktree (e.g. `$run-on-device Backlogium-improve-search-relevance`).
+- `$run-on-device <worktree>` — build + install + launch from the named worktree (e.g. `$run-on-device AirchiveApp-owner-mobile-auth-access`).
 
-Package id used for launch: `com.example.backlogium.debug` (the debug build applies an
-`applicationIdSuffix`, so it installs side by side with the signed release app rather
-than replacing it).
-
-One-time cleanup of legacy debug installs: debug builds installed before this change
-used the release package id `com.example.backlogium` (debug-signed). If such an install
-is present on a device, export anything valuable from it first, then remove it with
-`adb uninstall com.example.backlogium` before installing or restoring the signed
-release build at that id.
+Package id used for launch: `cloud.airchive.personal` (debug and release share
+the application id, so a debug install replaces any same-signature build on the
+device; back up anything valuable from a differently-signed install first).
 
 ## Workflow
 
@@ -47,14 +41,14 @@ One blocking call reaches a terminal state in the same tool result, so there is 
 second half to drop.
 
 ```powershell
-.\gradlew.bat :app:installDebug
+.\gradlew.bat :androidApp:installDebug
 ```
 
 Pass an explicit long timeout to the shell tool (at least 600000ms / 10 minutes;
 observed builds range from ~10s warm to ~95s cold, and a cold Gradle daemon plus
 `packageDebug` can exceed the default). Wait for the single result:
 
-- Success terminal state: `> Task :app:installDebug` … `Installed on 1 device.` and `BUILD SUCCESSFUL`.
+- Success terminal state: `> Task :androidApp:installDebug` … `Installed on 1 device.` and `BUILD SUCCESSFUL`.
 - Failure terminal state: `BUILD FAILED`.
 
 Only proceed once one of those two states appears in the result. If `BUILD FAILED`,
@@ -69,7 +63,7 @@ a hang to the user.
 ### 3. Launch on device
 
 ```powershell
-C:\Users\cnhyn\AppData\Local\Android\Sdk\platform-tools\adb.exe shell monkey -p com.example.backlogium.debug 1
+C:\Users\cnhyn\AppData\Local\Android\Sdk\platform-tools\adb.exe shell monkey -p cloud.airchive.personal 1
 ```
 
 Confirm `Events injected: 1` in the output.

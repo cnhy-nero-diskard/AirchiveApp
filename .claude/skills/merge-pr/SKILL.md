@@ -1,6 +1,6 @@
 ---
 name: merge-pr
-description: Merge a GitHub pull request into master, gated on its associated OpenSpec change being synced and archived (skippable when the unarchive was deliberate). Also handles semver bumps (major/minor/patch) by checking out master and running the bump-tag script. Use when the user asks to merge a PR, wants to pick from open PRs, or requests a version bump/release.
+description: Merge a GitHub pull request into main, gated on its associated OpenSpec change being synced and archived (skippable when the unarchive was deliberate). Also handles version bumps (versionCode/versionName) by checking out main and committing the bump. Use when the user asks to merge a PR, wants to pick from open PRs, or requests a version bump/release.
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(openspec:*), Bash(powershell:*)
 license: MIT
 compatibility: Requires gh CLI (authenticated), openspec CLI, and Git.
@@ -11,17 +11,18 @@ metadata:
 
 # Merge PR
 
-Merge a GitHub pull request into `master`, after making sure its associated OpenSpec
-change is synced and archived. Also handles semver bumps.
+Merge a GitHub pull request into `main`, after making sure its associated OpenSpec
+change is synced and archived. Also handles version bumps.
 
 ## Overview
 
 Two independent operations:
 
 - **Merge a PR** — resolve the PR, gate on OpenSpec sync + archive (skippable when the
-  unarchive was deliberate), then merge into `master`.
-- **Bump a version** — check out `master`, run the bump-tag script for a
-  major/minor/patch bump.
+  unarchive was deliberate), then merge into `main`.
+- **Bump the app version** — check out `main`, bump `versionName` / `versionCode`,
+  commit and push (signed release builds are produced separately via
+  `scripts/release/Invoke-AirchiveRelease.ps1`).
 
 ## Mode A — Merge a PR
 
@@ -88,7 +89,7 @@ git push
 
 ### 4. Merge (queue behind CI)
 
-`master` enforces required CI status checks with auto-merge enabled, so queue the
+`main` enforces required CI status checks with auto-merge enabled, so queue the
 merge rather than merging immediately — GitHub then waits for every required check:
 
 ```bash
@@ -96,30 +97,31 @@ gh pr merge <number> --auto --merge --delete-branch
 ```
 
 - Use `--squash` or `--rebase` instead of `--merge` only if the user asks.
-- The base branch is `master` (this repo's default branch).
+- The base branch is `main` (this repo's default branch).
 - Before queueing, review CI state with `gh pr checks <number>`; after queueing,
   report that auto-merge is pending — GitHub merges automatically once every
   required check passes.
 - If any required check fails, the PR stays blocked: report the failure instead of
   retrying with an immediate (non-`--auto`) merge.
 
-## Mode B — Bump a version
+## Mode B — Bump the app version
 
 1. Ensure a clean working tree, then:
    ```bash
-   git checkout master
+   git checkout main
    git pull --ff-only
    ```
-2. Run the bump script (Windows PowerShell or WSL/bash):
-   ```powershell
-   ./scripts/bump-tag.ps1 -Major   # or -Minor, -Patch
-   ```
+2. Bump the version: edit `versionName` in `androidApp/build.gradle.kts` and/or
+   raise the `airchive.versionCode` default (currently `2`) so the next build
+   carries the new code. Commit and push:
    ```bash
-   ./scripts/bump-tag.sh --major   # or --minor, --patch
+   git add androidApp/build.gradle.kts
+   git commit -m "chore: bump version to <name> (<code>)"
+   git push
    ```
-   Use `-DryRun` / `--dry-run` first to preview the next tag.
-3. Report the new tag and that it was pushed to origin (this triggers the release
-   workflow).
+3. Report the new version. Signed release builds are produced separately via
+   `scripts/release/Invoke-AirchiveRelease.ps1` (requires the private signing
+   setup from `Setup-AirchiveSigning.ps1`); the bump only versions the code.
 
 ## Guardrails
 
@@ -127,9 +129,9 @@ gh pr merge <number> --auto --merge --delete-branch
 - Never sync/archive or merge on a stale head branch; always fetch + `--ff-only` first, and stop if the branch diverged.
 - Do not skip the sync + archive gate unless the prompt explicitly marks the unarchive
   as deliberate.
-- Always target `master`; never merge into a feature branch.
+- Always target `main`; never merge into a feature branch.
 - Do not force-push, delete remote branches, or rewrite history.
-- If the working tree is dirty, stop and ask before checking out `master`.
+- If the working tree is dirty, stop and ask before checking out `main`.
 - Report clearly what was synced, archived, merged, or tagged.
 - Always queue merges with `--auto` — it merges at once when CI is already green;
   never merge without it to sidestep pending CI.

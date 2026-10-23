@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: Repository housekeeping for Backlogium — audit and remove workspace clutter (stray logs, screenshots, scratch dirs), verify .gitignore coverage, perform safe Git hygiene (prune merged branches, report stale worktrees), and refresh front-facing markdown docs on an ordinal-named chore branch. Use when the user invokes $housekeeping or asks to clean up the repository, tidy workspace artifacts, or refresh project status docs.
+description: Repository housekeeping for AirchiveApp — audit and remove workspace clutter (stray logs, build outputs, scratch files), verify .gitignore coverage, perform safe Git hygiene (prune merged branches, report stale worktrees), and refresh front-facing markdown docs on an ordinal-named chore branch. Use when the user invokes $housekeeping or asks to clean up the repository, tidy workspace artifacts, or refresh project status docs.
 allowed-tools: Bash(git:*), Bash(powershell:*)
 license: MIT
 compatibility: Requires Git and PowerShell (Windows).
@@ -11,7 +11,7 @@ metadata:
 
 # Housekeeping
 
-Safe, scan-first repository housekeeping for Backlogium. Every mode begins with a
+Safe, scan-first repository housekeeping for AirchiveApp. Every mode begins with a
 read-only audit; nothing is deleted or changed without an explicit, confirmed plan.
 
 ## Command Modes
@@ -28,19 +28,12 @@ read-only audit; nothing is deleted or changed without an explicit, confirmed pl
 
 ### 1. Scan (read-only — always first)
 
-If `scripts/Invoke-HousekeepingScan.ps1` exists, prefer it for deterministic checks:
+Collect the scan data manually (there is no scan script in this repo):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Invoke-HousekeepingScan.ps1 -RepoRoot <repo-root>
-```
-
-Otherwise collect the same data manually:
-
-```powershell
-# Known Backlogium clutter patterns (all currently expected to be ignored/untracked)
-Get-ChildItem -Path <repo-root> -File -Filter *.log          # root-level build/test logs
-Test-Path <repo-root>\.scratch_screens                       # emulator screenshot scratch dir
-Get-ChildItem -Path <repo-root> -Directory -Filter '.gradle-project-cache*'
+# Known AirchiveApp clutter patterns (all currently expected to be ignored/untracked)
+Get-ChildItem -Path <repo-root> -File -Filter *.log          # firebase-debug.log, firestore-debug.log, ui-debug.log
+Get-ChildItem -Path <repo-root> -Recurse -Directory -Filter build | Where-Object { $_.FullName -notmatch '\.git' }
 git -C <repo-root> status --porcelain                        # ?? = untracked non-ignored clutter
 git -C <repo-root> check-ignore -v <path>                    # verify .gitignore coverage of each target
 git -C <repo-root> branch --format '%(refname:short)'        # ordinal scan for chore branches
@@ -50,9 +43,9 @@ Classify every finding into exactly one bucket and report sizes:
 
 | Bucket | Examples in this repo | Action |
 |---|---|---|
-| Ignored artifact | `build_install*.log`, `instr_test*.log`, `build/` outputs | deletable |
-| Untracked clutter | `.scratch_screens/`, one-off screenshots | deletable if truly transient |
-| Gitignore gap | pattern recurring but not ignored (e.g. `.scratch_screens/`) | propose adding to `.gitignore` — do not edit silently |
+| Ignored artifact | `firebase-debug.log`, `firestore-debug.log`, `ui-debug.log`, `build/` outputs | deletable |
+| Untracked clutter | one-off captures, stray scratch files | deletable if truly transient |
+| Gitignore gap | pattern recurring but not ignored | propose adding it to `.gitignore` — do not edit silently |
 | Tracked file | anything matching `git ls-files` | **never touched** |
 
 Verify .gitignore coverage: for each clutter path run `git check-ignore -v <path>`.
@@ -68,9 +61,10 @@ Before deleting anything:
 3. Delete only then, e.g. `Remove-Item -LiteralPath <path> -Recurse -Force`.
 4. Re-run `git status --porcelain` afterward and report that no tracked content changed.
 
-**Never delete:** tracked sources/docs, `local.properties`, `keystore/`, `.worktrees/`
-(that belongs to worktree handling below), agent config dirs (`.cline/`, `.claude/`,
-`.codex/`, `.agents/`), or `openspec/`.
+**Never delete:** tracked sources/docs, `local.properties`,
+`config/airchive-mobile.properties`, signing material (`*.jks`, `*.keystore`,
+`*.p12`, `*.clixml`), registered worktrees, agent config dirs (`.cline/`,
+`.claude/`, `.agents/`), or `openspec/`.
 
 ### 3. Git Hygiene
 
@@ -78,8 +72,8 @@ Run checks in order and stop at the first guardrail violation:
 
 1. Confirm repository root: `git rev-parse --show-toplevel`.
 2. Report current branch. **Refuse to delete branches while HEAD is detached.**
-3. Protected branches are never candidates for deletion: `master`, `main`, `release/*`, `hotfix/*`, `prod/*`.
-4. List safe-to-prune locals: `git branch --merged master`, excluding protected branches and the current branch.
+3. Protected branches are never candidates for deletion: `main`, `release/*`, `hotfix/*`, `prod/*`.
+4. List safe-to-prune locals: `git branch --merged main`, excluding protected branches and the current branch.
 5. Present the list and get explicit approval, then delete with `-d` only (**never `-D`**, never force).
 6. Worktrees: `git worktree list`. Flag entries whose directory is missing, whose branch
    is gone, or whose branch is fully merged. **Propose** `git worktree remove <path>`;
@@ -88,20 +82,20 @@ Run checks in order and stop at the first guardrail violation:
 
 ### 4. Docs Refresh (chore branch workflow)
 
-Updates front-facing markdown (`README.md`, `CLAUDE.md`, `SECURITY.md` — plus other
-root-level `*.md` if present) so stated facts match current reality: module list,
-build commands, `ls openspec/specs/` capability list, and recent
-`openspec/changes/archive/` entries worth surfacing.
+Updates front-facing markdown (`docs/*.md` — `android-release.md`,
+`live-history.md`, `thinq-control.md`) so stated facts match current reality:
+module list, build commands, `openspec/specs/` and `openspec/changes/` capability
+lists, and recent `openspec/changes/archive/` entries worth surfacing.
 
 1. **Preconditions:** working tree must be clean (`git status --porcelain` empty);
-   current branch must have upstream or fall back to `origin/master`.
+   current branch must have upstream or fall back to `origin/main`.
 2. **Branch naming convention:** `chore/<topic>-<ordinal>` where `<ordinal>` starts at
    `1` and increments per invocation across sessions. Derive it deterministically:
    filter `git branch --format '%(refname:short)'` to `chore/<topic>-*`, take the max
    numeric suffix, add 1. Example progression: `chore/docs-refresh-1`, then later
    `chore/docs-refresh-2`, and so on. Default topic is `docs-refresh`; use the
    provided argument as topic when the user names one.
-3. Create the branch: `git fetch origin` then `git switch -c chore/<topic>-<N> origin/master`.
+3. Create the branch: `git fetch origin` then `git switch -c chore/<topic>-<N> origin/main`.
 4. Make **minimal factual updates** to front-facing markdown — correct stale numbers,
    commands, lists, paths. No tone/style rewrites; preserve each file's structure.
 5. Commit only those files: `docs: refresh front-facing project status` (conventional
@@ -116,7 +110,7 @@ build commands, `ls openspec/specs/` capability list, and recent
 - **Never touch tracked files** during cleanup. Deletion candidates must fail `git ls-files --error-unmatch`.
 - **Never modify openspec/** as part of housekeeping — behaviour specs go through opsx skills.
 - **Never force:** no `git branch -D`, no `git push --force`, no `git worktree remove --force`, no history rewrite.
-- **Protected branches are off-limits**: `master`, `main`, `release/*`, `hotfix/*`, `prod/*`.
+- **Protected branches are off-limits**: `main`, `release/*`, `hotfix/*`, `prod/*`.
 - **Keep deletes narrow.** When a path's classification is ambiguous, leave it and mark it "needs human review".
 - **Docs updates are factual only.** If a doc statement can't be verified against the repo, fix it or remove it — do not embellish.
 - **Report everything.** Finish with what was scanned, what was changed, what was skipped and why, and the exact chore branch name used (if any).

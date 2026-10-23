@@ -1,18 +1,14 @@
 ---
 name: openspec-autoship
 description: >-
-  Autonomous end-to-end OpenSpec execution: implements every task in a change
-  using the openspec-apply-change workflow and commits AND pushes each coherent
-  checkpoint without manual oversight. Use when the user invokes
-  `$openspec-autoship`, asks to "apply and ship" or "implement and push" an
-  OpenSpec change, or wants hands-free execution on the current non-detached
-  branch, including main.
-allowed-tools: Bash(openspec:*), Bash(git:*), Bash(powershell:*)
+  Run an OpenSpec change end to end with safe commit and push checkpoints. Use when
+  the user invokes this workflow or requests OpenSpec implementation with commits and
+  pushes.
 license: MIT
 compatibility: Requires openspec CLI and Git.
 metadata:
   author: auto-commit-agent
-  version: "1.0"
+  version: "1.1"
 ---
 
 # OpenSpec Autoship
@@ -22,13 +18,22 @@ One-shot autonomous execution pipeline that combines two existing skills:
 - **`openspec-apply-change`** — the task-selection, instruction-reading, and implementation loop
 - **`auto-commit-agent`** — the safety gate, staging rules, and conventional commit discipline
 
-and extends both with a hard guarantee: every coherent checkpoint is committed
-**and pushed** immediately, with no permission prompts, so the entire change
-lands on the remote hands-free.
+and extends both: every coherent checkpoint is committed and, unless
+`--no-push` is set, pushed automatically after the safety gate passes. Do not
+ask for repeated approval; higher-priority platform controls still apply.
 
 ## Autonomy Contract (read first)
 
 This skill exists to remove manual oversight. Follow these rules strictly:
+
+Calling this workflow through its provider-native trigger explicitly authorizes commits
+for task-only checkpoints and, unless `--no-push` is set, pushes to the checked-out
+branch's configured upstream (or `origin` when the branch has no upstream). Do not ask
+for a second approval for normal commits or pushes.
+
+This authorization does not override a higher-priority platform safety or egress
+control. If the platform rejects the exact authorized operation, stop and report the
+refusal; do not reroute it through another tool, agent, shell, or destination.
 
 1. **Never pause to ask permission to commit.** If the safety gate passes, commit.
 2. **Never pause to ask permission to push.** If the safety gate passes, push.
@@ -43,7 +48,7 @@ This skill exists to remove manual oversight. Follow these rules strictly:
 ## Input
 
 ```
-$openspec-autoship [change-name] [--dry-run] [--no-push]
+Use the host's native skill invocation with [change-name] [--dry-run] [--no-push].
 ```
 
 - `change-name` (optional): the OpenSpec change to apply. If omitted, infer from
@@ -137,6 +142,13 @@ After each completed task (or tightly-coupled task group), run the commit-push
 sequence. This replaces `auto-commit-agent`'s "ask when in doubt" with
 "proceed when the gate passes".
 
+Keep implementation, task checkboxes, checks, staging, and scope review in the parent
+agent.
+If this provider has a configured commit/push-only subagent, delegate only the already
+staged checkpoint to it and supply the exact path allowlist, commit message, branch,
+upstream state, and push mode. Otherwise, the parent performs the commit and push steps
+below. Never invent an agent name or pause to ask for one.
+
 ### 1. Stage explicit paths only
 
 ```bash
@@ -189,8 +201,9 @@ With `--no-push`, skip. With `--dry-run`, skip both commit and push and report i
 If `git push` is rejected because the remote is ahead:
 
 1. Run `git pull --no-rebase` (merge, never rebase — history must not be rewritten).
-2. If the merge auto-resolves cleanly: re-run any affected checks, commit the
-   merge, and push again. Continue autonomously.
+2. If the merge auto-resolves cleanly: re-run affected checks, stage and verify
+   the merge checkpoint, then use the provider delegation rule above or commit
+   and push directly when no dedicated agent is configured. Continue autonomously.
 3. If conflicts require judgment: hard blocker — report exactly which files
    conflict and stop. **Never** `git push --force` or `--force-with-lease`.
 
@@ -200,7 +213,9 @@ After the last task (or when `instructions apply` reports `all_done`):
 
 1. Ensure the working tree contains no unstaged task work (unrelated
    pre-existing files may remain untouched).
-2. Do a final `git push` (no-op if already pushed at the last checkpoint).
+2. If a push is still needed, delegate a `push-only` request with the branch,
+   upstream, and authorization when a configured shipper exists; otherwise run
+   `git push` directly. This is a no-op if the last checkpoint already pushed.
 3. Report using the template below, then suggest
    `openspec-archive-change` — do **not** archive automatically; archiving is a
    separate user decision.
@@ -219,7 +234,7 @@ After the last task (or when `instructions apply` reports `all_done`):
 ### Left Untouched (pre-existing)
 - <file>: <why>
 
-Next: archive with `$openspec-archive-change` when ready.
+Next: when ready, invoke the host's OpenSpec archive skill.
 ```
 
 ## Pause Conditions (exhaustive)
@@ -232,6 +247,8 @@ Pause ONLY for:
 - Secrets detected in a task's diff.
 - Pre-existing user changes inseparably overlapping a task's files.
 - Merge conflicts after a push rejection that cannot auto-resolve.
+- The execution platform blocks an authorized commit or push. Report the exact refusal
+  and do not retry through another route.
 - openspec CLI reports `blocked` and the missing artifact is not part of this run.
 - User interrupts.
 
