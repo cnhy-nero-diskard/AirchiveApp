@@ -55,5 +55,5 @@
 
 - [ ] 7.1 Add a signed private APK build with signing material kept outside Git and register its certificate for Google sign-in; verify an installable release APK and a secret scan of tracked files.
 - [ ] 7.2 Install the release APK on the target Android device and upgrade it with the same signing identity; verify sign-in, preserved compatible Room data and token, navigation, and all four validated controls.
-- [ ] 7.3 Complete the iOS project scaffold and platform adapter interfaces, documenting Mac-side Firebase, Keychain, build, and device-verification steps; verify project wiring from files and state plainly that iOS execution was not tested on Windows.
+- [x] 7.3 Complete the iOS project scaffold and platform adapter interfaces, documenting Mac-side Firebase, Keychain, build, and device-verification steps; verify project wiring from files and state plainly that iOS execution was not tested on Windows. **Verified from project files; iOS execution was not tested on Windows (see `iosApp/README.md`).**
 - [ ] 7.4 Run shared/Android tests, lint, Android build, `openspec validate add-personal-airchive-mobile-app --strict`, and `git diff --check`; record passed checks, live-device evidence, read volume, and any remaining environment-limited checks in the handoff.

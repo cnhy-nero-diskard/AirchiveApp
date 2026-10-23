@@ -6,9 +6,10 @@ import kotlinx.coroutines.flow.Flow
  * Protected storage for the LG ThinQ Personal Access Token and the stable
  * per-install LG client ID.
  *
- * Platform `actual` adapters keep the token encrypted at rest (Android Keystore
- * on Android, Keychain on iOS) behind a platform-protected key. The interface
- * never leaks the plaintext token to the UI: state carries only a masked form.
+ * The Android adapter encrypts the token at rest with Android Keystore. The iOS
+ * target must provide a Keychain-backed adapter before production use. This
+ * interface never leaks the plaintext token to the UI: state carries only a
+ * masked form.
  * When the protected key can no longer decrypt a saved token ([unlockFailed]),
  * the owner is routed back through ThinQ setup instead of seeing ciphertext.
  *
