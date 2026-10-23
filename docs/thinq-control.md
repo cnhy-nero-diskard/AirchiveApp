@@ -43,8 +43,9 @@ not paste it into chat, logs, test fixtures, or the repository.
 The owner entered the PAT through the protected Settings flow; no value was
 read from local properties. On the physical phone, the app successfully read
 the configured device profile and current live state after the REST-profile
-parser was updated. The UI now offers the controls permitted by that profile.
-No AC command has been sent. Task 4.6 still requires deliberate manual control
+parser was updated. The profile exposes writable power, temperature
+(16–30 °C in 0.5 °C steps), FAN/DRY mode, and LOW/HIGH fan choices. No AC
+command has been sent. Task 4.6 still requires deliberate manual control
 actions and recording requested values, API outcomes, and observed state. Task
 6.4 still needs offline-restart and Firestore-unavailable control evidence.
 Emulator/fixture results do not count as that evidence. The signed-release
