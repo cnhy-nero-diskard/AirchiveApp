@@ -1,8 +1,8 @@
 <resources>
     <style name="Theme.Airchive" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:navigationBarColor">?android:colorBackground</item>
+        <!-- Android 26 cannot draw dark navigation-bar icons; keep this fallback high-contrast. -->
+        <item name="android:navigationBarColor">#000000</item>
         <item name="android:statusBarColor">?android:colorBackground</item>
-        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

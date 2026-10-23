@@ -155,9 +155,20 @@ class FirebaseOwnerIdentityEmulatorTest {
     }
 
     @Test(timeout = 60_000L)
-    fun a06_configNotReady_reportsActionableMissingOptions() {
+    fun a06_explicitlyBlankClientOptions_reportsActionableMissingOptions() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val state = FirebaseOwnerIdentityFactory.fromBuildConfig(context)
+        // This instrumentation build may have real (public) Firebase client
+        // options configured. Exercise the unconfigured branch with explicit
+        // blanks instead of coupling the test to the developer's local config.
+        val state = FirebaseOwnerIdentityFactory.fromOptions(
+            context,
+            OwnerClientOptions(
+                apiKey = "",
+                applicationId = "",
+                projectId = "demo-airchive-telemetry-poller",
+                googleWebClientId = "",
+            ),
+        )
 
         assertTrue("expected MissingOptions, got $state", state is OwnerAuthConfiguration.MissingOptions)
         assertFalse("not configured while client options are blank", state.isConfigured)

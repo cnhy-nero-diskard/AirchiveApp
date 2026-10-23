@@ -1,8 +1,7 @@
 <resources>
     <style name="Theme.Airchive" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:navigationBarColor">?android:colorBackground</item>
+        <item name="android:navigationBarColor">#000000</item>
         <item name="android:statusBarColor">?android:colorBackground</item>
-        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

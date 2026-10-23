@@ -99,13 +99,14 @@ and production history. No ThinQ token was entered and no AC command was sent.
   it does not continuously refresh collector health or rotate the daily-total
   snapshot. Displayed health is cached and its sample age is shown separately.
 - No destructive sign-out/account switch was performed on the owner's phone.
-  Real-control, signed-release, iOS, and the broader tasks 6.3/6.4/7.x remain
-  unaccepted. The prior backend authorization/denial checks are separate
-  evidence in the sibling handoff, not newly rerun server acceptance here.
-- Strict OpenSpec validation and scoped whitespace checks passed. Android lint
-  still reports the two existing `NewApi` errors for
-  `android:windowLightNavigationBar` (API 27) in API-26 themes; full lint/release
-  acceptance is not claimed.
+  Real-control task 4.6, broader production tasks 6.3/6.4, and signed-release
+  tasks 7.1/7.2 remain unaccepted. Prior backend authorization/denial checks
+  are separate evidence in the sibling handoff, not newly rerun production-
+  server acceptance.
+- The iOS scaffold and adapter boundaries are documented in `iosApp/README.md`.
+  Its launcher shows an explicit setup-required screen, not demo device data.
+  Project wiring was checked from source files; iOS compilation/signing/device
+  verification were not tested on Windows.
 
 ### Repeatable checks
 
@@ -133,6 +134,37 @@ $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 
 Client options must be configured locally and the debug signing certificate
 registered with Firebase before a build can use real Google sign-in. This is
-not a release APK or acceptance of a release signing identity. The existing
-API-26 theme lint errors must be addressed before claiming full lint/release
-validation.
+not a release APK or acceptance of a release signing identity.
+
+## Windows-host verification
+
+The shared and Android build checks pass on this host:
+
+- `:shared:testAndroidHostTest`: **305 tests passed**, with no failures/errors.
+- `:androidApp:assembleDebug` and `:androidApp:assembleDebugAndroidTest`:
+  passed; the latter builds the instrumentation APK but does not execute it.
+- `:androidApp:lintDebug`: passed with **0 errors and 4 warnings**. The two
+  API-27 navigation-bar errors were fixed by moving those attributes to
+  `values-v27` / `values-night-v27`; API-26 has a dark, high-contrast fallback.
+  Remaining warnings concern target/compile SDK advisories, backup-rule
+  deprecation, and the missing launcher icon.
+- `openspec validate add-personal-airchive-mobile-app --strict` and
+  `git diff --check`: passed.
+- `:androidApp:testDebugUnitTest` has no source-set tests (`NO-SOURCE`); the
+  shared Room/JVM host test task is the applicable local unit suite.
+- Firebase Auth/Firestore emulator instrumentation on the `Medium_Phone_API_35`
+  AVD (`demo-airchive-telemetry-poller` only): **39 passed, 7 skipped, 0 failed**.
+  The passing local cases exercise fake-owner reads, a distinct fake intruder's
+  denial, wrong-device/unlisted-path denials, bounded-query enforcement, and
+  client-write denials. The 7 skips are opt-in tests requiring the real enrolled
+  owner/device; no production Firebase project was contacted. The missing-client-
+  options test now supplies explicit blank options, so it is independent of the
+  developer's local Firebase configuration.
+
+These host checks are not evidence of production acceptance. Local Firebase
+emulator tests use only the `demo-airchive-telemetry-poller` project and fake
+accounts; they do not test enrolled-owner production rules or the
+collector/dashboard. No live AC command, release signing identity, target-phone
+release upgrade, new production authorization denial, or production-server
+no-regression check is claimed here. See the OpenSpec task list for the exact
+remaining owner/hardware gates.

@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.Airchive" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:navigationBarColor">?android:colorBackground</item>
+        <item name="android:statusBarColor">?android:colorBackground</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
