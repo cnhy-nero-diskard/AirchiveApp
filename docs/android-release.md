@@ -174,6 +174,17 @@ distinct from the debug certificate. After the approved debug uninstall, ADB
 installed and launched it on phone `9XDQCM6HLB5DO7YH`. The owner reported finishing
 sign-in, history sync, and PAT entry. No PAT was read by the assistant.
 
-The same-key version-code-2 update and post-update preservation checks have not
-yet run. This evidence alone does not complete 7.1's tracked-file secret scan
-or 7.2's upgrade and control acceptance requirements.
+The Windows-DPAPI setup validated the existing keystore credentials and saved
+them outside Git. The automation built version code 2, verified its pinned
+release certificate and the installed version-1 certificate, then successfully
+updated the phone with `adb install -r` and launched the app. There was no
+uninstall or data clear during this upgrade. The owner confirmed that sign-in,
+history visibility, and saved PAT status survived. This confirms user-visible
+preservation, not an independent row-by-row Room database audit or a new control
+request.
+
+Artifact-name and common private-key/token-pattern scans found no matches across
+333 tracked paths. No secret environment files were read. This limited pattern
+scan does not guarantee detection of every possible credential. Task 7.1 is
+complete; task 7.2 remains open for post-update navigation and all-four-control
+acceptance. No new AC command was issued during signing or upgrade verification.
