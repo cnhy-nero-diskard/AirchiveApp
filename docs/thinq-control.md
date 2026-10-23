@@ -23,6 +23,12 @@ setup still requires the exact configured profile, and control enablement still
 requires a successful live-state read. An explicit offline report continues to
 block setup.
 
+The profile parser accepts both the legacy SDK `writable` / `write_values`
+shape and the current LG REST `mode` / `value.w` shape documented in the
+[official AC profile reference](https://thinq.developer.lge.com/en/cloud/docs/thinq-connect/device-profile/air-conditioner).
+Temperature writes retain the resource key from the profile; unsupported or
+unparsed properties remain disabled rather than inferred.
+
 ## PAT handling
 
 `local.properties` is not read for a ThinQ PAT, and the token is not put into
@@ -34,9 +40,12 @@ not paste it into chat, logs, test fixtures, or the repository.
 
 ## Acceptance still pending
 
-The production UI and secure storage path are wired, but the real token has not
-been loaded or read from any local properties file in this work. No live LG
-request or AC command has been sent. Tasks 4.6 and 6.4 still require deliberate
-manual validation on the configured AC, including the requested values, API
-outcomes, and observed state. Emulator/fixture results do not count as that
-evidence. The target-device release/signing tasks remain separate.
+The owner entered the PAT through the protected Settings flow; no value was
+read from local properties. On the physical phone, the app successfully read
+the configured device profile and current live state after the REST-profile
+parser was updated. The UI now offers the controls permitted by that profile.
+No AC command has been sent. Task 4.6 still requires deliberate manual control
+actions and recording requested values, API outcomes, and observed state. Task
+6.4 still needs offline-restart and Firestore-unavailable control evidence.
+Emulator/fixture results do not count as that evidence. The signed-release
+tasks remain separate.

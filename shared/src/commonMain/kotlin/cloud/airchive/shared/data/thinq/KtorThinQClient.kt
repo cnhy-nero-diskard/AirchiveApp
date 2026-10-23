@@ -411,7 +411,7 @@ class KtorThinQClient(
         val requestedUnit = command.unit
         val direct = profile.temperatureByUnit[requestedUnit]
         if (direct != null && direct.allows(command.value)) {
-            return temperatureJson(command.value, requestedUnit)
+            return temperatureJson(profile, command.value, requestedUnit)
         }
         // Fallback: a profile that supports exactly one other unit accepts a
         // converted value and reports it in that unit. The body always reports
@@ -421,13 +421,13 @@ class KtorThinQClient(
         if (profile.temperatureByUnit.size == 1) {
             val (onlyUnit, onlyCap) = profile.temperatureByUnit.entries.first()
             val converted = convertTemperature(command.value, requestedUnit, onlyUnit)
-            if (onlyCap.allows(converted)) return temperatureJson(converted, onlyUnit)
+            if (onlyCap.allows(converted)) return temperatureJson(profile, converted, onlyUnit)
         }
         return null
     }
 
-    private fun temperatureJson(value: Double, unit: TemperatureUnit): String = jsonBody {
-        putJsonObject("temperatureInUnits") {
+    private fun temperatureJson(profile: ParsedAcProfile, value: Double, unit: TemperatureUnit): String = jsonBody {
+        putJsonObject(profile.temperatureResourceKey) {
             put("targetTemperature", value)
             put("unit", unit.symbol())
         }

@@ -121,11 +121,16 @@ internal object ThinQPayloads {
             }
         }
 
+        val temperatures = parseTemperatures(
+            legacyNode = property["temperatureInUnits"],
+            currentNode = property["temperature"],
+        )
         return ParsedAcProfile(
             deviceId = deviceId,
             modelName = root.string("modelName"),
             powerWritable = powerWritable,
-            temperatureByUnit = parseTemperatures(property["temperatureInUnits"]),
+            temperatureByUnit = temperatures.byUnit,
+            temperatureResourceKey = temperatures.resourceKey,
             modeWriteStrings = modeWriteStrings,
             fanPropertyKey = windKey.takeIf { fanWriteStrings.isNotEmpty() },
             fanWriteStrings = fanWriteStrings,
@@ -162,7 +167,11 @@ internal object ThinQPayloads {
             deviceId = deviceId,
             observedAtEpochMillis = observedAtEpochMillis,
             powerOn = powerOn,
-            targetTemperature = targetTemperature(root["temperatureInUnits"], preferredUnit),
+            targetTemperature = targetTemperature(
+                legacyNode = root["temperatureInUnits"],
+                currentNode = root["temperature"],
+                preferredUnit = preferredUnit,
+            ),
             mode = jobMode?.string("currentJobMode")?.let { modeFromWire(it) },
             fanSpeed = wind?.let { fanFromWire(it) },
         )
@@ -170,7 +179,25 @@ internal object ThinQPayloads {
 
     // ------------------------------------------------------------ temperature
 
-    private fun parseTemperatures(node: JsonElement?): Map<TemperatureUnit, TemperatureCapability> {
+    private data class ParsedTemperatures(
+        val byUnit: Map<TemperatureUnit, TemperatureCapability>,
+        val resourceKey: String,
+    )
+
+    /** Supports both the SDK's `temperatureInUnits` schema and REST `temperature` profiles. */
+    private fun parseTemperatures(legacyNode: JsonElement?, currentNode: JsonElement?): ParsedTemperatures {
+        val legacy = parseTemperatureInUnits(legacyNode)
+        if (legacy.isNotEmpty()) return ParsedTemperatures(legacy, "temperatureInUnits")
+
+        val current = parseTemperatureResource(currentNode)
+        return if (current.isEmpty()) {
+            ParsedTemperatures(emptyMap(), "temperatureInUnits")
+        } else {
+            ParsedTemperatures(current, "temperature")
+        }
+    }
+
+    private fun parseTemperatureInUnits(node: JsonElement?): Map<TemperatureUnit, TemperatureCapability> {
         val result = linkedMapOf<TemperatureUnit, TemperatureCapability>()
         val blocks = when (node) {
             is JsonArray -> node.mapNotNull { it as? JsonObject }
@@ -193,22 +220,60 @@ internal object ThinQPayloads {
         return result
     }
 
+    private fun parseTemperatureResource(node: JsonElement?): Map<TemperatureUnit, TemperatureCapability> {
+        val resource = node as? JsonObject ?: return emptyMap()
+        val unit = temperatureUnit(resource["unit"]) ?: return emptyMap()
+        val capability = rangeCapability(resource["targetTemperature"]) ?: return emptyMap()
+        return mapOf(
+            unit to TemperatureCapability(
+                min = capability.min,
+                max = capability.max,
+                step = capability.step,
+                unit = unit,
+                excludedValues = capability.excluded,
+            ),
+        )
+    }
+
     /** Numeric target temperature (in its block's unit) converted to [preferredUnit]. */
-    private fun targetTemperature(node: JsonElement?, preferredUnit: TemperatureUnit): Double? {
-        val blocks = when (node) {
-            is JsonArray -> node.mapNotNull { it as? JsonObject }
-            is JsonObject -> listOf(node)
-            else -> return null
+    private fun targetTemperature(
+        legacyNode: JsonElement?,
+        currentNode: JsonElement?,
+        preferredUnit: TemperatureUnit,
+    ): Double? {
+        val blocks = when (legacyNode) {
+            is JsonArray -> legacyNode.mapNotNull { it as? JsonObject }
+            is JsonObject -> listOf(legacyNode)
+            else -> emptyList()
         }
         val symbol = preferredUnit.symbol()
         val preferred = blocks.firstOrNull {
             it.string("unit")?.trim()?.uppercase() == symbol && number(it, "targetTemperature") != null
         }
-        val chosen = preferred ?: blocks.firstOrNull { number(it, "targetTemperature") != null } ?: return null
-        val raw = number(chosen, "targetTemperature") ?: return null
-        val blockUnit = unitFromSymbol(chosen.string("unit"))
-        if (blockUnit == null || blockUnit == preferredUnit) return raw
-        return convertTemperature(raw, blockUnit, preferredUnit)
+        val chosen = preferred ?: blocks.firstOrNull { number(it, "targetTemperature") != null }
+        if (chosen != null) {
+            val raw = number(chosen, "targetTemperature") ?: return null
+            val blockUnit = unitFromSymbol(chosen.string("unit")) ?: return null
+            return if (blockUnit == preferredUnit) raw else convertTemperature(raw, blockUnit, preferredUnit)
+        }
+
+        val temperature = currentNode as? JsonObject ?: return null
+        val raw = number(temperature, "targetTemperature") ?: return null
+        val unit = temperatureUnit(temperature["unit"]) ?: return null
+        return if (unit == preferredUnit) raw else convertTemperature(raw, unit, preferredUnit)
+    }
+
+    private fun temperatureUnit(node: JsonElement?): TemperatureUnit? = when (node) {
+        is JsonPrimitive -> if (node.isString) unitFromSymbol(node.contentOrNull) else null
+        is JsonObject -> {
+            val values = enumValues(node, "r").ifEmpty { enumValues(node, "w") }
+            when {
+                values.any { unitFromSymbol(it) == TemperatureUnit.CELSIUS } -> TemperatureUnit.CELSIUS
+                values.any { unitFromSymbol(it) == TemperatureUnit.FAHRENHEIT } -> TemperatureUnit.FAHRENHEIT
+                else -> null
+            }
+        }
+        else -> null
     }
 
     // ------------------------------------------------------------- capability
@@ -228,11 +293,8 @@ internal object ThinQPayloads {
     private fun enumCapability(prop: JsonElement?): EnumCapability? {
         val obj = prop as? JsonObject ?: return null
         if (obj.string("type") != "enum") return null
-        val write = obj["write_values"] as? JsonArray
-        val values = write.orEmpty().mapNotNull { entry ->
-            (entry as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-        }
-        return EnumCapability(writable = obj.boolean("writable"), writeValues = values)
+        val writable = obj.booleanIfPresent("writable") ?: obj.modeIncludesWrite()
+        return EnumCapability(writable = writable, writeValues = enumValues(obj, "w"))
     }
 
     /**
@@ -246,8 +308,11 @@ internal object ThinQPayloads {
     private fun rangeCapability(prop: JsonElement?): RangeCapability? {
         val obj = prop as? JsonObject ?: return null
         if (obj.string("type") != "range") return null
-        if (!obj.boolean("writable")) return null
-        val values = obj["write_values"] as? JsonObject ?: return null
+        val writable = obj.booleanIfPresent("writable") ?: obj.modeIncludesWrite()
+        if (!writable) return null
+        val values = obj["write_values"] as? JsonObject
+            ?: ((obj["value"] as? JsonObject)?.get("w") as? JsonObject)
+            ?: return null
         val min = number(values, "min") ?: return null
         val max = number(values, "max") ?: return null
         if (!min.isFinite() || !max.isFinite() || min > max) return null
@@ -256,6 +321,21 @@ internal object ThinQPayloads {
         val excluded = parseExclusions(values["except"]) ?: return null
         return RangeCapability(min = min, max = max, step = step, excluded = excluded)
     }
+
+    private fun enumValues(obj: JsonObject, direction: String): List<String> {
+        val legacyKey = if (direction == "w") "write_values" else "read_values"
+        val legacy = obj[legacyKey] as? JsonArray
+        val current = ((obj["value"] as? JsonObject)?.get(direction) as? JsonArray)
+        val entries = legacy?.takeIf { it.isNotEmpty() } ?: current ?: legacy ?: return emptyList()
+        return entries.mapNotNull { entry ->
+            (entry as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        }
+    }
+
+    private fun JsonObject.modeIncludesWrite(): Boolean =
+        (this["mode"] as? JsonArray)?.any { entry ->
+            (entry as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull == "w"
+        } == true
 
     /**
      * Parses `write_values.except` into normalized exclusions. Only finite
@@ -315,7 +395,7 @@ internal object ThinQPayloads {
 internal fun modeFromWire(raw: String): AcOperatingMode? = when (raw) {
     "COOL" -> AcOperatingMode.COOL
     "HEAT" -> AcOperatingMode.HEAT
-    "DRY" -> AcOperatingMode.DRY
+    "DRY", "AIR_DRY" -> AcOperatingMode.DRY
     "FAN", "FAN_ONLY" -> AcOperatingMode.FAN
     "AUTO" -> AcOperatingMode.AUTO
     "ENERGY_SAVING", "POWER_SAVE" -> AcOperatingMode.POWER_SAVE
@@ -364,6 +444,8 @@ internal data class ParsedAcProfile(
     val powerWritable: Boolean,
     /** Writable temperature capability per unit the device offers; values are in that unit. */
     val temperatureByUnit: Map<TemperatureUnit, TemperatureCapability>,
+    /** Resource key for the exact profile schema used by the temperature write. */
+    val temperatureResourceKey: String = "temperatureInUnits",
     /** LG write string for each operating mode the profile permits (round-trip). */
     val modeWriteStrings: Map<AcOperatingMode, String>,
     /** Exact writable `airFlow` property selected by the official SDK profile map. */
