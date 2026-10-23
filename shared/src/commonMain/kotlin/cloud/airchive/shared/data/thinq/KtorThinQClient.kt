@@ -91,6 +91,7 @@ class KtorThinQClient(
     engine: HttpClientEngine,
     private val credentialStore: ThinQCredentialStore,
     private val configuredDeviceId: String,
+    private val temperatureStepOverride: Double? = null,
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) : ThinQPort, ThinQCredentialVerifier {
 
@@ -106,6 +107,9 @@ class KtorThinQClient(
         require(ThinQPayloads.isSinglePathSegment(configuredDeviceId)) {
             "Configured ThinQ device ID must be one safe URL path segment."
         }
+        require(temperatureStepOverride == null || temperatureStepOverride.isFinite() && temperatureStepOverride > 0.0) {
+            "Configured ThinQ temperature-step override must be finite and positive."
+        }
     }
 
     // ------------------------------------------------------------ public API
@@ -120,7 +124,7 @@ class KtorThinQClient(
         requireConfiguredDevice(deviceId)
         val ctx = currentCredentialContext()
         val payload = requestRead(ctx, "devices/$deviceId/profile")
-        return ThinQPayloads.acProfile(deviceId, payload).toContractProfile()
+        return ThinQPayloads.acProfile(deviceId, payload, temperatureStepOverride).toContractProfile()
     }
 
     override suspend fun liveState(deviceId: String): ThinQLiveState {
@@ -265,7 +269,7 @@ class KtorThinQClient(
                 ctx = CredentialContext(request.rawToken, country, request.clientId),
                 path = "devices/${device.deviceId}/profile",
             )
-            ThinQPayloads.acProfile(device.deviceId, payload).toContractProfile()
+            ThinQPayloads.acProfile(device.deviceId, payload, temperatureStepOverride).toContractProfile()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: ThinQClientException) {
@@ -315,7 +319,7 @@ class KtorThinQClient(
 
     private suspend fun fetchProfile(ctx: CredentialContext, deviceId: String): ParsedAcProfile {
         val payload = requestRead(ctx, "devices/$deviceId/profile")
-        return ThinQPayloads.acProfile(deviceId, payload)
+        return ThinQPayloads.acProfile(deviceId, payload, temperatureStepOverride)
     }
 
     private suspend fun request(

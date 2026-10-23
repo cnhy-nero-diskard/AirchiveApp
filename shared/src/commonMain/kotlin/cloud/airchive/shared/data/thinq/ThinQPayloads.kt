@@ -81,7 +81,11 @@ internal object ThinQPayloads {
      * contract-known values mapped to their exact LG write strings; temperature
      * requires a finite, ordered range with a positive step and a known unit.
      */
-    fun acProfile(deviceId: String, response: JsonElement?): ParsedAcProfile {
+    fun acProfile(
+        deviceId: String,
+        response: JsonElement?,
+        temperatureStepOverride: Double? = null,
+    ): ParsedAcProfile {
         val root = response as? JsonObject ?: throw ThinQClientException.MalformedResponse
         val property = root["property"] as? JsonObject ?: throw ThinQClientException.MalformedResponse
 
@@ -124,6 +128,7 @@ internal object ThinQPayloads {
         val temperatures = parseTemperatures(
             legacyNode = property["temperatureInUnits"],
             currentNode = property["temperature"],
+            temperatureStepOverride = temperatureStepOverride,
         )
         return ParsedAcProfile(
             deviceId = deviceId,
@@ -185,11 +190,15 @@ internal object ThinQPayloads {
     )
 
     /** Supports both the SDK's `temperatureInUnits` schema and REST `temperature` profiles. */
-    private fun parseTemperatures(legacyNode: JsonElement?, currentNode: JsonElement?): ParsedTemperatures {
-        val legacy = parseTemperatureInUnits(legacyNode)
+    private fun parseTemperatures(
+        legacyNode: JsonElement?,
+        currentNode: JsonElement?,
+        temperatureStepOverride: Double?,
+    ): ParsedTemperatures {
+        val legacy = parseTemperatureInUnits(legacyNode, temperatureStepOverride)
         if (legacy.isNotEmpty()) return ParsedTemperatures(legacy, "temperatureInUnits")
 
-        val current = parseTemperatureResource(currentNode)
+        val current = parseTemperatureResource(currentNode, temperatureStepOverride)
         return if (current.isEmpty()) {
             ParsedTemperatures(emptyMap(), "temperatureInUnits")
         } else {
@@ -197,7 +206,10 @@ internal object ThinQPayloads {
         }
     }
 
-    private fun parseTemperatureInUnits(node: JsonElement?): Map<TemperatureUnit, TemperatureCapability> {
+    private fun parseTemperatureInUnits(
+        node: JsonElement?,
+        temperatureStepOverride: Double?,
+    ): Map<TemperatureUnit, TemperatureCapability> {
         val result = linkedMapOf<TemperatureUnit, TemperatureCapability>()
         val blocks = when (node) {
             is JsonArray -> node.mapNotNull { it as? JsonObject }
@@ -211,7 +223,7 @@ internal object ThinQPayloads {
                 result[unit] = TemperatureCapability(
                     min = cap.min,
                     max = cap.max,
-                    step = cap.step,
+                    step = effectiveTemperatureStep(cap.step, temperatureStepOverride),
                     unit = unit,
                     excludedValues = cap.excluded,
                 )
@@ -220,7 +232,10 @@ internal object ThinQPayloads {
         return result
     }
 
-    private fun parseTemperatureResource(node: JsonElement?): Map<TemperatureUnit, TemperatureCapability> {
+    private fun parseTemperatureResource(
+        node: JsonElement?,
+        temperatureStepOverride: Double?,
+    ): Map<TemperatureUnit, TemperatureCapability> {
         val resource = node as? JsonObject ?: return emptyMap()
         val unit = temperatureUnit(resource["unit"]) ?: return emptyMap()
         val capability = rangeCapability(resource["targetTemperature"]) ?: return emptyMap()
@@ -228,12 +243,15 @@ internal object ThinQPayloads {
             unit to TemperatureCapability(
                 min = capability.min,
                 max = capability.max,
-                step = capability.step,
+                step = effectiveTemperatureStep(capability.step, temperatureStepOverride),
                 unit = unit,
                 excludedValues = capability.excluded,
             ),
         )
     }
+
+    private fun effectiveTemperatureStep(profileStep: Double, override: Double?): Double =
+        override?.takeIf { it.isFinite() && it >= profileStep } ?: profileStep
 
     /** Numeric target temperature (in its block's unit) converted to [preferredUnit]. */
     private fun targetTemperature(

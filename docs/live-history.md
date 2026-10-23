@@ -144,7 +144,7 @@ not a release APK or acceptance of a release signing identity.
 
 The shared and Android build checks pass on this host:
 
-- `:shared:testAndroidHostTest`: **309 tests passed**, with no failures/errors.
+- `:shared:testAndroidHostTest`: **310 tests passed**, with no failures/errors.
 - `:androidApp:assembleDebug` and `:androidApp:assembleDebugAndroidTest`:
   passed; the latter builds the instrumentation APK but does not execute it.
 - `:androidApp:lintDebug`: passed with **0 errors and 4 warnings**. The two

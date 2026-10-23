@@ -70,6 +70,11 @@ android {
         )
         buildConfigField("String", "AIRCHIVE_DEVICE_ID", "\"${airchiveConfigValue("device.id")}\"")
         buildConfigField("String", "AIRCHIVE_DAY_TIME_ZONE", "\"${airchiveConfigValue("day.timeZone")}\"")
+        buildConfigField(
+            "String",
+            "AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE",
+            buildConfigStringLiteral(airchiveConfigValueOrBlank("thinq.temperatureStepOverride")),
+        )
         buildConfigField("int", "AIRCHIVE_FIRESTORE_MAX_PAGE_SIZE", airchiveConfigValue("firestore.maxPageSize"))
         buildConfigField(
             "String",

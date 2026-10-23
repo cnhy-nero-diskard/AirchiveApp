@@ -57,13 +57,20 @@ class KtorThinQClientTest {
     private fun client(
         requests: MutableList<HttpRequestData>,
         store: FakeThinQCredentialStore = FakeThinQCredentialStore(stableClientId),
+        temperatureStepOverride: Double? = null,
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ): KtorThinQClient {
         val engine = MockEngine { request ->
             requests += request
             handler(request)
         }
-        return KtorThinQClient(engine, store, deviceId) { fixedNow }
+        return KtorThinQClient(
+            engine = engine,
+            credentialStore = store,
+            configuredDeviceId = deviceId,
+            nowEpochMillis = { fixedNow },
+            temperatureStepOverride = temperatureStepOverride,
+        )
     }
 
     private fun MockRequestHandleScope.jsonOk(body: String): HttpResponseData =
@@ -187,7 +194,7 @@ class KtorThinQClientTest {
           "airConJobMode":{"currentJobMode":{"type":"enum","mode":["r","w"],"value":{"r":["COOL","AIR_DRY","AUTO"],"w":["COOL","AIR_DRY","AUTO"]}}},
           "temperature":{
             "unit":{"type":"enum","mode":["r"],"value":{"r":["C","F"]}},
-            "targetTemperature":{"type":"range","mode":["r","w"],"value":{"r":{"min":18,"max":30,"step":1},"w":{"min":18,"max":30,"step":1}}}
+            "targetTemperature":{"type":"range","mode":["r","w"],"value":{"r":{"min":18,"max":30,"step":0.5},"w":{"min":18,"max":30,"step":0.5}}}
           },
           "airFlow":{"windStrength":{"type":"enum","mode":["r","w"],"value":{"r":["LOW","MID","HIGH"],"w":["LOW","MID","HIGH"]}}}
         }}}
@@ -481,6 +488,29 @@ class KtorThinQClientTest {
         assertEquals(TemperatureUnit.CELSIUS, profile.controls.temperatureUnit)
         assertEquals(18.0, profile.controls.targetTemperature?.min)
         assertEquals(30.0, profile.controls.targetTemperature?.max)
+        assertEquals(0.5, profile.controls.targetTemperature?.step)
+    }
+
+    @Test
+    fun deviceTemperatureStepOverrideRemovesObservedUnsupportedHalfSteps() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val thinq = client(requests, stored(), temperatureStepOverride = 1.0) {
+            jsonOk(currentRestProfileJson)
+        }
+
+        val profile = thinq.profile(deviceId)
+        val temperature = requireNotNull(profile.controls.targetTemperature)
+        assertEquals(1.0, temperature.step)
+        assertTrue(temperature.allows(25.0))
+        assertFalse(temperature.allows(25.5))
+
+        val outcome = thinq.setState(
+            AcCommand.SetTargetTemperature(REQUESTED_AT, value = 25.5, unit = TemperatureUnit.CELSIUS),
+        )
+        assertEquals(CommandStatus.FAILED, outcome.status)
+        assertEquals(CommandFailure.INVALID_REQUEST, outcome.failure)
+        assertEquals(2, requests.size, "the profile is re-read, but the unsupported half-step is never POSTed")
+        assertEquals(0, requests.count { it.method == HttpMethod.Post })
     }
 
     @Test

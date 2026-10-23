@@ -43,22 +43,27 @@ not paste it into chat, logs, test fixtures, or the repository.
 The owner entered the PAT through the protected Settings flow; no value was
 read from local properties. On the physical phone, the app successfully read
 the configured device profile and current live state after the REST-profile
-parser was updated. The profile exposes writable power, temperature
-(16–30 °C in 0.5 °C steps), FAN/DRY mode, and LOW/HIGH fan choices. No AC
-command was sent during the initial read-only check; the later partial control
-checks are recorded below.
+parser was updated. The profile exposes writable power, temperature, FAN/DRY
+mode, and LOW/HIGH fan choices. The REST profile advertised 0.5 °C steps, but
+the owner confirmed this AC accepts whole-degree targets; the nonsecret
+`thinq.temperatureStepOverride=1.0` now restricts the UI and command validation
+to integer Celsius values.
 
 ### Partial real-device control check
 
 - Requested 25.5 °C. The app reported the outcome as **unconfirmed**; it did not
   resend. A separate fresh read returned 25.0 °C. Per the owner's instruction,
-  the setpoint was left at 25.0 °C; no restoration command was sent.
+  the setpoint was left at 25.0 °C; no restoration command was sent. The integer
+  step override has been added; another temperature command awaits a new
+  owner-selected integer setpoint.
 - Requested fan HIGH. The app reported **confirmed**, and the fresh observed
   state showed fan HIGH.
-- Power and mode commands were skipped at the owner's direction. The profile
-  showed a power-off action, FAN/DRY modes, and LOW/HIGH fan options.
+- The owner reports that power off/on were manually verified in the official
+  ThinQ app. No power command was sent from Airchive during this session.
+- Mode commands were skipped at the owner's direction. The app profile offers
+  FAN/DRY and LOW/HIGH options.
 
-Task 4.6 remains incomplete: power and mode were not validated, and the
+Task 4.6 remains incomplete: the app has not validated power/mode, and the
 temperature result did not match the requested value. Task 6.4 still needs
 offline-restart and Firestore-unavailable control evidence. Emulator/fixture
 results do not count as that evidence. The signed-release tasks remain separate.

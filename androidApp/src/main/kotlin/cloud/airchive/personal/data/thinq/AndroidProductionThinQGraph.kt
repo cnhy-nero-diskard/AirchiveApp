@@ -39,6 +39,7 @@ class AndroidProductionThinQGraph(
         engine = CIO.create(),
         credentialStore = credentialStore,
         configuredDeviceId = configuredDeviceId,
+        temperatureStepOverride = BuildConfig.AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE.toDoubleOrNull(),
     )
 
     val credentialSetup = ThinQCredentialSetupCoordinator(
