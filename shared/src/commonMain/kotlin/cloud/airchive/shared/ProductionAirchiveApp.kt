@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,6 +43,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
@@ -58,6 +62,7 @@ import cloud.airchive.shared.data.energy.normalizeToWh
 import cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult
 import cloud.airchive.shared.data.onboarding.ProductionAccountConfirmStep
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
+import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
@@ -65,18 +70,19 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Production history-only graph for the Android app.
+ * Production owner graph for the Android app.
  *
  * This composition never references [cloud.airchive.shared.fakes.FakeProviders],
  * never creates a demo partition, and never falls back to simulated data. It
  * renders the real owner's cached [HistorySnapshot] first (so a durable Room
  * cache appears before any network work and survives restart/offline for the
  * same owner), reuses the existing read-only [EnergyRoute] and
- * [HistoryHealthRoute], shows real Google sign-in/retry actions, and presents
- * the Device route with ThinQ controls clearly unavailable.
+ * [HistoryHealthRoute], shows real Google sign-in/retry actions, and keeps
+ * ThinQ operations on their independent protected-credential graph.
  *
  * Every screen keys off the exact partition derived by [coordinator] from the
  * live owner session; when the owner signs out or switches accounts the
@@ -93,6 +99,7 @@ fun ProductionAirchiveApp(
     accountController: ProductionAccountController,
     onManualRefresh: (() -> Unit)? = null,
     ownerAuthConfigurationMessage: String? = null,
+    thinQBindings: ProductionThinQBindings? = null,
 ) {
     val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
     MaterialTheme(colorScheme = colors) {
@@ -102,6 +109,7 @@ fun ProductionAirchiveApp(
                 accountController = accountController,
                 onManualRefresh = onManualRefresh,
                 ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                thinQBindings = thinQBindings,
             )
         }
     }
@@ -166,6 +174,7 @@ private fun ProductionRouteHost(
     accountController: ProductionAccountController,
     onManualRefresh: (() -> Unit)?,
     ownerAuthConfigurationMessage: String?,
+    thinQBindings: ProductionThinQBindings?,
 ) {
     val session by coordinator.session.collectAsState()
     val isRefreshing by coordinator.isRefreshing.collectAsState()
@@ -174,6 +183,17 @@ private fun ProductionRouteHost(
     val partition = session?.let { coordinator.partitionFor(it) }
 
     val placeholderHistory = remember(coordinator) { coordinator.emptySnapshot() }
+    val emptyCredentialState = remember(thinQBindings) {
+        ThinQCredentialState(
+            present = false,
+            clientId = thinQBindings?.clientId.orEmpty(),
+        )
+    }
+    val credentialState = if (thinQBindings == null) {
+        emptyCredentialState
+    } else {
+        thinQBindings.credentialState.collectAsState(initial = emptyCredentialState).value
+    }
     val historyFlow = remember(coordinator, partition) {
         partition?.let { coordinator.local.observe(it) } ?: flowOf(placeholderHistory)
     }
@@ -216,6 +236,14 @@ private fun ProductionRouteHost(
     val sampledIdentity = (accessState as? OwnerAccessState.Authorized)?.device
 
     val afterSettingsAction: suspend () -> Unit = {
+        val hasSavedCredential = try {
+            thinQBindings?.credentialState?.first()?.present == true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        if (!hasSavedCredential) thinQBindings?.clearCachedDeviceProfile?.invoke()
         rawAccessState = try {
             coordinator.access.restore()
         } catch (cancelled: CancellationException) {
@@ -248,14 +276,19 @@ private fun ProductionRouteHost(
                     nowEpochMillis = nowEpochMillis,
                     onManualRefresh = onManualRefresh,
                     onOpenDevice = { route = ProductionRoute.DEVICE },
+                    onOpenSettings = { route = ProductionRoute.SETTINGS },
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    credentialState = credentialState,
                 )
 
                 ProductionRoute.DEVICE -> if (partition != null) {
                     ProductionDeviceRoute(
                         configuredDeviceId = coordinator.configuredDeviceId,
                         identity = sampledIdentity,
+                        thinQBindings = thinQBindings,
+                        credentialState = credentialState,
                         onBackToHome = { route = ProductionRoute.HOME },
+                        onOpenSettings = { route = ProductionRoute.SETTINGS },
                     )
                 } else {
                     ProductionSignedOutRoute(title = "Device")
@@ -292,6 +325,8 @@ private fun ProductionRouteHost(
                     nowEpochMillis = nowEpochMillis,
                     onManualRefresh = onManualRefresh,
                     afterSettingsAction = afterSettingsAction,
+                    thinQBindings = thinQBindings,
+                    credentialState = credentialState,
                 )
             }
         }
@@ -358,7 +393,9 @@ private fun ProductionHome(
     nowEpochMillis: Long,
     onManualRefresh: (() -> Unit)?,
     onOpenDevice: () -> Unit,
+    onOpenSettings: () -> Unit,
     ownerAuthConfigurationMessage: String?,
+    credentialState: ThinQCredentialState,
 ) {
     Column(
         modifier = Modifier
@@ -401,7 +438,7 @@ private fun ProductionHome(
         )
 
         SummaryCard("Device") {
-            Text("Open the configured AC's read-only identity and the deferred thinQ controls status.")
+            Text("Open the configured AC's live state and profile-supported controls.")
             Button(
                 onClick = onOpenDevice,
                 modifier = Modifier
@@ -413,11 +450,14 @@ private fun ProductionHome(
         }
 
         SummaryCard("ThinQ control") {
+            val credentialVisible = accessState !is OwnerAccessState.SignedOut
             Text(
-                "Live thinQ state and control commands are not enabled in this build. Setting up a " +
-                    "control-capable ThinQ account is deferred: this app never asks for a ThinQ PAT. " +
-                    "Airchive history sync and energy history work independently of ThinQ.",
+                if (credentialVisible) credentialState.productionCredentialStatus()
+                else "ThinQ credential status is hidden while signed out.",
             )
+            if (credentialVisible && (!credentialState.present || credentialState.unlockFailed)) {
+                Button(onClick = onOpenSettings) { Text("Set up ThinQ PAT") }
+            }
         }
 
         ownerAuthConfigurationMessage?.let { configurationMessage ->
@@ -613,8 +653,8 @@ private fun ProductionAccessCard(
             }
         }
         Text(
-            "ThinQ control setup is deferred in this build: no ThinQ PAT is requested and live controls " +
-                "stay disabled. History loading works without ThinQ.",
+            "ThinQ uses a separate protected credential. History sync and cached energy remain available " +
+                "if LG is offline or control access is unavailable.",
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -657,15 +697,34 @@ private fun ProductionHistorySyncCard(
 }
 
 // -------------------------------------------------------------------------
-// Device (ThinQ controls clearly unavailable)
+// Device (profile-gated live ThinQ controls)
 // -------------------------------------------------------------------------
 
 @Composable
 private fun ProductionDeviceRoute(
     configuredDeviceId: String,
     identity: DeviceIdentity?,
+    thinQBindings: ProductionThinQBindings?,
+    credentialState: ThinQCredentialState,
     onBackToHome: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    val device = if (thinQBindings != null) thinQBindings.device.collectAsState().value else null
+    val profile = if (thinQBindings != null) thinQBindings.profile.collectAsState().value else null
+
+    LaunchedEffect(thinQBindings, credentialState.present, credentialState.unlockFailed) {
+        if (credentialState.present && !credentialState.unlockFailed) {
+            try {
+                thinQBindings?.onDeviceOpened?.invoke()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The graph and live-state controller expose only safe status.
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .widthIn(max = 640.dp)
@@ -678,16 +737,48 @@ private fun ProductionDeviceRoute(
         Text("Device", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
         ProductionConfiguredAcCard(configuredDeviceId = configuredDeviceId, identity = identity)
 
-        SummaryCard("Live state and controls · unavailable") {
-            Text(
-                "ThinQ live state and quick controls are not enabled in this build. A control-capable " +
-                    "ThinQ account setup — including any ThinQ Personal Access Token — is intentionally " +
-                    "deferred, so no control commands can be sent from this app.",
-            )
-            Text(
-                "Airchive history sync and energy history are independent of ThinQ and keep working while " +
-                    "this card stays disabled.",
-            )
+        when {
+            thinQBindings == null -> SummaryCard("ThinQ controls unavailable") {
+                Text("The protected ThinQ adapter is not configured in this build.")
+            }
+
+            !credentialState.present || credentialState.unlockFailed -> SummaryCard("ThinQ setup required") {
+                Text(
+                    if (credentialState.unlockFailed) {
+                        "The saved ThinQ credential could not be unlocked. Verify and save it again in Settings."
+                    } else {
+                        "No ThinQ PAT is stored in protected app storage. Set it up from Settings; the token is verified before saving."
+                    },
+                )
+                Button(onClick = onOpenSettings) { Text("Open ThinQ settings") }
+            }
+
+            device == null || profile == null -> SummaryCard("ThinQ device profile unavailable") {
+                Text("The configured AC may be offline or its writable profile could not be verified. Controls remain unavailable.")
+                Button(
+                    onClick = { scope.launch { thinQBindings.onDeviceOpened() } },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("Retry live device read") }
+                Button(onClick = onOpenSettings) { Text("Review ThinQ credential") }
+            }
+
+            else -> {
+                DeviceLiveStateCard(
+                    controller = thinQBindings.liveStateController,
+                    device = device,
+                    profile = profile,
+                    simulated = false,
+                    onRefresh = thinQBindings.refreshLiveState,
+                    readOnOpen = false,
+                )
+                DeviceControlsCard(
+                    profile = profile,
+                    liveStateController = thinQBindings.liveStateController,
+                    commandController = thinQBindings.commandController,
+                    simulated = false,
+                    onCommandOutcome = thinQBindings.liveStateController::acceptCommandOutcome,
+                )
+            }
         }
 
         Button(
@@ -717,6 +808,8 @@ private fun ProductionSettingsRoute(
     nowEpochMillis: Long,
     onManualRefresh: (() -> Unit)?,
     afterSettingsAction: suspend () -> Unit,
+    thinQBindings: ProductionThinQBindings?,
+    credentialState: ThinQCredentialState,
 ) {
     Column(
         modifier = Modifier
@@ -730,7 +823,7 @@ private fun ProductionSettingsRoute(
             Text("Account, history access, sync, and local cache for this device.", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "Cached state is shown without automatic network work. History refresh is an explicit " +
-                    "action; ThinQ control setup is deferred in this build.",
+                    "action; ThinQ uses a separate protected PAT and live device reads.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -741,6 +834,14 @@ private fun ProductionSettingsRoute(
             history = history,
             afterSettingsAction = afterSettingsAction,
         )
+
+        thinQBindings?.let { bindings ->
+            ProductionThinQCredentialCard(
+                bindings = bindings,
+                credentialState = credentialState,
+                signedIn = session != null,
+            )
+        }
 
         OwnerAccessStatusCard(ownerAccessState = accessState)
 
@@ -756,9 +857,9 @@ private fun ProductionSettingsRoute(
             LocalDiagnosticsCard(
                 partition = partition,
                 history = history,
-                credentialState = ThinQCredentialState(present = false, clientId = ""),
-                credentialIsVisible = false,
-                thinQStatusLabel = "ThinQ control setup is deferred in this build; no PAT is stored or requested.",
+                credentialState = credentialState,
+                credentialIsVisible = session != null,
+                thinQStatusLabel = credentialState.productionCredentialStatus(),
                 nowEpochMillis = nowEpochMillis,
             )
         } else {
@@ -766,6 +867,142 @@ private fun ProductionSettingsRoute(
                 Text("Signed out: no local cache to inspect for another account.")
             }
         }
+    }
+}
+
+@Composable
+private fun ProductionThinQCredentialCard(
+    bindings: ProductionThinQBindings,
+    credentialState: ThinQCredentialState,
+    signedIn: Boolean,
+) {
+    val scope = rememberCoroutineScope()
+    var busy by remember(bindings) { mutableStateOf(false) }
+    var replacing by remember(bindings) { mutableStateOf(false) }
+    var confirmingRemoval by remember(bindings) { mutableStateOf(false) }
+    var rawToken by remember(bindings) { mutableStateOf("") }
+    var country by remember(bindings) { mutableStateOf("PH") }
+    var feedback by remember(bindings) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
+        if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
+    }
+
+    SummaryCard("Settings · ThinQ credential") {
+        if (!signedIn) {
+            Text("Sign in with Google before setting up the separate ThinQ credential.")
+        } else {
+            Text(credentialState.productionCredentialStatus())
+            Text("LG client ID: ${credentialState.clientId}")
+            Text(
+                "The PAT is verified against the configured AC before it is stored in Android Keystore. " +
+                    "A successful read does not prove command authority.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            feedback?.let {
+                Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
+
+            if (!replacing) {
+                Button(enabled = !busy, onClick = { replacing = true }) {
+                    Text(if (credentialState.present || credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
+                }
+            } else {
+                OutlinedTextField(
+                    value = rawToken,
+                    onValueChange = { rawToken = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("ThinQ Personal Access Token") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                OutlinedTextField(
+                    value = country,
+                    onValueChange = { country = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !busy,
+                    singleLine = true,
+                    label = { Text("ThinQ account country") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                )
+                Button(
+                    enabled = !busy,
+                    onClick = {
+                        val submittedToken = rawToken
+                        rawToken = ""
+                        scope.launch {
+                            busy = true
+                            feedback = try {
+                                when (val result = bindings.setupCredential(submittedToken, country)) {
+                                    is ThinQCredentialSetupResult.Success -> {
+                                        replacing = false
+                                        "The configured AC and profile were verified; the PAT was saved in protected storage. " +
+                                            "LG may still require a control-capable PAT for commands."
+                                    }
+                                    is ThinQCredentialSetupResult.Failure -> result.productionFailureMessage()
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(if (busy) "Verifying and saving…" else "Verify and save securely")
+                }
+                TextButton(
+                    enabled = !busy,
+                    onClick = { rawToken = ""; replacing = false },
+                ) { Text("Cancel") }
+            }
+
+            if (credentialState.present || credentialState.unlockFailed) {
+                TextButton(
+                    enabled = !busy,
+                    onClick = { confirmingRemoval = true },
+                ) { Text("Remove ThinQ PAT") }
+            }
+        }
+    }
+
+    if (confirmingRemoval) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmingRemoval = false },
+            title = { Text("Remove ThinQ PAT?", modifier = Modifier.semantics { heading() }) },
+            text = { Text("This removes the protected ThinQ credential. Your Google session and cached Airchive history stay intact.") },
+            confirmButton = {
+                Button(
+                    enabled = !busy,
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            try {
+                                bindings.removeCredential()
+                                rawToken = ""
+                                replacing = false
+                                feedback = "ThinQ PAT removed. Cached Airchive history was kept."
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                feedback = "The ThinQ PAT could not be removed. Your current session and cached history remain."
+                            } finally {
+                                busy = false
+                                confirmingRemoval = false
+                            }
+                        }
+                    },
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = { confirmingRemoval = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -842,7 +1079,7 @@ private fun ProductionAccountCard(
         ProductionAccountConfirmStep.NONE -> Unit
         ProductionAccountConfirmStep.SIGN_OUT -> ProductionConfirmationDialog(
             title = "Sign out of Google?",
-            message = "This clears this Google account's cached Airchive history on this device, then signs out. The action cannot be undone.",
+            message = "This clears this Google account's cached Airchive history and protected ThinQ PAT on this device, then signs out. The action cannot be undone.",
             busy = busy,
             onCancel = controller::dismissConfirmation,
             onConfirm = {
@@ -853,7 +1090,7 @@ private fun ProductionAccountCard(
         )
         ProductionAccountConfirmStep.CHANGE_ACCOUNT -> ProductionConfirmationDialog(
             title = "Switch Google account?",
-            message = "This first clears the current account's cached Airchive history, then opens Google sign-in for another account.",
+            message = "This first clears the current account's cached Airchive history and protected ThinQ PAT, then opens Google sign-in for another account.",
             busy = busy,
             onCancel = controller::dismissConfirmation,
             onConfirm = {
@@ -962,23 +1199,40 @@ internal fun productionSignInFailureReason(reason: SignInFailure): String = when
 
 private fun OwnerSettingsActionResult.productionOutcomeMessage(): String = when (this) {
     is OwnerSettingsActionResult.Success -> if (session == null) {
-        "Signed out. This account's local history cache was cleared."
+        "Signed out. This account's local history cache and ThinQ PAT were cleared."
     } else {
-        "Account switched. The previous account's local history cache was cleared."
+        "Account switched. The previous account's local history cache and ThinQ PAT were cleared."
     }
     OwnerSettingsActionResult.AccountChangeCancelled ->
-        "The previous account's local history cache was cleared; the new sign-in was cancelled."
+        "The previous account's local history cache and ThinQ PAT were cleared; the new sign-in was cancelled."
     is OwnerSettingsActionResult.AccountChangeSignInFailed ->
-        "The previous account's local history cache was cleared; Google sign-in failed " +
+        "The previous account's local history cache and ThinQ PAT were cleared; Google sign-in failed " +
             "(${productionSignInFailureReason(reason)})."
     is OwnerSettingsActionResult.Failure -> when (reason) {
         cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED ->
             "Could not clear this account's local history. Nothing was changed; retry cleanup."
         cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED ->
-            "The account cleanup did not finish. Nothing else changed; retry."
+            "The history cache was cleared, but the ThinQ PAT could not be removed. You remain signed in; retry cleanup."
         cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.SIGN_OUT_FAILED ->
-            "Local history was cleared, but sign-out did not finish. Retry or restart the app."
+            "Local history and the ThinQ PAT were cleared, but sign-out did not finish. Retry or restart the app."
     }
+}
+
+private fun ThinQCredentialState.productionCredentialStatus(): String = when {
+    unlockFailed -> "Saved ThinQ PAT could not be unlocked. Verify and save it again."
+    present -> "ThinQ PAT saved: ${credential?.maskedToken ?: "••••"} · country ${credential?.accountCountry ?: "unknown"}."
+    else -> "No ThinQ PAT is saved in the app's protected storage."
+}
+
+private fun ThinQCredentialSetupResult.Failure.productionFailureMessage(): String = when (this) {
+    is ThinQCredentialSetupResult.Failure.MalformedInput -> "Enter a token and a two-letter country code."
+    is ThinQCredentialSetupResult.Failure.InvalidToken -> "LG rejected this token; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.WrongAccount -> "The configured AC is not in this ThinQ account; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.DeviceUnavailable -> "The AC or its profile is unavailable; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.NetworkFailure -> "LG could not be reached. Retry online; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.RemoteFailure -> "LG verification failed. Retry later; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.StoreKeyUnavailable -> "Android Keystore is unavailable; the previous PAT was kept."
+    is ThinQCredentialSetupResult.Failure.StoreSaveFailure -> "The verified PAT could not be saved; the previous PAT was kept."
 }
 
 private fun Observation.productionIsUsableEnergySample(): Boolean {

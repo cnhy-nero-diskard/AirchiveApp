@@ -7,6 +7,8 @@ import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
 import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
+import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
+import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.ProductionAirchiveApp
 import cloud.airchive.shared.ProductionConfigBlockedScreen
 import cloud.airchive.shared.data.local.AirchiveDatabase
@@ -32,7 +34,8 @@ import kotlinx.coroutines.launch
  * [ProductionHistoryCoordinator] that owns the exact (project, owner UID,
  * configured device) partition and the foreground/manual sync policy. It never
  * instantiates [cloud.airchive.shared.fakes.FakeProviders]: the demo graph is
- * only used by tests/preview/iOS. When the nonsecret Firebase client options are
+ * used only by tests/previews. The iOS scaffold is explicit about its pending
+ * native adapters. When the nonsecret Firebase client options are
  * missing, the app renders an actionable configuration screen instead of any
  * fake/demo fallback.
  *
@@ -45,6 +48,8 @@ class MainActivity : ComponentActivity() {
 
     private var coordinator: ProductionHistoryCoordinator? = null
     private var accountController: ProductionAccountController? = null
+    private var thinQGraph: AndroidProductionThinQGraph? = null
+    private var thinQBindings: ProductionThinQBindings? = null
     private var controllerScope: CoroutineScope? = null
     private var activeRefreshJob: Job? = null
     private var ownerAuthConfigurationMessage: String? = null
@@ -73,6 +78,7 @@ class MainActivity : ComponentActivity() {
                     accountController = activeAccountController,
                     onManualRefresh = ::onManualRefresh,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    thinQBindings = thinQBindings,
                 )
             } else {
                 ProductionConfigBlockedScreen(
@@ -119,6 +125,9 @@ class MainActivity : ComponentActivity() {
         activeRefreshJob = null
         controllerScope?.cancel()
         controllerScope = null
+        thinQGraph?.close()
+        thinQGraph = null
+        thinQBindings = null
         super.onDestroy()
     }
 
@@ -138,6 +147,10 @@ class MainActivity : ComponentActivity() {
             firestore = FirebaseFirestore.getInstance(auth.app),
         )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val productionThinQGraph = AndroidProductionThinQGraph(
+            context = applicationContext,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+        )
         val productionCoordinator = ProductionHistoryCoordinator(
             identity = configuration.identity,
             telemetry = telemetry,
@@ -165,10 +178,13 @@ class MainActivity : ComponentActivity() {
             firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
             configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
             serializedAction = { action -> productionCoordinator.runExclusive(action) },
+            credentialStore = productionThinQGraph.credentialStore,
         )
 
         coordinator = productionCoordinator
         accountController = productionAccountController
+        thinQGraph = productionThinQGraph
+        thinQBindings = productionThinQGraph.bindings()
         controllerScope = scope
     }
 

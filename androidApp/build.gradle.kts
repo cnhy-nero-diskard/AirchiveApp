@@ -107,6 +107,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation(libs.ktor.client.cio)
     // Current official Google sign-in stack: AndroidX Credential Manager +
     // GetGoogleIdOption + GoogleIdTokenCredential (no legacy GoogleSignInClient).
     implementation(libs.androidx.credentials)

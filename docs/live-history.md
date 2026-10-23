@@ -107,6 +107,10 @@ and production history. No ThinQ token was entered and no AC command was sent.
   Its launcher shows an explicit setup-required screen, not demo device data.
   Project wiring was checked from source files; iOS compilation/signing/device
   verification were not tested on Windows.
+- Android's production ThinQ path now uses the Keystore-backed runtime credential
+  flow and profile-gated controls; `docs/thinq-control.md` documents its status.
+  The live-control task remains unaccepted until deliberate real-AC actions are
+  recorded. No PAT was read from local properties and no AC command was sent.
 
 ### Repeatable checks
 
@@ -140,7 +144,7 @@ not a release APK or acceptance of a release signing identity.
 
 The shared and Android build checks pass on this host:
 
-- `:shared:testAndroidHostTest`: **305 tests passed**, with no failures/errors.
+- `:shared:testAndroidHostTest`: **306 tests passed**, with no failures/errors.
 - `:androidApp:assembleDebug` and `:androidApp:assembleDebugAndroidTest`:
   passed; the latter builds the instrumentation APK but does not execute it.
 - `:androidApp:lintDebug`: passed with **0 errors and 4 warnings**. The two

@@ -3,6 +3,7 @@ package cloud.airchive.shared.data.onboarding
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
 import cloud.airchive.shared.contract.history.LocalHistoryPort
+import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInFailure
@@ -15,9 +16,9 @@ import kotlinx.coroutines.flow.first
 
 /**
  * Production account actions for Settings: confirmed sign-out, account change,
- * and cache clear. It deliberately has **no** ThinQ credential surface — all
- * ThinQ control setup is deferred in production, so no PAT is stored, read,
- * replaced, or cleared here.
+ * and cache clear. When the optional protected credential store is supplied,
+ * confirmed sign-out/account change clear the ThinQ PAT before identity changes;
+ * cache-only deletion intentionally preserves it.
  *
  * Order-of-operations mirrors [OwnerSettingsController] so every destructive
  * transition is safe against an active history refresh:
@@ -27,9 +28,10 @@ import kotlinx.coroutines.flow.first
  *    through the [cloud.airchive.shared.data.sync.ProductionHistoryCoordinator]
  *    operation lock) so a foreground/manual refresh can never re-populate a
  *    partition that is being removed.
- *  - Each confirmed action first clears the **current exact** (project, UID,
- *    device) partition; a clear failure aborts before any identity change so
- *    the prior session and rows stay intact and the owner can retry.
+ *  - Account transitions clear the **current exact** (project, UID, device)
+ *    partition and then the optional PAT before identity changes. A cache clear
+ *    failure leaves the PAT/session intact; a credential-clear failure aborts
+ *    before identity changes and returns a typed failure for retry.
  *  - After a confirmed account change, a dismissed or failed new sign-in ends
  *    the prior session and stays signed out and clear.
  *
@@ -39,6 +41,8 @@ import kotlinx.coroutines.flow.first
  *
  * @param serializedAction wrapper that locks destructive transitions against
  *   concurrent sync runs (default: no locking, used by tests and simple graphs).
+ * @param credentialStore optional protected ThinQ PAT store cleared on account
+ *   change/sign-out; cache-only deletion leaves it untouched.
  */
 class ProductionAccountController(
     private val identity: OwnerIdentityPort,
@@ -46,6 +50,7 @@ class ProductionAccountController(
     private val firebaseProjectId: String,
     private val configuredDeviceId: String,
     private val serializedAction: suspend (suspend () -> OwnerSettingsActionResult) -> OwnerSettingsActionResult = { action -> action() },
+    private val credentialStore: ThinQCredentialStore? = null,
 ) {
 
     private val _state = MutableStateFlow(ProductionAccountState(session = identity.currentSession))
@@ -91,15 +96,17 @@ class ProductionAccountController(
     // ------------------------------------------------------------ actions
 
     /**
-     * Confirmed sign-out. Clears the active UID's exact partition, then ends
-     * the Google session. A clear failure refuses the sign-out and keeps the
-     * session and rows intact.
+     * Confirmed sign-out. Clears the active UID's exact partition and optional
+     * ThinQ PAT, then ends the Google session. A Room-clear failure leaves all
+     * state intact; a PAT-clear failure prevents sign-out (the Room cache is
+     * already removed).
      */
     suspend fun signOutConfirmed(): OwnerSettingsActionResult = serializedAction {
         checkConfirmStep(ProductionAccountConfirmStep.SIGN_OUT)
         val session = identity.currentSession
-        val result: OwnerSettingsActionResult = if (clearPartitionSafely(partitionFor(session)) != null) {
-            OwnerSettingsActionResult.Failure(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED)
+        val cleanupFailure = clearOwnerDataSafely(partitionFor(session))
+        val result: OwnerSettingsActionResult = if (cleanupFailure != null) {
+            OwnerSettingsActionResult.Failure(cleanupFailure)
         } else {
             signOutSafely()
                 ?.let { OwnerSettingsActionResult.Failure(it) }
@@ -129,15 +136,16 @@ class ProductionAccountController(
     }
 
     /**
-     * Confirmed Google account change. Clears the prior UID's exact partition,
-     * then starts the new sign-in; a dismissed/failed dialog ends the prior
-     * session so the install stays signed out and clear.
+     * Confirmed Google account change. Clears the prior UID's exact partition
+     * and optional ThinQ PAT, then starts the new sign-in; a dismissed/failed
+     * dialog ends the prior session so the install stays signed out and clear.
      */
     suspend fun changeAccountConfirmed(): OwnerSettingsActionResult = serializedAction {
         checkConfirmStep(ProductionAccountConfirmStep.CHANGE_ACCOUNT)
         val priorSession = identity.currentSession
-        val result: OwnerSettingsActionResult = if (clearPartitionSafely(partitionFor(priorSession)) != null) {
-            OwnerSettingsActionResult.Failure(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED)
+        val cleanupFailure = clearOwnerDataSafely(partitionFor(priorSession))
+        val result: OwnerSettingsActionResult = if (cleanupFailure != null) {
+            OwnerSettingsActionResult.Failure(cleanupFailure)
         } else {
             when (val signIn = signInSafely()) {
                 is SignInResult.Success -> OwnerSettingsActionResult.Success(signIn.session)
@@ -200,6 +208,20 @@ class ProductionAccountController(
         } catch (_: Throwable) {
             OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED
         }
+
+    private suspend fun clearOwnerDataSafely(partition: HistoryPartition?): OwnerSettingsActionFailure? {
+        clearPartitionSafely(partition)?.let { return it }
+        return clearCredentialSafely()
+    }
+
+    private suspend fun clearCredentialSafely(): OwnerSettingsActionFailure? = try {
+        credentialStore?.clear()
+        null
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED
+    }
 
     private suspend fun signOutSafely(): OwnerSettingsActionFailure? = try {
         identity.signOut()

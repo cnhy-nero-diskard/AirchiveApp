@@ -2,11 +2,13 @@ package cloud.airchive.shared.data.onboarding
 
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.LocalHistoryPort
+import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInResult
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
+import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -38,7 +40,14 @@ class ProductionAccountControllerTest {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         assertIs<SignInResult.Success>(identity.signIn())
         val local = RecordingLocalHistory()
-        val controller = ProductionAccountController(identity, local, project, device)
+        val credentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+        )
 
         controller.requestSignOut()
         val result = controller.signOutConfirmed()
@@ -47,6 +56,7 @@ class ProductionAccountControllerTest {
         assertNull(result.session)
         assertNull(identity.currentSession)
         assertEquals(listOf(partitionFor(owner)), local.clearedPartitions)
+        assertNull(credentialStore.readToken())
     }
 
     @Test
@@ -77,7 +87,14 @@ class ProductionAccountControllerTest {
     fun clearCacheFailureAbortsSignOutAndKeepsSession(): Unit = runBlocking {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()
-        val controller = ProductionAccountController(identity, ThrowingLocalHistory(), project, device)
+        val credentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = ThrowingLocalHistory(),
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+        )
 
         controller.requestSignOut()
         val result = controller.signOutConfirmed()
@@ -85,6 +102,7 @@ class ProductionAccountControllerTest {
         assertIs<OwnerSettingsActionResult.Failure>(result)
         assertEquals(OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED, result.reason)
         assertNotNull(identity.currentSession)
+        assertEquals("fixture-token", credentialStore.readToken())
     }
 
     @Test
@@ -92,7 +110,14 @@ class ProductionAccountControllerTest {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()
         val local = RecordingLocalHistory()
-        val controller = ProductionAccountController(identity, local, project, device)
+        val credentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+        )
 
         controller.requestClearCache()
         val result = controller.clearCacheConfirmed()
@@ -101,6 +126,7 @@ class ProductionAccountControllerTest {
         assertEquals(owner, result.session)
         assertNotNull(identity.currentSession)
         assertEquals(listOf(partitionFor(owner)), local.clearedPartitions)
+        assertEquals("fixture-token", credentialStore.readToken())
     }
 
     @Test
@@ -108,13 +134,46 @@ class ProductionAccountControllerTest {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()
         val local = RecordingLocalHistory()
-        val controller = ProductionAccountController(identity, local, project, device)
+        val credentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+        )
 
         controller.requestChangeAccount()
         val result = controller.changeAccountConfirmed()
 
         assertIs<OwnerSettingsActionResult.Success>(result)
         assertEquals(owner, result.session)
+        assertEquals(listOf(partitionFor(owner)), local.clearedPartitions)
+        assertNull(credentialStore.readToken())
+    }
+
+    @Test
+    fun credentialClearFailureAbortsIdentityChangeWithTypedFailure() = runBlocking {
+        val identity = FakeOwnerIdentity(fixedSession = owner)
+        identity.signIn()
+        val local = RecordingLocalHistory()
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = ThrowingCredentialStore(),
+        )
+
+        controller.requestSignOut()
+        val result = controller.signOutConfirmed()
+
+        assertEquals(
+            OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED,
+            assertIs<OwnerSettingsActionResult.Failure>(result).reason,
+        )
+        assertNotNull(identity.currentSession)
+        // Cache deletion happened first; sign-out did not.
         assertEquals(listOf(partitionFor(owner)), local.clearedPartitions)
     }
 
@@ -162,6 +221,12 @@ class ProductionAccountControllerTest {
     private class ThrowingLocalHistory : LocalHistoryPort by FakeLocalHistory() {
         override suspend fun clear(partition: HistoryPartition) {
             error("simulated clear failure")
+        }
+    }
+
+    private class ThrowingCredentialStore : ThinQCredentialStore by FakeThinQCredentialStore() {
+        override suspend fun clear() {
+            error("fixture clear failure")
         }
     }
 
