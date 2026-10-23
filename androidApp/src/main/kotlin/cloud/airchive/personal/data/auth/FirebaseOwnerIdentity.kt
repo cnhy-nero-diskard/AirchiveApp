@@ -15,6 +15,7 @@ import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import java.io.IOException
+import java.util.WeakHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
 import kotlin.coroutines.cancellation.CancellationException
@@ -82,9 +83,17 @@ class FirebaseOwnerIdentity private constructor(
         require(authExchangeTimeoutMillis > 0L) { "Auth exchange timeout must be positive." }
     }
 
-    private val exchangeMutex = Mutex()
-    private val exchangeStateLock = Any()
-    private var activeExchange: AuthExchange? = null
+    // Activity recreation creates a new adapter around the same FirebaseAuth.
+    // Exchange state must outlive this instance so a stale Firebase Task cannot
+    // run concurrently with, or later evict, an exchange from the new adapter.
+    private val exchangeCoordinator = OwnerAuthExchangeRegistry.coordinatorFor(auth)
+    private val exchangeMutex: Mutex get() = exchangeCoordinator.exchangeMutex
+    private val exchangeStateLock: Any get() = exchangeCoordinator.exchangeStateLock
+    private var activeExchange: AuthExchange?
+        get() = exchangeCoordinator.activeExchange
+        set(value) {
+            exchangeCoordinator.activeExchange = value
+        }
 
     /** Firebase instance paired with this auth port (Firestore must use the same app). */
     val firebaseAuth: FirebaseAuth get() = auth
@@ -297,17 +306,43 @@ class FirebaseOwnerIdentity private constructor(
         }
     }
 
-    private class AuthExchange {
-        lateinit var task: Task<OwnerSession>
-        var abandoned: Boolean = false
-        var signOutInProgress: Boolean = false
-        var cleanupStarted: Boolean = false
-        var finalized: Boolean = false
-    }
-
     private companion object {
         const val DEFAULT_AUTH_EXCHANGE_TIMEOUT_MILLIS: Long = 30_000L
     }
+}
+
+/**
+ * Outstanding-exchange state shared by every [FirebaseOwnerIdentity] wrapping
+ * the same [FirebaseAuth]. Recreated adapters therefore observe the same gate,
+ * abandoned attempt, and late-completion cleanup as the adapter that started
+ * the exchange.
+ */
+private class OwnerAuthExchangeCoordinator {
+    val exchangeMutex = Mutex()
+    val exchangeStateLock = Any()
+    var activeExchange: AuthExchange? = null
+}
+
+private class AuthExchange {
+    lateinit var task: Task<OwnerSession>
+    var abandoned: Boolean = false
+    var signOutInProgress: Boolean = false
+    var cleanupStarted: Boolean = false
+    var finalized: Boolean = false
+}
+
+/**
+ * Binds coordinators to their [FirebaseAuth]. Weak keys let an auth instance
+ * (and its coordinator) disappear with the owning Firebase app instead of
+ * leaking process-wide state; there is deliberately no unkeyed global lock.
+ */
+private object OwnerAuthExchangeRegistry {
+    private val coordinators = WeakHashMap<FirebaseAuth, OwnerAuthExchangeCoordinator>()
+
+    fun coordinatorFor(auth: FirebaseAuth): OwnerAuthExchangeCoordinator =
+        synchronized(coordinators) {
+            coordinators.getOrPut(auth) { OwnerAuthExchangeCoordinator() }
+        }
 }
 
 /** Narrow auth seam for deterministic local-Task tests of late completion. */

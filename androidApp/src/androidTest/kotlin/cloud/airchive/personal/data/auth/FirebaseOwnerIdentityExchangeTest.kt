@@ -141,11 +141,107 @@ class FirebaseOwnerIdentityExchangeTest {
         assertEquals(retriedSession, identity.currentSession)
     }
 
+    @Test(timeout = 5_000L)
+    fun recreatedIdentitySharesAbandonedExchangeFenceUntilLateCompletionIsCleanedUp() = runBlocking {
+        val backend = ManualOwnerAuthBackend(auth)
+        val originalIdentity = newIdentity(backend, timeoutMillis = 50L)
+        val recreatedIdentity = newIdentity(backend, timeoutMillis = 2_000L)
+
+        val firstSignIn = async { originalIdentity.signIn() }
+        withTimeout(1_000L) { backend.exchangeStarted.await() }
+        val staleTask = withTimeout(1_000L) { backend.nextTask() }
+        assertEquals(
+            SignInResult.Failure(SignInFailure.NETWORK),
+            withTimeout(1_000L) { firstSignIn.await() },
+        )
+
+        // The recreated adapter must fail fast rather than start a second
+        // Firebase exchange while the abandoned task is still unresolved.
+        assertEquals(
+            SignInResult.Failure(SignInFailure.NETWORK),
+            withTimeout(1_000L) { recreatedIdentity.signIn() },
+        )
+        assertNull(
+            "a recreated adapter must not start an overlapping exchange",
+            backend.tryNextTask(),
+        )
+
+        backend.completeLate(staleTask, lateSession)
+
+        assertNull(
+            "the original late completion must not leave the owner signed in",
+            originalIdentity.currentSession,
+        )
+        assertNull(
+            "the original late completion must not surface in the recreated adapter",
+            recreatedIdentity.currentSession,
+        )
+
+        // The shared gate releases only after cleanup. The retry then succeeds
+        // and the original adapter's finalized attempt cannot evict it.
+        val retry = async { recreatedIdentity.signIn() }
+        val retryTask = withTimeout(1_000L) { backend.nextTask() }
+        backend.completeLate(retryTask, retriedSession)
+
+        assertEquals(SignInResult.Success(retriedSession), withTimeout(1_000L) { retry.await() })
+        assertEquals(retriedSession, recreatedIdentity.currentSession)
+        assertEquals(retriedSession, originalIdentity.currentSession)
+    }
+
+    @Test(timeout = 5_000L)
+    fun differentFirebaseAuthInstancesDoNotShareExchangeFence() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val otherApp = FirebaseApp.initializeApp(
+            context,
+            FirebaseOptions.Builder()
+                .setApplicationId("1:123456789012:android:authreviewtestother")
+                .setProjectId("demo-airchive-auth-review-other")
+                .setApiKey("fake-local-auth-review-other-api-key")
+                .build(),
+            OTHER_TEST_APP_NAME,
+        )
+
+        try {
+            val otherAuth = FirebaseAuth.getInstance(otherApp)
+            assertFalse("the second test app must have a distinct FirebaseAuth", auth === otherAuth)
+            val firstBackend = ManualOwnerAuthBackend(auth)
+            val secondBackend = ManualOwnerAuthBackend(otherAuth)
+            val firstIdentity = newIdentity(firstBackend, timeoutMillis = 2_000L)
+            val secondIdentity = newIdentity(
+                secondBackend,
+                timeoutMillis = 2_000L,
+                firebaseAuth = otherAuth,
+            )
+
+            val firstSignIn = async { firstIdentity.signIn() }
+            val secondSignIn = async { secondIdentity.signIn() }
+            withTimeout(1_000L) { firstBackend.exchangeStarted.await() }
+            withTimeout(1_000L) { secondBackend.exchangeStarted.await() }
+            val firstTask = withTimeout(1_000L) { firstBackend.nextTask() }
+            val secondTask = withTimeout(1_000L) { secondBackend.nextTask() }
+            assertFalse("both auth exchanges must be outstanding concurrently", firstSignIn.isCompleted)
+            assertFalse("both auth exchanges must be outstanding concurrently", secondSignIn.isCompleted)
+            assertNull(firstBackend.tryNextTask())
+            assertNull(secondBackend.tryNextTask())
+
+            firstBackend.completeLate(firstTask, priorSession)
+            secondBackend.completeLate(secondTask, retriedSession)
+
+            assertEquals(SignInResult.Success(priorSession), withTimeout(1_000L) { firstSignIn.await() })
+            assertEquals(SignInResult.Success(retriedSession), withTimeout(1_000L) { secondSignIn.await() })
+            assertEquals(priorSession, firstIdentity.currentSession)
+            assertEquals(retriedSession, secondIdentity.currentSession)
+        } finally {
+            otherApp.delete()
+        }
+    }
+
     private fun newIdentity(
         backend: ManualOwnerAuthBackend,
         timeoutMillis: Long,
+        firebaseAuth: FirebaseAuth = auth,
     ): FirebaseOwnerIdentity = FirebaseOwnerIdentity(
-        auth = auth,
+        auth = firebaseAuth,
         googleIdTokenSource = GoogleIdTokenSource {
             GoogleIdTokenResult.Success("local-test-google-id-token")
         },
@@ -185,6 +281,8 @@ class FirebaseOwnerIdentityExchangeTest {
 
         suspend fun nextTask(): TaskCompletionSource<OwnerSession> = pendingTasks.receive()
 
+        fun tryNextTask(): TaskCompletionSource<OwnerSession>? = pendingTasks.tryReceive().getOrNull()
+
         fun restoreSession(session: OwnerSession) {
             currentSession = session
             notifyAuthStateChanged()
@@ -219,6 +317,7 @@ class FirebaseOwnerIdentityExchangeTest {
 
     companion object {
         private const val TEST_APP_NAME = "demo-airchive-auth-exchange-review"
+        private const val OTHER_TEST_APP_NAME = "demo-airchive-auth-exchange-review-other"
         private val lateSession = OwnerSession(
             uid = "late-owner-session",
             displayName = "Late Test Owner",
