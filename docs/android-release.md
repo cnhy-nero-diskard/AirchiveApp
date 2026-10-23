@@ -186,5 +186,8 @@ request.
 Artifact-name and common private-key/token-pattern scans found no matches across
 333 tracked paths. No secret environment files were read. This limited pattern
 scan does not guarantee detection of every possible credential. Task 7.1 is
-complete; task 7.2 remains open for post-update navigation and all-four-control
-acceptance. No new AC command was issued during signing or upgrade verification.
+complete. The owner subsequently explicitly confirmed post-update navigation and
+all-four-control verification complete, closing task 7.2 on owner-reported final
+acceptance. Those manual checks are distinct from the assistant-observed signed
+build/update results. No new AC command was issued by the assistant during
+signing or upgrade verification.

@@ -172,3 +172,23 @@ collector/dashboard. No live AC command, release signing identity, target-phone
 release upgrade, new production authorization denial, or production-server
 no-regression check is claimed here. See the OpenSpec task list for the exact
 remaining owner/hardware gates.
+
+## Subsequent owner acceptance and release handoff
+
+The owner explicitly reported tasks 6.3 and 6.4 verified before release signing.
+Their completion is owner-reported acceptance, not another assistant-run live
+instrumentation session; no additional document counts, timing measurements,
+API responses, or production server logs were provided. The device, emulator,
+and host observations above retain their original attribution and limits.
+
+The assistant subsequently built and installed signed release 2 over release 1
+without uninstalling or clearing data. The owner confirmed sign-in, history
+visibility and saved PAT status survived, and then confirmed the remaining
+real-AC and release-navigation/control checks complete. See
+`docs/android-release.md` and `docs/thinq-control.md` for the evidence boundary.
+All 39 OpenSpec implementation tasks are now checked; final host shared tests,
+Android debug lint, signing-automation smoke checks, strict OpenSpec validation,
+and whitespace checks pass. Release build/signature/update verification passed
+through the protected signing automation; a separate unsigned `lintRelease`
+invocation hit the expected signing preflight and is not claimed as a pass.
+No new live AC command was issued by the assistant during this finalization.

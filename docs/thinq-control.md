@@ -38,7 +38,7 @@ credential store. Enter the token in the signed-in app's **Settings → ThinQ
 credential** flow; the app verifies it before saving in Android Keystore. Do
 not paste it into chat, logs, test fixtures, or the repository.
 
-## Acceptance still pending
+## Real-device acceptance
 
 The owner entered the PAT through the protected Settings flow; no value was
 read from local properties. On the physical phone, the app successfully read
@@ -63,7 +63,17 @@ to integer Celsius values.
 - Mode commands were skipped at the owner's direction. The app profile offers
   FAN/DRY and LOW/HIGH options.
 
-Task 4.6 remains incomplete: the app has not validated power/mode, and the
-temperature result did not match the requested value. Task 6.4 still needs
-offline-restart and Firestore-unavailable control evidence. Emulator/fixture
-results do not count as that evidence. The signed-release tasks remain separate.
+### Owner-confirmed final acceptance
+
+After the signed release 1 → 2 upgrade, the owner explicitly confirmed the
+remaining real-AC verification (whole-degree temperature, mode, power, and fan)
+and release navigation/control checks complete. Task 4.6 is closed on this
+owner-reported acceptance. Exact requested values and API responses from those
+final manual checks were not supplied, so the earlier direct observations above
+are retained rather than replaced with invented results. No additional control
+command was issued by the assistant.
+
+The owner separately reported task 6.4 verified before release signing, including
+its offline/Firestore-unavailable acceptance. That is owner-reported device
+evidence, not a new instrumentation run. Earlier emulator/fixture results remain
+separate and do not themselves establish physical-device behavior.
