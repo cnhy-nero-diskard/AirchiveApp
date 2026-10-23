@@ -18,6 +18,10 @@ value and the live-state/profile gate is current. Each command is an explicit
 UI action; the Ktor adapter validates against a fresh profile and confirms with
 a bounded live read. Ambiguous outcomes are not resent automatically. ThinQ
 uses its local protected credential independently from Firestore history sync.
+If a device-list response omits its `online` field, that status stays unknown;
+setup still requires the exact configured profile, and control enablement still
+requires a successful live-state read. An explicit offline report continues to
+block setup.
 
 ## PAT handling
 

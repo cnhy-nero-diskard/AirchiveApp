@@ -216,9 +216,9 @@ class KtorThinQClientTest {
         assertEquals(listOf("ac-device-1", "wash-9"), devices.map { it.deviceId })
         assertEquals("Room AC", devices.first().alias)
         assertEquals("PC18SQ.NSD", devices.first().modelName)
-        assertTrue(devices.first().online)
+        assertEquals(true, devices.first().online)
         assertEquals("DEVICE_AIR_CONDITIONER", devices.first().deviceType)
-        assertFalse(devices.last().online, "missing online state is never treated as online")
+        assertNull(devices.last().online, "missing online state remains unknown")
         assertEquals("DEVICE_WASHER", devices.last().deviceType)
     }
 
@@ -696,6 +696,23 @@ class KtorThinQClientTest {
         """.trimIndent()
         val thinq = client(mutableListOf(), stored()) { jsonOk(offlineList) }
         assertEquals(ThinQVerificationResult.DeviceUnavailable, thinq.verify(verificationRequest()))
+    }
+
+    @Test
+    fun verifyMissingOnlineFlagStillRequiresAndReadsConfiguredProfile() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val unknownOnlineList = """
+            {"response":[{"deviceId":"ac-device-1","deviceInfo":{"deviceType":"DEVICE_AIR_CONDITIONER","alias":"Room AC"}}]}
+        """.trimIndent()
+        val thinq = client(requests, stored()) {
+            if (requests.size == 1) jsonOk(unknownOnlineList) else jsonOk(profileJson)
+        }
+
+        val result = assertIs<ThinQVerificationResult.Verified>(thinq.verify(verificationRequest()))
+
+        assertEquals("ac-device-1", result.device.deviceId)
+        assertEquals("ac-device-1", result.profile.deviceId)
+        assertEquals(2, requests.size, "the configured profile must still be read before saving")
     }
 
     @Test

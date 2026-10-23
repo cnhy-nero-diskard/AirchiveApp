@@ -58,7 +58,7 @@ internal object ThinQPayloads {
                 deviceId = deviceId,
                 alias = info?.string("alias") ?: "",
                 modelName = info?.string("modelName"),
-                online = info?.boolean("online") ?: false,
+                online = info?.booleanIfPresent("online"),
                 deviceType = info?.string("deviceType") ?: obj.string("deviceType"),
             )
         }
@@ -290,6 +290,12 @@ internal object ThinQPayloads {
 
     private fun JsonObject.boolean(key: String): Boolean =
         (this[key] as? JsonPrimitive)?.boolean ?: false
+
+    private fun JsonObject.booleanIfPresent(key: String): Boolean? {
+        val primitive = this[key] as? JsonPrimitive ?: return null
+        if (primitive.isString) return null
+        return primitive.content.toBooleanStrictOrNull()
+    }
 
     private fun number(obj: JsonObject, key: String): Double? {
         val value = obj[key] as? JsonPrimitive ?: return null

@@ -577,7 +577,13 @@ private fun DemoHome(
             Text(summary.device.alias, style = MaterialTheme.typography.titleMedium)
             summary.device.modelName?.let { Text("Model: $it") }
             Text("Device ID: ${summary.device.deviceId}")
-            Text(if (summary.device.online) "Reported online by the collector." else "Reported offline by the collector.")
+            Text(
+                when (summary.device.online) {
+                    true -> "Reported online by the collector."
+                    false -> "Reported offline by the collector."
+                    null -> "The collector did not report online status."
+                },
+            )
             Text(
                 "Profile supports: ${summary.profile.controls.supportedControlNames()}.",
                 style = MaterialTheme.typography.bodyMedium,

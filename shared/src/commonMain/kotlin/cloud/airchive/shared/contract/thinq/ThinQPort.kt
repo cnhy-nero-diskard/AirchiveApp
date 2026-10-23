@@ -43,7 +43,8 @@ data class ThinQDevice(
     val deviceId: String,
     val alias: String,
     val modelName: String? = null,
-    val online: Boolean = true,
+    /** Nullable because some valid device-list responses omit online status. */
+    val online: Boolean? = null,
     /** Raw LG product type, when returned; credential verification checks this. */
     val deviceType: String? = null,
 )

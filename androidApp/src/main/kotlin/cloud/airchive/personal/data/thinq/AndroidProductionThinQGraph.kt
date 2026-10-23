@@ -99,7 +99,7 @@ class AndroidProductionThinQGraph(
                             clearCachedDeviceProfileLocked()
                             return
                         }
-                    if (!configuredDevice.online) {
+                    if (configuredDevice.online == false) {
                         mutableDevice.value = configuredDevice
                         mutableProfile.value = null
                         return

@@ -257,7 +257,7 @@ class KtorThinQClient(
             // appliance under the configured air-conditioner account.
             return ThinQVerificationResult.WrongAccount
         }
-        if (!device.online) return ThinQVerificationResult.DeviceUnavailable
+        if (device.online == false) return ThinQVerificationResult.DeviceUnavailable
 
         // 2) GET the profile of exactly that device.
         val profile = try {
