@@ -114,6 +114,8 @@ fun EnergyRoute(
     local: LocalHistoryPort,
     partition: HistoryPartition,
     timeZoneId: String = DEFAULT_DAY_TIME_ZONE,
+    remoteLoadEnabled: Boolean = true,
+    loadRange: (suspend (Long, Long) -> HistoricalRangeResult)? = null,
 ) {
     // A malformed/unknown zone id must never crash the route; fall back to the
     // documented default day boundary.
@@ -161,8 +163,9 @@ fun EnergyRoute(
                 return@launch
             }
             loadState = try {
-                val result = HistoricalRangeLoader(telemetry, local, partition)
-                    .loadHistoricalRange(requestedPeriod.startEpochMillis, end)
+                val result = loadRange?.invoke(requestedPeriod.startEpochMillis, end)
+                    ?: HistoricalRangeLoader(telemetry, local, partition)
+                        .loadHistoricalRange(requestedPeriod.startEpochMillis, end)
                 EnergyLoadUiState.Loaded(result)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -199,7 +202,10 @@ fun EnergyRoute(
             state = loadState,
             loading = loadState is EnergyLoadUiState.Loading,
             onLoad = ::launchLoad,
+            remoteLoadEnabled = remoteLoadEnabled,
         )
+
+        if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.")
 
         EnergySummaryCard(presentation = presentation)
 
@@ -321,6 +327,7 @@ private fun EnergyLoadCard(
     state: EnergyLoadUiState,
     loading: Boolean,
     onLoad: () -> Unit,
+    remoteLoadEnabled: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -334,7 +341,7 @@ private fun EnergyLoadCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
-                enabled = !loading,
+                enabled = !loading && remoteLoadEnabled,
                 onClick = onLoad,
                 modifier = Modifier
                     .fillMaxWidth()

@@ -7,125 +7,95 @@ import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
 import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
-import cloud.airchive.shared.AirchiveApp
-import cloud.airchive.shared.contract.history.HistoryPartition
-import cloud.airchive.shared.contract.owner.OwnerAccessCoordinator
-import cloud.airchive.shared.data.onboarding.FirstRunOnboardingController
-import cloud.airchive.shared.data.onboarding.OwnerSettingsController
-import cloud.airchive.shared.data.sync.ForegroundRefreshController
-import cloud.airchive.shared.data.sync.IncrementalSyncCoordinator
-import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
-import cloud.airchive.shared.fakes.FakeOwnerIdentity
-import cloud.airchive.shared.fakes.FakeProviders
-import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
+import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
+import cloud.airchive.shared.ProductionThinQBindings
+import cloud.airchive.shared.ProductionAirchiveApp
+import cloud.airchive.shared.ProductionConfigBlockedScreen
+import cloud.airchive.shared.data.local.AirchiveDatabase
+import cloud.airchive.shared.data.local.RoomLocalHistoryPort
+import cloud.airchive.shared.data.local.openAirchiveDatabase
+import cloud.airchive.shared.data.onboarding.ProductionAccountController
+import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.MutableStateFlow
 
+/**
+ * Android entry point for the production history flow.
+ *
+ * [onCreate] builds the real graph — Firebase owner identity, the read-only
+ * Firebase telemetry adapter, the durable Room history projection, and the
+ * [ProductionHistoryCoordinator] that owns the exact (project, owner UID,
+ * configured device) partition and the foreground/manual sync policy. It never
+ * instantiates [cloud.airchive.shared.fakes.FakeProviders]: the demo graph is
+ * used only by tests/previews. The iOS scaffold is explicit about its pending
+ * native adapters. When the nonsecret Firebase client options are
+ * missing, the app renders an actionable configuration screen instead of any
+ * fake/demo fallback.
+ *
+ * [onResume] runs the ten-minute-gated foreground refresh; the shared UI's
+ * manual-refresh callback bypasses the gate. A change of the signed-in owner
+ * cancels any in-flight refresh so a stale async run for a previous session can
+ * never surface for the new one (the coordinator additionally drops its result).
+ */
 class MainActivity : ComponentActivity() {
 
-    private lateinit var demoProviders: FakeProviders
-    private lateinit var foregroundRefresh: ForegroundRefreshController
-    private val historySyncInProgress = MutableStateFlow(false)
-    private var activeHistoryRefreshes: Int = 0
-    private var ownerAccessController: OwnerAccessCoordinator? = null
-    private lateinit var firstRunOnboardingController: FirstRunOnboardingController
-    private lateinit var ownerSettingsController: OwnerSettingsController
+    private var coordinator: ProductionHistoryCoordinator? = null
+    private var accountController: ProductionAccountController? = null
+    private var thinQGraph: AndroidProductionThinQGraph? = null
+    private var thinQBindings: ProductionThinQBindings? = null
+    private var controllerScope: CoroutineScope? = null
+    private var activeRefreshJob: Job? = null
     private var ownerAuthConfigurationMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val openedAt = System.currentTimeMillis()
-        demoProviders = FakeProviders(nowEpochMillis = openedAt)
-        val partition = HistoryPartition(
-            firebaseProjectId = "demo-firebase-project",
-            ownerUid = FakeOwnerIdentity.DEFAULT_SESSION.uid,
-            deviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
-        )
-        val incrementalSync = IncrementalSyncCoordinator(
-            telemetry = demoProviders.telemetry,
-            local = demoProviders.localHistory,
-            partition = partition,
-        )
-        foregroundRefresh = ForegroundRefreshController(
-            local = demoProviders.localHistory,
-            partition = partition,
-            refresh = incrementalSync::syncIncremental,
-        )
-
         val configuration = try {
             FirebaseOwnerIdentityFactory.fromBuildConfig(this)
         } catch (_: Exception) {
             OwnerAuthConfiguration.MissingOptions(setOf("Firebase client initialization"))
         }
-        var onboardingAccess = OwnerAccessCoordinator(demoProviders.ownerIdentity, demoProviders.telemetry)
-        var onboardingTelemetry = demoProviders.telemetry
-        var onboardingProjectId = "demo-firebase-project"
-        var onboardingDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID
-        var settingsIdentity = demoProviders.ownerIdentity
         when (configuration) {
-            is OwnerAuthConfiguration.Ready -> {
-                val auth = configuration.identity.firebaseAuth
-                val telemetry = FirebaseAirchiveTelemetry.fromBuildConfig(
-                    auth = auth,
-                    firestore = FirebaseFirestore.getInstance(auth.app),
-                )
-                ownerAccessController = OwnerAccessCoordinator(configuration.identity, telemetry)
-                settingsIdentity = configuration.identity
-                onboardingAccess = requireNotNull(ownerAccessController)
-                onboardingTelemetry = telemetry
-                onboardingProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID
-                onboardingDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID
-            }
+            is OwnerAuthConfiguration.Ready -> buildProductionGraph(configuration)
 
             is OwnerAuthConfiguration.MissingOptions -> {
                 ownerAuthConfigurationMessage = configuration.actionableMessage
             }
         }
-        firstRunOnboardingController = FirstRunOnboardingController(
-            ownerAccess = onboardingAccess,
-            credentialStore = demoProviders.thinQCredentialStore,
-            credentialVerifier = FakeThinQCredentialVerifier(onboardingDeviceId),
-            telemetry = onboardingTelemetry,
-            local = demoProviders.localHistory,
-            firebaseProjectId = onboardingProjectId,
-            configuredDeviceId = onboardingDeviceId,
-            // The current graph still uses the in-memory fake credential store;
-            // task 3.3 replaces it with Android Keystore before real PAT entry.
-            demoOnly = true,
-        )
-        ownerSettingsController = OwnerSettingsController(
-            identity = settingsIdentity,
-            credentialStore = demoProviders.thinQCredentialStore,
-            credentialVerifier = FakeThinQCredentialVerifier(onboardingDeviceId),
-            local = demoProviders.localHistory,
-            firebaseProjectId = onboardingProjectId,
-            configuredDeviceId = onboardingDeviceId,
-        )
 
         setContent {
-            AirchiveApp(
-                providers = demoProviders,
-                ownerAccessController = ownerAccessController,
-                onboardingController = firstRunOnboardingController,
-                ownerSettingsController = ownerSettingsController,
-                ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                onManualRefresh = ::onManualRefresh,
-                historySyncInProgress = historySyncInProgress,
-            )
+            val activeCoordinator = coordinator
+            val activeAccountController = accountController
+            if (activeCoordinator != null && activeAccountController != null) {
+                ProductionAirchiveApp(
+                    coordinator = activeCoordinator,
+                    accountController = activeAccountController,
+                    onManualRefresh = ::onManualRefresh,
+                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    thinQBindings = thinQBindings,
+                )
+            } else {
+                ProductionConfigBlockedScreen(
+                    ownerAuthConfigurationMessage ?: "Firebase owner sign-in is not configured.",
+                )
+            }
         }
     }
 
     /** Android foreground entry point: first open and every later resume share the ten-minute gate. */
     override fun onResume() {
         super.onResume()
-        if (!::foregroundRefresh.isInitialized) return
-        lifecycleScope.launch {
+        val activeCoordinator = coordinator ?: return
+        activeRefreshJob?.cancel()
+        activeRefreshJob = lifecycleScope.launch {
             try {
-                withHistoryRefreshProgress {
-                    foregroundRefresh.onForeground(System.currentTimeMillis())
-                }
+                activeCoordinator.refreshAfterAccessCheck(System.currentTimeMillis())
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -137,12 +107,11 @@ class MainActivity : ComponentActivity() {
 
     /** Explicit refresh action for the shared UI to invoke; it bypasses the age gate. */
     fun onManualRefresh() {
-        if (!::foregroundRefresh.isInitialized) return
-        lifecycleScope.launch {
+        val activeCoordinator = coordinator ?: return
+        activeRefreshJob?.cancel()
+        activeRefreshJob = lifecycleScope.launch {
             try {
-                withHistoryRefreshProgress {
-                    foregroundRefresh.onManualRefresh(System.currentTimeMillis())
-                }
+                activeCoordinator.refreshAfterAccessCheck(System.currentTimeMillis(), manual = true)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -151,15 +120,75 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Publishes a balanced foreground/manual refresh count to the shared UI. */
-    private suspend fun <T> withHistoryRefreshProgress(action: suspend () -> T): T {
-        activeHistoryRefreshes += 1
-        historySyncInProgress.value = true
-        try {
-            return action()
-        } finally {
-            activeHistoryRefreshes = (activeHistoryRefreshes - 1).coerceAtLeast(0)
-            historySyncInProgress.value = activeHistoryRefreshes > 0
+    override fun onDestroy() {
+        activeRefreshJob?.cancel()
+        activeRefreshJob = null
+        controllerScope?.cancel()
+        controllerScope = null
+        thinQGraph?.close()
+        thinQGraph = null
+        thinQBindings = null
+        super.onDestroy()
+    }
+
+    private fun buildProductionGraph(configuration: OwnerAuthConfiguration.Ready) {
+        // Reuse one database per process rather than opening a new connection
+        // pool on every Activity recreation. No Activity/Context is retained.
+        val database = synchronized(MainActivity::class.java) {
+            historyDatabase ?: openAirchiveDatabase(
+                name = getDatabasePath(AirchiveDatabase.DATABASE_NAME).absolutePath,
+                migrations = AirchiveDatabase.MIGRATIONS.asList(),
+            ).also { historyDatabase = it }
         }
+        val local = RoomLocalHistoryPort(database)
+        val auth = configuration.identity.firebaseAuth
+        val telemetry = FirebaseAirchiveTelemetry.fromBuildConfig(
+            auth = auth,
+            firestore = FirebaseFirestore.getInstance(auth.app),
+        )
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val productionThinQGraph = AndroidProductionThinQGraph(
+            context = applicationContext,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+        )
+        val productionCoordinator = ProductionHistoryCoordinator(
+            identity = configuration.identity,
+            telemetry = telemetry,
+            local = local,
+            firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+            scope = scope,
+        )
+
+        // Cancel any in-flight refresh the moment the owner session changes
+        // (sign-out, account switch, or Firebase session restore settle).
+        lifecycleScope.launch {
+            productionCoordinator.session.collect {
+                activeRefreshJob?.cancel()
+                activeRefreshJob = null
+            }
+        }
+
+        // The account controller's destructive transitions run under the same
+        // lock as refresh runs, so a clear/sign-out never races an in-flight
+        // refresh that could re-populate the partition being removed.
+        val productionAccountController = ProductionAccountController(
+            identity = configuration.identity,
+            local = local,
+            firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+            serializedAction = { action -> productionCoordinator.runExclusive(action) },
+            credentialStore = productionThinQGraph.credentialStore,
+        )
+
+        coordinator = productionCoordinator
+        accountController = productionAccountController
+        thinQGraph = productionThinQGraph
+        thinQBindings = productionThinQGraph.bindings()
+        controllerScope = scope
+    }
+
+    private companion object {
+        var historyDatabase: AirchiveDatabase? = null
     }
 }

@@ -42,13 +42,18 @@ fun DeviceLiveStateCard(
     device: ThinQDevice,
     profile: ThinQDeviceProfile,
     simulated: Boolean,
+    onDeviceOpened: (suspend () -> Unit)? = null,
+    onRefresh: (suspend () -> Unit)? = null,
+    readOnOpen: Boolean = true,
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
     val reading = state is ThinQLiveRefreshState.Loading
 
-    LaunchedEffect(controller) {
-        controller.onDeviceOpened()
+    LaunchedEffect(controller, onDeviceOpened, readOnOpen) {
+        if (readOnOpen) {
+            if (onDeviceOpened != null) onDeviceOpened() else controller.onDeviceOpened()
+        }
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -95,7 +100,11 @@ fun DeviceLiveStateCard(
 
             Button(
                 enabled = !reading,
-                onClick = { scope.launch { controller.refresh() } },
+                onClick = {
+                    scope.launch {
+                        if (onRefresh != null) onRefresh() else controller.refresh()
+                    }
+                },
             ) {
                 Text(
                     when {

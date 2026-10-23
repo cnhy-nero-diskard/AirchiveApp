@@ -57,13 +57,20 @@ class KtorThinQClientTest {
     private fun client(
         requests: MutableList<HttpRequestData>,
         store: FakeThinQCredentialStore = FakeThinQCredentialStore(stableClientId),
+        temperatureStepOverride: Double? = null,
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ): KtorThinQClient {
         val engine = MockEngine { request ->
             requests += request
             handler(request)
         }
-        return KtorThinQClient(engine, store, deviceId) { fixedNow }
+        return KtorThinQClient(
+            engine = engine,
+            credentialStore = store,
+            configuredDeviceId = deviceId,
+            nowEpochMillis = { fixedNow },
+            temperatureStepOverride = temperatureStepOverride,
+        )
     }
 
     private fun MockRequestHandleScope.jsonOk(body: String): HttpResponseData =
@@ -142,6 +149,15 @@ class KtorThinQClientTest {
         }}
     """.trimIndent()
 
+    private val currentRestStateJson = """
+        {"response":{
+          "operation":{"airConOperationMode":"POWER_ON"},
+          "airConJobMode":{"currentJobMode":"COOL"},
+          "temperature":{"currentTemperature":24,"targetTemperature":24,"unit":"C"},
+          "airFlow":{"windStrength":"MID"}
+        }}
+    """.trimIndent()
+
     private val profileFOnlyJson = """
         {"response":{"property":{
           "operation":{
@@ -169,6 +185,18 @@ class KtorThinQClientTest {
           },
           "airConJobMode":{"currentJobMode":{"type":"enum","readable":true,"writable":false,"read_values":["COOL"]}},
           "airFlow":{"windStrength":{"type":"enum","readable":true,"writable":false,"read_values":["MID"]}}
+        }}}
+    """.trimIndent()
+
+    private val currentRestProfileJson = """
+        {"response":{"modelName":"PC18SQ.NSD","property":{
+          "operation":{"airConOperationMode":{"type":"enum","mode":["r","w"],"value":{"r":["POWER_ON","POWER_OFF"],"w":["POWER_ON","POWER_OFF"]}}},
+          "airConJobMode":{"currentJobMode":{"type":"enum","mode":["r","w"],"value":{"r":["COOL","AIR_DRY","AUTO"],"w":["COOL","AIR_DRY","AUTO"]}}},
+          "temperature":{
+            "unit":{"type":"enum","mode":["r"],"value":{"r":["C","F"]}},
+            "targetTemperature":{"type":"range","mode":["r","w"],"value":{"r":{"min":18,"max":30,"step":0.5},"w":{"min":18,"max":30,"step":0.5}}}
+          },
+          "airFlow":{"windStrength":{"type":"enum","mode":["r","w"],"value":{"r":["LOW","MID","HIGH"],"w":["LOW","MID","HIGH"]}}}
         }}}
     """.trimIndent()
 
@@ -216,9 +244,9 @@ class KtorThinQClientTest {
         assertEquals(listOf("ac-device-1", "wash-9"), devices.map { it.deviceId })
         assertEquals("Room AC", devices.first().alias)
         assertEquals("PC18SQ.NSD", devices.first().modelName)
-        assertTrue(devices.first().online)
+        assertEquals(true, devices.first().online)
         assertEquals("DEVICE_AIR_CONDITIONER", devices.first().deviceType)
-        assertFalse(devices.last().online, "missing online state is never treated as online")
+        assertNull(devices.last().online, "missing online state remains unknown")
         assertEquals("DEVICE_WASHER", devices.last().deviceType)
     }
 
@@ -446,6 +474,69 @@ class KtorThinQClientTest {
         val outcome = thinq.setState(AcCommand.SetTargetTemperature(REQUESTED_AT, value = 25.0, unit = TemperatureUnit.CELSIUS))
         assertEquals(CommandStatus.CONFIRMED, outcome.status)
         assertEquals(77.0, outcome.observedState?.targetTemperature)
+    }
+
+    @Test
+    fun currentRestProfileSchemaParsesModeValueCapabilities() = runBlocking {
+        val thinq = client(mutableListOf(), stored()) { jsonOk(currentRestProfileJson) }
+
+        val profile = thinq.profile(deviceId)
+
+        assertTrue(profile.controls.powerWritable)
+        assertEquals(listOf(AcOperatingMode.COOL, AcOperatingMode.DRY, AcOperatingMode.AUTO), profile.controls.allowedModes)
+        assertEquals(listOf(FanSpeed.LOW, FanSpeed.MEDIUM, FanSpeed.HIGH), profile.controls.allowedFanSpeeds)
+        assertEquals(TemperatureUnit.CELSIUS, profile.controls.temperatureUnit)
+        assertEquals(18.0, profile.controls.targetTemperature?.min)
+        assertEquals(30.0, profile.controls.targetTemperature?.max)
+        assertEquals(0.5, profile.controls.targetTemperature?.step)
+    }
+
+    @Test
+    fun deviceTemperatureStepOverrideRemovesObservedUnsupportedHalfSteps() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val thinq = client(requests, stored(), temperatureStepOverride = 1.0) {
+            jsonOk(currentRestProfileJson)
+        }
+
+        val profile = thinq.profile(deviceId)
+        val temperature = requireNotNull(profile.controls.targetTemperature)
+        assertEquals(1.0, temperature.step)
+        assertTrue(temperature.allows(25.0))
+        assertFalse(temperature.allows(25.5))
+
+        val outcome = thinq.setState(
+            AcCommand.SetTargetTemperature(REQUESTED_AT, value = 25.5, unit = TemperatureUnit.CELSIUS),
+        )
+        assertEquals(CommandStatus.FAILED, outcome.status)
+        assertEquals(CommandFailure.INVALID_REQUEST, outcome.failure)
+        assertEquals(2, requests.size, "the profile is re-read, but the unsupported half-step is never POSTed")
+        assertEquals(0, requests.count { it.method == HttpMethod.Post })
+    }
+
+    @Test
+    fun currentRestTemperatureProfileWritesTemperatureResourceAndConfirmsRead() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val thinq = client(requests, stored()) {
+            when (requests.size) {
+                1 -> jsonOk(currentRestProfileJson)
+                2 -> {
+                    val body = requestBody(requests.last())
+                    assertTrue(body.contains("\"temperature\""), "REST profile resource key: $body")
+                    assertTrue(body.contains("\"targetTemperature\":24.0"), "temperature body: $body")
+                    assertTrue(body.contains("\"unit\":\"C\""), "temperature unit: $body")
+                    jsonOk("""{"message":"accepted"}""")
+                }
+                else -> jsonOk(currentRestStateJson)
+            }
+        }
+
+        val outcome = thinq.setState(
+            AcCommand.SetTargetTemperature(REQUESTED_AT, value = 24.0, unit = TemperatureUnit.CELSIUS),
+        )
+
+        assertEquals(CommandStatus.CONFIRMED, outcome.status)
+        assertEquals(3, requests.size)
+        assertEquals(1, requests.count { it.method == HttpMethod.Post })
     }
 
     // ---------------------------------------------- locally rejected controls
@@ -696,6 +787,23 @@ class KtorThinQClientTest {
         """.trimIndent()
         val thinq = client(mutableListOf(), stored()) { jsonOk(offlineList) }
         assertEquals(ThinQVerificationResult.DeviceUnavailable, thinq.verify(verificationRequest()))
+    }
+
+    @Test
+    fun verifyMissingOnlineFlagStillRequiresAndReadsConfiguredProfile() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val unknownOnlineList = """
+            {"response":[{"deviceId":"ac-device-1","deviceInfo":{"deviceType":"DEVICE_AIR_CONDITIONER","alias":"Room AC"}}]}
+        """.trimIndent()
+        val thinq = client(requests, stored()) {
+            if (requests.size == 1) jsonOk(unknownOnlineList) else jsonOk(profileJson)
+        }
+
+        val result = assertIs<ThinQVerificationResult.Verified>(thinq.verify(verificationRequest()))
+
+        assertEquals("ac-device-1", result.device.deviceId)
+        assertEquals("ac-device-1", result.profile.deviceId)
+        assertEquals(2, requests.size, "the configured profile must still be read before saving")
     }
 
     @Test

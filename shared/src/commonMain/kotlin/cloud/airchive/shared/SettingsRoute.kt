@@ -154,7 +154,7 @@ private fun SettingsHeaderCard() {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
+internal fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -195,7 +195,7 @@ private fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun SyncStatusCard(
+internal fun SyncStatusCard(
     presentation: HistorySyncPresentation,
     sync: SyncMetadata?,
     nowEpochMillis: Long,
@@ -273,12 +273,13 @@ private fun String.syncErrorLabel(): String = when (this) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun LocalDiagnosticsCard(
+internal fun LocalDiagnosticsCard(
     partition: HistoryPartition,
     history: HistorySnapshot,
     credentialState: ThinQCredentialState,
     credentialIsVisible: Boolean,
     nowEpochMillis: Long,
+    thinQStatusLabel: String? = null,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -299,11 +300,15 @@ private fun LocalDiagnosticsCard(
             )
 
             Text("ThinQ credential", style = MaterialTheme.typography.labelLarge)
-            Text(
-                if (credentialIsVisible) credentialState.safeCredentialPresenceLabel()
-                else "ThinQ credential status is hidden while signed out.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            if (thinQStatusLabel != null) {
+                Text(thinQStatusLabel, style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(
+                    if (credentialIsVisible) credentialState.safeCredentialPresenceLabel()
+                    else "ThinQ credential status is hidden while signed out.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
 
             Text("Collector health", style = MaterialTheme.typography.labelLarge)
             val health = history.collectorHealth

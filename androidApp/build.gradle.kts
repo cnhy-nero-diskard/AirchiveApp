@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -31,6 +32,61 @@ fun buildConfigStringLiteral(value: String): String = "\"" +
         .replace("\r", "\\r") +
     "\""
 
+// Release signing values are consumed by Gradle only; none are written to
+// BuildConfig, resources, or the APK. Keep the keystore outside the repository.
+val releaseSigningEnvironment = mapOf(
+    "AIRCHIVE_RELEASE_STORE_FILE" to providers.environmentVariable("AIRCHIVE_RELEASE_STORE_FILE").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_STORE_PASSWORD" to providers.environmentVariable("AIRCHIVE_RELEASE_STORE_PASSWORD").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_KEY_ALIAS" to providers.environmentVariable("AIRCHIVE_RELEASE_KEY_ALIAS").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_KEY_PASSWORD" to providers.environmentVariable("AIRCHIVE_RELEASE_KEY_PASSWORD").orNull.orEmpty(),
+)
+val hasPrivateReleaseSigning = releaseSigningEnvironment.values.all(String::isNotBlank)
+// Android Studio's Generate Signed APK wizard supplies these AGP properties.
+// Only presence and the non-secret file path are passed to our preflight task;
+// AGP itself consumes and validates the signing credentials.
+val studioSigningKeys = listOf(
+    "android.injected.signing.store.file",
+    "android.injected.signing.store.password",
+    "android.injected.signing.key.alias",
+    "android.injected.signing.key.password",
+)
+val hasStudioReleaseSigning = studioSigningKeys.all {
+    !providers.gradleProperty(it).orNull.isNullOrBlank()
+}
+val signingStorePath = if (hasStudioReleaseSigning) {
+    providers.gradleProperty("android.injected.signing.store.file").get()
+} else {
+    releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_FILE")
+}
+val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull?.let { raw ->
+    val parsed = requireNotNull(raw.toIntOrNull()) { "airchive.versionCode must be a positive integer." }
+    require(parsed > 0) { "airchive.versionCode must be a positive integer." }
+    parsed
+} ?: 2
+
+val verifyPrivateReleaseSigning = tasks.register("verifyPrivateReleaseSigning") {
+    group = "verification"
+    description = "Checks that private release signing is configured without printing credential values."
+    inputs.property("signingConfigured", hasStudioReleaseSigning || hasPrivateReleaseSigning)
+    inputs.property("signingStorePath", if (signingStorePath.isBlank()) "" else rootProject.file(signingStorePath).absolutePath)
+    doLast {
+        check(inputs.properties["signingConfigured"] == true) {
+            "Release signing is not configured. Use Android Studio's Generate Signed APK wizard, or set AIRCHIVE_RELEASE_STORE_FILE, " +
+                "AIRCHIVE_RELEASE_STORE_PASSWORD, AIRCHIVE_RELEASE_KEY_ALIAS, and " +
+                "AIRCHIVE_RELEASE_KEY_PASSWORD in the build environment."
+        }
+        check(File(inputs.properties.getValue("signingStorePath") as String).isFile) {
+            "The configured release keystore file does not exist."
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name in setOf("preReleaseBuild", "validateSigningRelease", "packageRelease", "assembleRelease", "bundleRelease", "installRelease")) {
+        dependsOn(verifyPrivateReleaseSigning)
+    }
+}
+
 android {
     namespace = "cloud.airchive.personal"
     compileSdk = 36
@@ -44,11 +100,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (hasPrivateReleaseSigning) {
+            create("privateRelease") {
+                storeFile = rootProject.file(releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_FILE"))
+                storePassword = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "cloud.airchive.personal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = releaseVersionCode
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -70,6 +137,11 @@ android {
         )
         buildConfigField("String", "AIRCHIVE_DEVICE_ID", "\"${airchiveConfigValue("device.id")}\"")
         buildConfigField("String", "AIRCHIVE_DAY_TIME_ZONE", "\"${airchiveConfigValue("day.timeZone")}\"")
+        buildConfigField(
+            "String",
+            "AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE",
+            buildConfigStringLiteral(airchiveConfigValueOrBlank("thinq.temperatureStepOverride")),
+        )
         buildConfigField("int", "AIRCHIVE_FIRESTORE_MAX_PAGE_SIZE", airchiveConfigValue("firestore.maxPageSize"))
         buildConfigField(
             "String",
@@ -92,6 +164,15 @@ android {
             airchiveConfigValue("firestore.ownerEnrollmentRequired"),
         )
     }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasPrivateReleaseSigning) {
+                signingConfig = signingConfigs.getByName("privateRelease")
+            }
+        }
+    }
 }
 
 kotlin {
@@ -102,10 +183,12 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(libs.room.runtime)
     implementation(libs.activity.compose)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation(libs.ktor.client.cio)
     // Current official Google sign-in stack: AndroidX Credential Manager +
     // GetGoogleIdOption + GoogleIdTokenCredential (no legacy GoogleSignInClient).
     implementation(libs.androidx.credentials)

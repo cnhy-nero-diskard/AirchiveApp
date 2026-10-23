@@ -169,6 +169,20 @@ private data class DemoSummary(
 private enum class DemoRoute { HOME, DEVICE, ENERGY, HISTORY, SETTINGS }
 
 /**
+ * Destination set shared by the demo route shell and the production history
+ * graph so the vector destination glyphs are drawn in exactly one place.
+ */
+internal enum class ShellDestination { HOME, DEVICE, ENERGY, HISTORY, SETTINGS }
+
+private fun DemoRoute.toShellDestination(): ShellDestination = when (this) {
+    DemoRoute.HOME -> ShellDestination.HOME
+    DemoRoute.DEVICE -> ShellDestination.DEVICE
+    DemoRoute.ENERGY -> ShellDestination.ENERGY
+    DemoRoute.HISTORY -> ShellDestination.HISTORY
+    DemoRoute.SETTINGS -> ShellDestination.SETTINGS
+}
+
+/**
  * Main route shell for Home, Device, Energy, History, and Settings. Holds each
  * controller once so the same [ThinQLiveStateController] instance travels
  * Home<->Device and a later failed live read can still show its stale last
@@ -347,35 +361,35 @@ private fun DemoBottomNavigation(
         NavigationBarItem(
             selected = current == DemoRoute.HOME,
             onClick = { onSelect(DemoRoute.HOME) },
-            icon = { DestinationGlyph(DemoRoute.HOME, selected = current == DemoRoute.HOME) },
+            icon = { DestinationGlyph(DemoRoute.HOME.toShellDestination(), selected = current == DemoRoute.HOME) },
             label = { Text("Home") },
             alwaysShowLabel = true,
         )
         NavigationBarItem(
             selected = current == DemoRoute.DEVICE,
             onClick = { onSelect(DemoRoute.DEVICE) },
-            icon = { DestinationGlyph(DemoRoute.DEVICE, selected = current == DemoRoute.DEVICE) },
+            icon = { DestinationGlyph(DemoRoute.DEVICE.toShellDestination(), selected = current == DemoRoute.DEVICE) },
             label = { Text("Device") },
             alwaysShowLabel = true,
         )
         NavigationBarItem(
             selected = current == DemoRoute.ENERGY,
             onClick = { onSelect(DemoRoute.ENERGY) },
-            icon = { DestinationGlyph(DemoRoute.ENERGY, selected = current == DemoRoute.ENERGY) },
+            icon = { DestinationGlyph(DemoRoute.ENERGY.toShellDestination(), selected = current == DemoRoute.ENERGY) },
             label = { Text("Energy") },
             alwaysShowLabel = true,
         )
         NavigationBarItem(
             selected = current == DemoRoute.HISTORY,
             onClick = { onSelect(DemoRoute.HISTORY) },
-            icon = { DestinationGlyph(DemoRoute.HISTORY, selected = current == DemoRoute.HISTORY) },
+            icon = { DestinationGlyph(DemoRoute.HISTORY.toShellDestination(), selected = current == DemoRoute.HISTORY) },
             label = { Text("History") },
             alwaysShowLabel = true,
         )
         NavigationBarItem(
             selected = current == DemoRoute.SETTINGS,
             onClick = { onSelect(DemoRoute.SETTINGS) },
-            icon = { DestinationGlyph(DemoRoute.SETTINGS, selected = current == DemoRoute.SETTINGS) },
+            icon = { DestinationGlyph(DemoRoute.SETTINGS.toShellDestination(), selected = current == DemoRoute.SETTINGS) },
             label = { Text("Settings") },
             alwaysShowLabel = true,
         )
@@ -384,8 +398,8 @@ private fun DemoBottomNavigation(
 
 /** Small vector-only destination glyphs; their adjacent visible labels name the controls. */
 @Composable
-private fun DestinationGlyph(
-    destination: DemoRoute,
+internal fun DestinationGlyph(
+    destination: ShellDestination,
     selected: Boolean,
 ) {
     val color = if (selected) {
@@ -397,7 +411,7 @@ private fun DestinationGlyph(
         val scale = size.minDimension / 24f
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         when (destination) {
-            DemoRoute.HOME -> {
+            ShellDestination.HOME -> {
                 val roof = Path().apply {
                     moveTo(3f * scale, 11f * scale)
                     lineTo(12f * scale, 3f * scale)
@@ -417,7 +431,7 @@ private fun DestinationGlyph(
                 drawPath(body, color, style = stroke)
             }
 
-            DemoRoute.DEVICE -> {
+            ShellDestination.DEVICE -> {
                 drawRoundRect(
                     color = color,
                     topLeft = androidx.compose.ui.geometry.Offset(3f * scale, 5f * scale),
@@ -441,7 +455,7 @@ private fun DestinationGlyph(
                 )
             }
 
-            DemoRoute.ENERGY -> {
+            ShellDestination.ENERGY -> {
                 drawLine(
                     color = color,
                     start = androidx.compose.ui.geometry.Offset(3f * scale, 21f * scale),
@@ -459,7 +473,7 @@ private fun DestinationGlyph(
                 }
             }
 
-            DemoRoute.HISTORY -> {
+            ShellDestination.HISTORY -> {
                 drawRoundRect(
                     color = color,
                     topLeft = androidx.compose.ui.geometry.Offset(5f * scale, 3f * scale),
@@ -478,7 +492,7 @@ private fun DestinationGlyph(
                 }
             }
 
-            DemoRoute.SETTINGS -> {
+            ShellDestination.SETTINGS -> {
                 val center = androidx.compose.ui.geometry.Offset(12f * scale, 12f * scale)
                 drawCircle(
                     color = color,
@@ -563,7 +577,13 @@ private fun DemoHome(
             Text(summary.device.alias, style = MaterialTheme.typography.titleMedium)
             summary.device.modelName?.let { Text("Model: $it") }
             Text("Device ID: ${summary.device.deviceId}")
-            Text(if (summary.device.online) "Reported online by the collector." else "Reported offline by the collector.")
+            Text(
+                when (summary.device.online) {
+                    true -> "Reported online by the collector."
+                    false -> "Reported offline by the collector."
+                    null -> "The collector did not report online status."
+                },
+            )
             Text(
                 "Profile supports: ${summary.profile.controls.supportedControlNames()}.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -977,7 +997,7 @@ private fun String.onboardingErrorMessage(): String = when (this) {
 }
 
 @Composable
-private fun SummaryCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun SummaryCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),

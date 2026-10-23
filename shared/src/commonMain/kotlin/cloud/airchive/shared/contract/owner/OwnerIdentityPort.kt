@@ -5,12 +5,12 @@ import kotlinx.coroutines.flow.Flow
 /**
  * Identity boundary for the single owner's Google sign-in session.
  *
- * Platform `actual` adapters back this with Firebase Auth (Android) and the
- * equivalent platform auth flow (iOS). The in-memory [FakeOwnerIdentity] keeps a
- * deterministic, fixed session so the complete app flow runs without a live
- * account or network. Clearing owner-bound local data after sign-out is
- * orchestrated by the caller (see [LocalHistoryPort] and the credential store),
- * not by this port.
+ * The Android adapter backs this with Firebase Auth. The iOS target is expected
+ * to provide an equivalent native Firebase Auth adapter before production use.
+ * The in-memory [FakeOwnerIdentity] keeps a deterministic, fixed session so the
+ * complete test flow runs without a live account or network. Clearing
+ * owner-bound local data after sign-out is orchestrated by the caller (see
+ * [LocalHistoryPort] and the credential store), not by this port.
  */
 interface OwnerIdentityPort {
 

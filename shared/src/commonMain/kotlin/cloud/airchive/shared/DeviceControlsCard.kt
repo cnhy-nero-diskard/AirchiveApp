@@ -485,7 +485,7 @@ private fun ThinQLiveRefreshState.gateExplanation(): String = when (this) {
         }
     is ThinQLiveRefreshState.Current ->
         if (canIssueCommands) {
-            "Live state is current and the verified profile allows commands — controls below are enabled."
+            "Live state is current and the device profile was verified. Only properties marked writable are enabled below."
         } else {
             "A verified device profile is not available, so commands stay disabled for safety. " +
                 "Verify the ThinQ credential/profile and refresh the state read."

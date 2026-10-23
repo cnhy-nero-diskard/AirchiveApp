@@ -91,6 +91,7 @@ class KtorThinQClient(
     engine: HttpClientEngine,
     private val credentialStore: ThinQCredentialStore,
     private val configuredDeviceId: String,
+    private val temperatureStepOverride: Double? = null,
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) : ThinQPort, ThinQCredentialVerifier {
 
@@ -106,6 +107,9 @@ class KtorThinQClient(
         require(ThinQPayloads.isSinglePathSegment(configuredDeviceId)) {
             "Configured ThinQ device ID must be one safe URL path segment."
         }
+        require(temperatureStepOverride == null || temperatureStepOverride.isFinite() && temperatureStepOverride > 0.0) {
+            "Configured ThinQ temperature-step override must be finite and positive."
+        }
     }
 
     // ------------------------------------------------------------ public API
@@ -120,7 +124,7 @@ class KtorThinQClient(
         requireConfiguredDevice(deviceId)
         val ctx = currentCredentialContext()
         val payload = requestRead(ctx, "devices/$deviceId/profile")
-        return ThinQPayloads.acProfile(deviceId, payload).toContractProfile()
+        return ThinQPayloads.acProfile(deviceId, payload, temperatureStepOverride).toContractProfile()
     }
 
     override suspend fun liveState(deviceId: String): ThinQLiveState {
@@ -257,7 +261,7 @@ class KtorThinQClient(
             // appliance under the configured air-conditioner account.
             return ThinQVerificationResult.WrongAccount
         }
-        if (!device.online) return ThinQVerificationResult.DeviceUnavailable
+        if (device.online == false) return ThinQVerificationResult.DeviceUnavailable
 
         // 2) GET the profile of exactly that device.
         val profile = try {
@@ -265,7 +269,7 @@ class KtorThinQClient(
                 ctx = CredentialContext(request.rawToken, country, request.clientId),
                 path = "devices/${device.deviceId}/profile",
             )
-            ThinQPayloads.acProfile(device.deviceId, payload).toContractProfile()
+            ThinQPayloads.acProfile(device.deviceId, payload, temperatureStepOverride).toContractProfile()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: ThinQClientException) {
@@ -315,7 +319,7 @@ class KtorThinQClient(
 
     private suspend fun fetchProfile(ctx: CredentialContext, deviceId: String): ParsedAcProfile {
         val payload = requestRead(ctx, "devices/$deviceId/profile")
-        return ThinQPayloads.acProfile(deviceId, payload)
+        return ThinQPayloads.acProfile(deviceId, payload, temperatureStepOverride)
     }
 
     private suspend fun request(
@@ -411,7 +415,7 @@ class KtorThinQClient(
         val requestedUnit = command.unit
         val direct = profile.temperatureByUnit[requestedUnit]
         if (direct != null && direct.allows(command.value)) {
-            return temperatureJson(command.value, requestedUnit)
+            return temperatureJson(profile, command.value, requestedUnit)
         }
         // Fallback: a profile that supports exactly one other unit accepts a
         // converted value and reports it in that unit. The body always reports
@@ -421,13 +425,13 @@ class KtorThinQClient(
         if (profile.temperatureByUnit.size == 1) {
             val (onlyUnit, onlyCap) = profile.temperatureByUnit.entries.first()
             val converted = convertTemperature(command.value, requestedUnit, onlyUnit)
-            if (onlyCap.allows(converted)) return temperatureJson(converted, onlyUnit)
+            if (onlyCap.allows(converted)) return temperatureJson(profile, converted, onlyUnit)
         }
         return null
     }
 
-    private fun temperatureJson(value: Double, unit: TemperatureUnit): String = jsonBody {
-        putJsonObject("temperatureInUnits") {
+    private fun temperatureJson(profile: ParsedAcProfile, value: Double, unit: TemperatureUnit): String = jsonBody {
+        putJsonObject(profile.temperatureResourceKey) {
             put("targetTemperature", value)
             put("unit", unit.symbol())
         }
