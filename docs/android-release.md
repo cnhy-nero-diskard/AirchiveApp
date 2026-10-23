@@ -2,6 +2,42 @@
 
 ## Signing setup status
 
+### Unattended Windows builds (preferred)
+
+Run `scripts/release/Setup-AirchiveSigning.ps1` once in a local Windows
+PowerShell window. Its masked dialog accepts the existing keystore passwords,
+validates them without exporting the private key, and stores SecureStrings in
+`%USERPROFILE%\.airchive\signing-credentials.clixml`. Windows DPAPI binds these
+credentials to this Windows account on this PC; the file ACL grants only this
+user and SYSTEM access. Do not copy it into Git or share it. Keep the original
+keystore/password backup separately; this encrypted file is not a portable backup.
+
+After setup, the assistant can run this unattended:
+
+```powershell
+powershell.exe -NoProfile -File scripts/release/Invoke-AirchiveRelease.ps1 `
+  -VersionCode 2 -Install -DeviceSerial 9XDQCM6HLB5DO7YH
+```
+
+Omit `-Install` to build only. Increment `-VersionCode` for each update. The
+script decrypts credentials only for the build, uses a single-use Gradle daemon
+with configuration caching disabled, restores process environment variables,
+verifies the pinned release certificate/package/version, and checks the installed
+certificate and older version before `adb install -r`. It **never uninstalls,
+clears data, publishes, or sends AC commands**. A disconnected phone or rejected
+installation stops the process; it does not trigger a destructive fallback.
+
+To set up and immediately perform the authorized build/update in the same local
+process, setup accepts `-BuildAfterSetup -Install -DeviceSerial ... -VersionCode 2`.
+Passwords never need to be sent in chat, command arguments, or shell history.
+DPAPI protects the file at rest, not from programs already running as your Windows
+account. Build tools necessarily receive plaintext process-environment passwords
+while signing. Do not use transcripts, Gradle build scans or debug logging for
+credential-bearing builds. No cloud credential storage or CI upload is configured.
+
+Noninteractive checks using dummy credentials only:
+`powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1`.
+
 Android Studio's **Build → Generate Signed Bundle / APK → APK** wizard is
 also supported. Select the existing keystore and alias, enter the passwords
 locally, and choose **release**. There is no need to create another key or set
@@ -19,7 +55,7 @@ environment variables** (not BuildConfig, resources, or the APK):
 
 The `verifyPrivateReleaseSigning` preflight fails closed when any value is
 missing or the keystore path does not exist. Debug builds do not require signing
-variables. No release key has been configured or registered in this workflow yet.
+variables. See the acceptance evidence at the end for the installed release key.
 
 ## 7.1 — Create and register the private release key
 
@@ -106,7 +142,7 @@ Remove-Item Env:AIRCHIVE_RELEASE_STORE_PASSWORD, Env:AIRCHIVE_RELEASE_KEY_PASSWO
 
 ## 7.2 — Test a same-key release upgrade
 
-The phone currently has a debug-signed app. Android will reject a release APK
+The original phone installation was a debug-signed app. Android rejects a release APK
 signed by a different key as an in-place update. Uninstalling the debug app
 deletes its local Room history and Android Keystore PAT; history can be synced
 again, but the PAT must be entered again. **Do not uninstall until you are
