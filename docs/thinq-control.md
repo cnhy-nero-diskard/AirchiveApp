@@ -58,8 +58,8 @@ to integer Celsius values.
   owner-selected integer setpoint.
 - Requested fan HIGH. The app reported **confirmed**, and the fresh observed
   state showed fan HIGH.
-- The owner reports that power off/on were manually verified in the official
-  ThinQ app. No power command was sent from Airchive during this session.
+- The owner reports that power off/on were manually verified. The interface and
+  API outcome were not specified; no power command was sent from Airchive here.
 - Mode commands were skipped at the owner's direction. The app profile offers
   FAN/DRY and LOW/HIGH options.
 
