@@ -45,8 +45,20 @@ read from local properties. On the physical phone, the app successfully read
 the configured device profile and current live state after the REST-profile
 parser was updated. The profile exposes writable power, temperature
 (16–30 °C in 0.5 °C steps), FAN/DRY mode, and LOW/HIGH fan choices. No AC
-command has been sent. Task 4.6 still requires deliberate manual control
-actions and recording requested values, API outcomes, and observed state. Task
-6.4 still needs offline-restart and Firestore-unavailable control evidence.
-Emulator/fixture results do not count as that evidence. The signed-release
-tasks remain separate.
+command was sent during the initial read-only check; the later partial control
+checks are recorded below.
+
+### Partial real-device control check
+
+- Requested 25.5 °C. The app reported the outcome as **unconfirmed**; it did not
+  resend. A separate fresh read returned 25.0 °C. Per the owner's instruction,
+  the setpoint was left at 25.0 °C; no restoration command was sent.
+- Requested fan HIGH. The app reported **confirmed**, and the fresh observed
+  state showed fan HIGH.
+- Power and mode commands were skipped at the owner's direction. The profile
+  showed a power-off action, FAN/DRY modes, and LOW/HIGH fan options.
+
+Task 4.6 remains incomplete: power and mode were not validated, and the
+temperature result did not match the requested value. Task 6.4 still needs
+offline-restart and Firestore-unavailable control evidence. Emulator/fixture
+results do not count as that evidence. The signed-release tasks remain separate.
