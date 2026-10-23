@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -31,6 +32,49 @@ fun buildConfigStringLiteral(value: String): String = "\"" +
         .replace("\r", "\\r") +
     "\""
 
+// Release signing values are consumed by Gradle only; none are written to
+// BuildConfig, resources, or the APK. Keep the keystore outside the repository.
+val releaseSigningEnvironment = mapOf(
+    "AIRCHIVE_RELEASE_STORE_FILE" to providers.environmentVariable("AIRCHIVE_RELEASE_STORE_FILE").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_STORE_PASSWORD" to providers.environmentVariable("AIRCHIVE_RELEASE_STORE_PASSWORD").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_KEY_ALIAS" to providers.environmentVariable("AIRCHIVE_RELEASE_KEY_ALIAS").orNull.orEmpty(),
+    "AIRCHIVE_RELEASE_KEY_PASSWORD" to providers.environmentVariable("AIRCHIVE_RELEASE_KEY_PASSWORD").orNull.orEmpty(),
+)
+val hasPrivateReleaseSigning = releaseSigningEnvironment.values.all(String::isNotBlank)
+val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull?.let { raw ->
+    val parsed = requireNotNull(raw.toIntOrNull()) { "airchive.versionCode must be a positive integer." }
+    require(parsed > 0) { "airchive.versionCode must be a positive integer." }
+    parsed
+} ?: 1
+
+val verifyPrivateReleaseSigning = tasks.register("verifyPrivateReleaseSigning") {
+    group = "verification"
+    description = "Checks that private release signing is configured without printing credential values."
+    doLast {
+        val requiredEnvironment = listOf(
+            "AIRCHIVE_RELEASE_STORE_FILE",
+            "AIRCHIVE_RELEASE_STORE_PASSWORD",
+            "AIRCHIVE_RELEASE_KEY_ALIAS",
+            "AIRCHIVE_RELEASE_KEY_PASSWORD",
+        )
+        val missingEnvironment = requiredEnvironment.filter { System.getenv(it).isNullOrBlank() }
+        check(missingEnvironment.isEmpty()) {
+            "Release signing is not configured. Set AIRCHIVE_RELEASE_STORE_FILE, " +
+                "AIRCHIVE_RELEASE_STORE_PASSWORD, AIRCHIVE_RELEASE_KEY_ALIAS, and " +
+                "AIRCHIVE_RELEASE_KEY_PASSWORD in the build environment."
+        }
+        check(File(System.getenv("AIRCHIVE_RELEASE_STORE_FILE")).isFile) {
+            "The configured release keystore file does not exist."
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name in setOf("preReleaseBuild", "validateSigningRelease", "packageRelease", "assembleRelease", "bundleRelease", "installRelease")) {
+        dependsOn(verifyPrivateReleaseSigning)
+    }
+}
+
 android {
     namespace = "cloud.airchive.personal"
     compileSdk = 36
@@ -44,11 +88,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (hasPrivateReleaseSigning) {
+            create("privateRelease") {
+                storeFile = rootProject.file(releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_FILE"))
+                storePassword = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "cloud.airchive.personal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = releaseVersionCode
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -96,6 +151,15 @@ android {
             "AIRCHIVE_OWNER_ENROLLMENT_REQUIRED",
             airchiveConfigValue("firestore.ownerEnrollmentRequired"),
         )
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasPrivateReleaseSigning) {
+                signingConfig = signingConfigs.getByName("privateRelease")
+            }
+        }
     }
 }
 
