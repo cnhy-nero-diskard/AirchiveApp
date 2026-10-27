@@ -176,59 +176,31 @@ fun EnergyRoute(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Energy", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Five-minute sampled AC energy by local calendar day. Day boundaries use the " +
-                "$zoneId zone; nothing is fetched automatically.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-
-        EnergyPeriodSelector(selected = periodType, onSelect = { periodType = it })
-
-        EnergyPeriodNavigation(
-            period = period,
-            onNavigate = { anchorDate = it },
-        )
-
-        EnergyLoadCard(
-            state = loadState,
-            loading = loadState is EnergyLoadUiState.Loading,
-            onLoad = ::launchLoad,
-            remoteLoadEnabled = remoteLoadEnabled,
-        )
-
-        if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.")
-
-        EnergySummaryCard(presentation = presentation)
-
-        EnergyChartSection(presentation = presentation)
-
-        EnergyDailySections(
-            presentation = presentation,
-            showDayDetail = periodType == EnergyPeriodType.DAY,
-        )
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("Units and conversions", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Interval values keep each source's recorded unit. Wh conversions are shown only for " +
-                        "recognized units (Wh verbatim, kWh × 1000). An unknown or absent unit is labeled " +
-                        "\"unit not recorded/unknown\" and is never guessed. Energy per time is always shown as " +
-                        "interval-average power, never instantaneous wattage.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+    InstrumentPage("Energy", "Recorded energy · $zoneId") {
+        InstrumentPanel {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                EnergyPeriodSelector(selected = periodType, onSelect = { periodType = it })
+                EnergyPeriodNavigation(period = period, onNavigate = { anchorDate = it })
+            }
+            EnergySummaryCard(presentation)
+            EnergyChartSection(presentation)
+            InstrumentDisclosure("Coverage and measurement details", "Measured intervals, cache coverage and units", informational = true) {
+                EnergyCoverageDetails(presentation)
+            }
+        }
+        InstrumentPanel {
+            EnergyLoadCard(loadState, loadState is EnergyLoadUiState.Loading, ::launchLoad, remoteLoadEnabled)
+            if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.",
+                modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+        InstrumentPanel {
+            InstrumentDisclosure(if (periodType == EnergyPeriodType.DAY) "Daily record" else "Daily records",
+                "Sampled sums and separately recorded daily totals", informational = true) {
+                EnergyDailySections(presentation, showDayDetail = periodType == EnergyPeriodType.DAY)
+            }
+            InstrumentDisclosure("Units and conversions", informational = true) {
+                Text("Interval values retain their recorded units. Recognized Wh and kWh values are normalized to Wh; unknown units are never guessed. Energy divided by time is interval-average power, never instantaneous wattage.",
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp))
             }
         }
     }
@@ -263,6 +235,7 @@ private fun EnergyPeriodSelector(
     ) {
         EnergyPeriodType.entries.forEach { type ->
             FilterChip(
+                modifier = Modifier.heightIn(min = 48.dp),
                 selected = type == selected,
                 onClick = { onSelect(type) },
                 label = { Text(type.label()) },
@@ -279,21 +252,23 @@ private fun EnergyPeriodNavigation(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(periodRangeTitle(period), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
+            androidx.compose.material3.OutlinedButton(
+                shape = MaterialTheme.shapes.small,
                 onClick = { onNavigate(navigateAnchor(period.periodType, period.selectedDate, -1)) },
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
             ) {
-                Text("Previous ${period.periodType.unitLabel()}")
+                Text("Previous", modifier = Modifier.semantics { contentDescription = "Previous ${period.periodType.unitLabel()}" })
             }
-            Button(
+            androidx.compose.material3.OutlinedButton(
+                shape = MaterialTheme.shapes.small,
                 onClick = { onNavigate(navigateAnchor(period.periodType, period.selectedDate, +1)) },
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
             ) {
-                Text("Next ${period.periodType.unitLabel()}")
+                Text("Next", modifier = Modifier.semantics { contentDescription = "Next ${period.periodType.unitLabel()}" })
             }
         }
     }
@@ -329,25 +304,26 @@ private fun EnergyLoadCard(
     onLoad: () -> Unit,
     remoteLoadEnabled: Boolean,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Fetch sampled intervals", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            Text("Download this period", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
-                "Select a period and press the button to load and cache its five-minute intervals. " +
-                    "Revisiting an already-fetched period reads the local cache with zero remote reads.",
+                if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "Save this period for offline viewing."
+                else "Download five-minute intervals into your local history. Already cached ranges are reused.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
+                shape = MaterialTheme.shapes.small,
                 enabled = !loading && remoteLoadEnabled,
                 onClick = onLoad,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp),
             ) {
-                Text(if (loading) "Loading sampled intervals…" else "Load sampled intervals for this period")
+                Text(if (loading) "Loading sampled intervals…" else "Load sampled intervals")
             }
             loadStateDialogText(state)?.let { text ->
                 Text(
@@ -384,7 +360,27 @@ private fun loadStateDialogText(state: EnergyLoadUiState): String? = when (state
 
 @Composable
 private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Sampled energy", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(presentation.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—", style = InstrumentReading)
+        Text("kWh · five-minute interval sum", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val usable = presentation.days.sumOf { it.usableSlotCount }
+        val expected = presentation.days.sumOf { it.expectedSlotCount }
+        val complete = expected > 0 && usable == expected && presentation.queryCoverage.fullyQueried
+        androidx.compose.material3.Surface(
+            color = if (complete) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = if (complete) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onTertiaryContainer,
+            shape = MaterialTheme.shapes.small, modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text(when { expected == 0 -> "No elapsed intervals"; usable == 0 -> "No usable samples"; complete -> "Recorded coverage complete"; else -> "Incomplete coverage · $usable of $expected intervals" },
+                style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+        }
+    }
+}
+
+@Composable
+private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -430,7 +426,7 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
                         "fully queried: ${if (presentation.queryCoverage.fullyQueried) "yes" else "no"}.",
                 )
                 if (!presentation.queryCoverage.fullyQueried) {
-                    Text("Some elapsed range remains unfetched — use the Load button above.")
+                    Text("Some elapsed range remains unfetched — use the Load button below.")
                 }
                 Text(
                     "This describes which epoch ranges have been fetched from Airchive, separate from measured " +
@@ -477,7 +473,7 @@ private data class EnergyLegendColors(val scheme: ColorScheme) {
 
 @Composable
 private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -513,7 +509,7 @@ private fun EnergyLegend(colors: EnergyLegendColors, intervalDay: Boolean) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (intervalDay) {
-            LegendItem(colors.usable, "Usable interval (recognized unit)")
+            LegendItem(colors.usable, if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "Measured interval" else "Usable interval (recognized unit)")
             LegendItem(colors.gap, "Gap / missing interval")
             LegendItem(colors.anomalous, "Anomalous sample")
             LegendItem(colors.unknownUnit, "Unknown-unit value")
@@ -667,7 +663,7 @@ private fun EnergyDailySections(
     showDayDetail: Boolean,
 ) {
     if (presentation.days.isEmpty()) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -689,7 +685,7 @@ private fun EnergyDailySections(
 /** Full single-day detail: slot strip, all counts, units, preserved measures. */
 @Composable
 private fun DayDetailCard(day: EnergyDaySummary) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -723,7 +719,7 @@ private fun DayDetailCard(day: EnergyDaySummary) {
 /** Compact textual row for week/month views. */
 @Composable
 private fun DaySummaryCard(day: EnergyDaySummary) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

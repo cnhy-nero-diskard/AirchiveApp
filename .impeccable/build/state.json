@@ -1,0 +1,322 @@
+{
+  "tool": "build-phase",
+  "version": 2,
+  "startedAt": "2026-10-24T02:00:11.938Z",
+  "comp": ".impeccable/mocks/home-shared.png",
+  "direction": "17804111",
+  "breakpoint": "863x1823",
+  "artifact": null,
+  "phase": "hero",
+  "phases": {
+    "comps": {
+      "status": "closed",
+      "openedAt": "2026-10-24T02:00:11.938Z",
+      "closedAt": "2026-10-24T02:07:41.246Z",
+      "attempts": 3,
+      "notes": [],
+      "gate": {
+        "ok": true,
+        "reasons": [],
+        "summary": "3 comps, 1 approved",
+        "approved": ".impeccable/mocks/home-shared.png",
+        "at": "2026-10-24T02:07:41.246Z"
+      },
+      "forced": null
+    },
+    "spec": {
+      "status": "closed",
+      "openedAt": "2026-10-24T02:07:41.257Z",
+      "closedAt": "2026-10-24T02:09:10.848Z",
+      "attempts": 5,
+      "notes": [],
+      "gate": {
+        "ok": true,
+        "reasons": [],
+        "summary": "26 regions, 0 plates, 15 text regions measured",
+        "at": "2026-10-24T02:09:10.848Z"
+      },
+      "forced": null
+    },
+    "plates": {
+      "status": "closed",
+      "openedAt": "2026-10-24T02:09:10.848Z",
+      "closedAt": "2026-10-24T02:09:10.876Z",
+      "attempts": 1,
+      "notes": [],
+      "gate": {
+        "ok": true,
+        "reasons": [],
+        "summary": "no plates owed",
+        "at": "2026-10-24T02:09:10.876Z"
+      },
+      "forced": null
+    },
+    "hero": {
+      "status": "open",
+      "openedAt": "2026-10-24T02:09:10.876Z",
+      "closedAt": null,
+      "attempts": 2,
+      "notes": [],
+      "gate": {
+        "ok": false,
+        "reasons": [
+          "region device-title is missing (detail 12%, structure 48%): the comp shows material the build does not",
+          "region device-age is missing (detail 0%, structure 54%): the comp shows material the build does not",
+          "region power is missing (detail 3%, structure 50%): the comp shows material the build does not",
+          "region target-unit is missing (detail 2%, structure 63%): the comp shows material the build does not",
+          "region energy-unit is missing (detail 16%, structure 42%): the comp shows material the build does not",
+          "region controls-title is missing (detail 0%, structure 48%): the comp shows material the build does not",
+          "region minus is missing (detail 0%, structure 87%): the comp shows material the build does not",
+          "region plus is missing (detail 0%, structure 90%): the comp shows material the build does not",
+          "region apply is missing (detail 12%, structure 55%): the comp shows material the build does not",
+          "region mode is missing (detail 0%, structure 89%): the comp shows material the build does not",
+          "region fan is missing (detail 0%, structure 85%): the comp shows material the build does not",
+          "region record-title is missing (detail 0%, structure 43%): the comp shows material the build does not",
+          "region energy-link is missing (detail 0%, structure 65%): the comp shows material the build does not",
+          "region chart (control) is contradicted (structure 46%, detail added 31%): this control does not read as the comp's: rebuild its chrome from the crop (border, fill, radius, chevron or arrow, label size) rather than from a component default",
+          "control coverage drifts to 56% (structure 60%, color 76%): its chrome differs from the comp's; open .impeccable/review/diff/hero/regions/coverage.png and match the border, fill, radius, chevron or arrow, and label size"
+        ],
+        "summary": "hero 75% (drift)",
+        "score": 0.7469,
+        "verdict": "drift",
+        "report": ".impeccable/review/diff/hero/report.json",
+        "sideBySide": "D:/Codez/Projects/AirchiveApp/.impeccable/review/diff/hero/side-by-side.png",
+        "worst": [
+          "apply missing 28%",
+          "power missing 43%",
+          "record-title missing 44%"
+        ],
+        "worstIds": [
+          "apply",
+          "power",
+          "record-title"
+        ],
+        "worstCrops": [
+          {
+            "id": "apply",
+            "verdict": "missing",
+            "score": {
+              "overall": 0.2793,
+              "structure": 0.5473,
+              "color": 0.0258,
+              "colorIntersection": 0.028,
+              "paletteMatch": 0.0246,
+              "detail": 0.12,
+              "detailRaw": 0.1565,
+              "detailAdded": 0.0729,
+              "bands": 0.3333
+            },
+            "file": ".impeccable/review/diff/hero/regions/apply.png"
+          },
+          {
+            "id": "power",
+            "verdict": "missing",
+            "score": {
+              "overall": 0.4261,
+              "structure": 0.4955,
+              "color": 0.5615,
+              "colorIntersection": 0.3152,
+              "paletteMatch": 0.6942,
+              "detail": 0.0328,
+              "detailRaw": 0.137,
+              "detailAdded": 0.2083,
+              "bands": 0
+            },
+            "file": ".impeccable/review/diff/hero/regions/power.png"
+          },
+          {
+            "id": "record-title",
+            "verdict": "missing",
+            "score": {
+              "overall": 0.4402,
+              "structure": 0.4297,
+              "color": 0.7113,
+              "colorIntersection": 0.7023,
+              "paletteMatch": 0.7162,
+              "detail": 0,
+              "detailRaw": 0.0089,
+              "detailAdded": 0.0833,
+              "bands": 0.475
+            },
+            "file": ".impeccable/review/diff/hero/regions/record-title.png"
+          }
+        ],
+        "advisories": [
+          "(advisory, above the 72% bar) region minus: its ink sits in a 46x7px box in the comp and 143x46px in the build (padding, row height, or size); match the box, not only the position",
+          "(advisory, above the 72% bar; fix in the polish pass before responsive) 4 readings:",
+          "  text sample-age: cap height 14.6px in the build, 20.6px in the comp (-29%); set font-size so the cap height renders at 20.6px",
+          "  text device-age: ink is #282939 in the build, #526070 in the comp; use the comp's colour",
+          "  text sample-age: ink is #3858a8 in the build, #505d6e in the comp; use the comp's colour",
+          "  text finalized: ink is #884808 in the build, #485567 in the comp; use the comp's colour"
+        ],
+        "regionVerdicts": {
+          "panel": "drift",
+          "app-title": "drift",
+          "device-title": "missing",
+          "device-age": "missing",
+          "power": "missing",
+          "target-label": "drift",
+          "energy-label": "drift",
+          "target-value": "drift",
+          "energy-value": "drift",
+          "target-unit": "missing",
+          "energy-unit": "missing",
+          "controls-title": "missing",
+          "minus": "missing",
+          "plus": "missing",
+          "apply": "missing",
+          "mode": "missing",
+          "fan": "missing",
+          "record-title": "missing",
+          "energy-link": "missing",
+          "chart-label": "drift",
+          "chart": "contradicted",
+          "coverage": "drift",
+          "sample-age": "drift",
+          "finalized": "drift",
+          "sync": "drift",
+          "navigation": "drift",
+          "native-header": "drift"
+        },
+        "at": "2026-10-24T02:29:17.854Z"
+      },
+      "forced": null,
+      "readingsSeen": {
+        "text device-title: letter-spacing is wider than the comp's (gap 0.150 vs 0.084 of the cap height); set letter-spacing to close it by about 2px": 2,
+        "text device-age: letter-spacing is wider than the comp's (gap 0.150 vs 0.084 of the cap height); set letter-spacing to close it by about 2px": 2,
+        "text record-title: cap height 8.8px in the build, 35.9px in the comp (-75%); set font-size so the cap height renders at 35.9px": 2,
+        "text sync: cap height 18.4px in the build, 27.1px in the comp (-32%); set font-size so the cap height renders at 27.1px": 2,
+        "text sync: 1 line in the build, 2 in the comp; the measure (max-width, font-size, letter-spacing) wraps it differently, so the block is a different shape": 2,
+        "text chart-label: the face renders 26% lighter than the comp's (ink density 0.47 vs 0.64); raise a weight step or use the ranked face": 2,
+        "text controls-title: ink is #5c6f72 in the build, #f8f8f8 in the comp; use the comp's colour": 2,
+        "text finalized: ink is #884808 in the build, #bf7212 in the comp; use the comp's colour": 2,
+        "text device-title: its first line starts 35px lower than in the comp (43px vs 8px into the region box); the spacing above it is too large": 2,
+        "text device-age: its first line starts 35px lower than in the comp (43px vs 8px into the region box); the spacing above it is too large": 2,
+        "control apply: its rule sits 8px into the box in the comp and 66px in the build (+58px), so the strip is taller than the comp's; match the height, not only the position": 2,
+        "control mode: its rule sits 5px into the box in the comp and 63px in the build (+58px), so the strip is taller than the comp's; match the height, not only the position": 2,
+        "text sample-age: cap height 14.6px in the build, 20.6px in the comp (-29%); set font-size so the cap height renders at 20.6px": 2,
+        "text device-age: ink is #282939 in the build, #526070 in the comp; use the comp's colour": 2,
+        "text sample-age: ink is #3858a8 in the build, #505d6e in the comp; use the comp's colour": 2,
+        "text finalized: ink is #884808 in the build, #485567 in the comp; use the comp's colour": 2
+      },
+      "records": 2,
+      "history": [
+        {
+          "at": "2026-10-24T02:20:44.727Z",
+          "score": 0.7494,
+          "worstIds": [
+            "energy-label",
+            "apply",
+            "mode"
+          ],
+          "regionVerdicts": {
+            "panel": "drift",
+            "app-title": "drift",
+            "device-title": "contradicted",
+            "device-age": "contradicted",
+            "power": "missing",
+            "target-label": "contradicted",
+            "energy-label": "missing",
+            "target-value": "contradicted",
+            "energy-value": "missing",
+            "target-unit": "drift",
+            "energy-unit": "missing",
+            "controls-title": "missing",
+            "minus": "drift",
+            "plus": "missing",
+            "apply": "missing",
+            "mode": "missing",
+            "fan": "drift",
+            "record-title": "contradicted",
+            "energy-link": "drift",
+            "chart-label": "drift",
+            "chart": "drift",
+            "coverage": "drift",
+            "sample-age": "drift",
+            "finalized": "drift",
+            "sync": "missing",
+            "navigation": "drift"
+          },
+          "artifactHash": null
+        },
+        {
+          "at": "2026-10-24T02:29:17.854Z",
+          "score": 0.7469,
+          "worstIds": [
+            "apply",
+            "power",
+            "record-title"
+          ],
+          "regionVerdicts": {
+            "panel": "drift",
+            "app-title": "drift",
+            "device-title": "missing",
+            "device-age": "missing",
+            "power": "missing",
+            "target-label": "drift",
+            "energy-label": "drift",
+            "target-value": "drift",
+            "energy-value": "drift",
+            "target-unit": "missing",
+            "energy-unit": "missing",
+            "controls-title": "missing",
+            "minus": "missing",
+            "plus": "missing",
+            "apply": "missing",
+            "mode": "missing",
+            "fan": "missing",
+            "record-title": "missing",
+            "energy-link": "missing",
+            "chart-label": "drift",
+            "chart": "contradicted",
+            "coverage": "drift",
+            "sample-age": "drift",
+            "finalized": "drift",
+            "sync": "drift",
+            "navigation": "drift",
+            "native-header": "drift"
+          },
+          "artifactHash": null
+        }
+      ]
+    },
+    "sections": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "motion": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "responsive": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    },
+    "review": {
+      "status": "pending",
+      "openedAt": null,
+      "closedAt": null,
+      "attempts": 0,
+      "notes": [],
+      "gate": null,
+      "forced": null
+    }
+  },
+  "finish": null,
+  "plates": {}
+}

@@ -133,7 +133,7 @@ fun SettingsRoute(
 
 @Composable
 private fun SettingsHeaderCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -155,7 +155,7 @@ private fun SettingsHeaderCard() {
 
 @Composable
 internal fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -202,7 +202,7 @@ internal fun SyncStatusCard(
     onManualRefresh: (() -> Unit)?,
     isHistorySyncing: Boolean,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -281,7 +281,7 @@ internal fun LocalDiagnosticsCard(
     nowEpochMillis: Long,
     thinQStatusLabel: String? = null,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

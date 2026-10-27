@@ -120,27 +120,37 @@ fun HistoryHealthRoute(
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .widthIn(max = 640.dp),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .widthIn(max = 640.dp)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            item(key = "header") { HistoryHeader() }
-            item(key = "sync") {
-                SyncContextCard(
-                    presentation = syncPresentation,
-                    sync = snapshot.sync,
-                    coveredRanges = snapshot.coveredRanges,
-                    nowEpochMillis = nowEpochMillis,
-                    onRefresh = onRefresh,
-                    isRefreshing = isRefreshing,
-                )
+            item(key = "header") {
+                Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    InstrumentPageHeading("History", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Recorded five-minute observations · newest first" else null)
+                }
             }
-            item(key = "health") {
-                CollectorHealthCard(health = snapshot.collectorHealth, nowEpochMillis = nowEpochMillis)
+            item(key = "overview") {
+                InstrumentPanel {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "${counters.total} saved observations" else "${counters.total} cached · ${counters.usable} usable energy values", style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.semantics { heading() })
+                        Text(if (isRefreshing) "Refreshing history… Cached observations remain available." else syncPresentation.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        onRefresh?.let { refresh -> TextButton(onClick = refresh, enabled = !isRefreshing,
+                            modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(if (isRefreshing) "Syncing history…" else syncPresentation.retryLabel)
+                        } }
+                    }
+                    InstrumentDisclosure("Sync and collector health", "Refresh history, collector status and sample quality", informational = true) {
+                        SyncContextCard(syncPresentation, snapshot.sync, snapshot.coveredRanges, nowEpochMillis, onRefresh, isRefreshing)
+                        CollectorHealthCard(snapshot.collectorHealth, nowEpochMillis)
+                        SampleCountersCard(counters)
+                    }
+                    InstrumentDisclosure("Sample status guide", "Gaps, anomalies and unknown units", informational = true) { SampleLegendCard() }
+                }
             }
-            item(key = "counters") { SampleCountersCard(counters = counters) }
-            item(key = "legend") { SampleLegendCard() }
             if (observations.isEmpty()) {
                 item(key = "empty") {
                     EmptyHistoryCard(onRefresh = onRefresh, retryLabel = syncPresentation.retryLabel)
@@ -158,7 +168,7 @@ fun HistoryHealthRoute(
                 item(key = "list-header") {
                     Text(
                         "Cached observations (newest first)",
-                        modifier = Modifier.semantics { heading() },
+                        modifier = Modifier.padding(top = 20.dp, bottom = 12.dp).semantics { heading() },
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
@@ -208,7 +218,7 @@ private fun SyncContextCard(
     onRefresh: (() -> Unit)?,
     isRefreshing: Boolean,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -295,7 +305,7 @@ private fun coveredRangeSummary(ranges: List<CoveredRange>, zoneId: String): Str
 
 @Composable
 private fun CollectorHealthCard(health: CollectorHealth?, nowEpochMillis: Long) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -395,7 +405,7 @@ internal fun countSampleTypes(samples: List<Observation>): SampleCounters {
 
 @Composable
 private fun SampleCountersCard(counters: SampleCounters) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -433,7 +443,7 @@ private fun SampleCountersCard(counters: SampleCounters) {
 
 @Composable
 private fun SampleLegendCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -464,7 +474,7 @@ private fun SampleLegendCard() {
 
 @Composable
 private fun EmptyHistoryCard(onRefresh: (() -> Unit)?, retryLabel: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -495,7 +505,7 @@ private fun NoUsableMeasurementsCard(
     onRefresh: (() -> Unit)?,
     retryLabel: String,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -572,7 +582,8 @@ private fun observationRowUi(sample: Observation): ObservationRowUi {
 
 @Composable
 private fun ObservationRow(row: ObservationRowUi, onClick: () -> Unit) {
-    Card(
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
@@ -583,11 +594,11 @@ private fun ObservationRow(row: ObservationRowUi, onClick: () -> Unit) {
             },
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(row.intervalTimeText, style = MaterialTheme.typography.titleSmall)
-            Text(row.energyText, style = MaterialTheme.typography.bodyMedium)
+            Text(row.energyText, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 row.statusText,
                 maxLines = 2,
@@ -600,6 +611,7 @@ private fun ObservationRow(row: ObservationRowUi, onClick: () -> Unit) {
             row.failureText?.let {
                 Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
             }
+            androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(top = 12.dp))
         }
     }
 }

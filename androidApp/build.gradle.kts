@@ -182,6 +182,9 @@ kotlin {
 }
 
 dependencies {
+    // Native debug-only scene for isolated Home layout and interaction verification.
+    add("debugImplementation", libs.compose.foundation)
+    add("debugImplementation", libs.compose.material3)
     implementation(project(":shared"))
     implementation(libs.room.runtime)
     implementation(libs.activity.compose)

@@ -523,7 +523,7 @@ private fun ThinQRefreshFailureKind.gateDetail(): String = when (this) {
  * [AcCommandUiState] outcome `message`, any exception text, and tokens are
  * never displayed.
  */
-private fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (this) {
+internal fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (this) {
     AcCommandUiState.Idle -> null
     is AcCommandUiState.Sending -> if (simulated) {
         "Sending simulated ${command.commandLabel()}…"
@@ -579,7 +579,7 @@ private fun failureText(failure: CommandFailure?, simulated: Boolean): String {
 // ------------------------------------------------------------------- helpers
 
 /** Last known live state across every snapshot, so controls can label stale values honestly. */
-private fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this) {
+internal fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this) {
     is ThinQLiveRefreshState.Current -> state
     is ThinQLiveRefreshState.Stale -> lastKnownState
     is ThinQLiveRefreshState.Loading -> previous?.knownLiveState()
@@ -589,6 +589,21 @@ private fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this
 
 private fun nowEpochMillis(): Long = Clock.System.now().toEpochMilliseconds()
 
+/** Reuse the bounded adapter confirmation for Home just as Device does; never resend. */
+internal suspend fun submitAndPresentCommand(
+    command: AcCommand,
+    commands: AcCommandController,
+    live: ThinQLiveStateController,
+) {
+    if (commands.submit(command) !is AcCommandSubmitResult.Submitted) return
+    when (val result = commands.state.value) {
+        is AcCommandUiState.Accepted -> live.acceptCommandOutcome(result.outcome)
+        is AcCommandUiState.Confirmed -> live.acceptCommandOutcome(result.outcome)
+        is AcCommandUiState.Unconfirmed -> live.acceptCommandOutcome(result.outcome)
+        else -> Unit
+    }
+}
+
 private fun AcCommand.commandLabel(): String = when (this) {
     is AcCommand.SetPower -> if (powerOn) "power on" else "power off"
     is AcCommand.SetTargetTemperature -> "target temperature ${temperatureLabel(value, unit)}"
@@ -596,13 +611,13 @@ private fun AcCommand.commandLabel(): String = when (this) {
     is AcCommand.SetFanSpeed -> "fan ${speed.displayLabel()}"
 }
 
-private fun AcOperatingMode.displayLabel(): String =
+internal fun AcOperatingMode.displayLabel(): String =
     name.lowercase().split('_').joinToString(" ")
 
-private fun FanSpeed.displayLabel(): String =
+internal fun FanSpeed.displayLabel(): String =
     name.lowercase().split('_').joinToString(" ")
 
-private fun TemperatureCapability.allowedValues(): List<Double> {
+internal fun TemperatureCapability.allowedValues(): List<Double> {
     if (!min.isFinite() || !max.isFinite() || !step.isFinite() || step <= 0.0) return emptyList()
     if (max < min) return emptyList()
     val intervalCount = (max - min) / step
@@ -628,12 +643,12 @@ private fun TemperatureCapability.rangeLabel(): String =
 private fun temperatureLabel(value: Double, unit: TemperatureUnit): String =
     "${formatTemperature(value)} ${unit.symbol()}"
 
-private fun TemperatureUnit.symbol(): String = when (this) {
+internal fun TemperatureUnit.symbol(): String = when (this) {
     TemperatureUnit.CELSIUS -> "°C"
     TemperatureUnit.FAHRENHEIT -> "°F"
 }
 
-private fun formatTemperature(value: Double): String =
+internal fun formatTemperature(value: Double): String =
     when {
         !value.isFinite() -> "—"
         abs(value - value.roundToLong()) < 1e-9 -> value.roundToLong().toString()

@@ -1,8 +1,10 @@
 package cloud.airchive.personal
 
 import android.os.Bundle
+import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
@@ -56,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val configuration = try {
             FirebaseOwnerIdentityFactory.fromBuildConfig(this)
         } catch (_: Exception) {
@@ -69,6 +72,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val interfacePreferences = AndroidInterfaceDetailPreferences(applicationContext)
         setContent {
             val activeCoordinator = coordinator
             val activeAccountController = accountController
@@ -79,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     onManualRefresh = ::onManualRefresh,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     thinQBindings = thinQBindings,
+                    interfacePreferences = interfacePreferences,
                 )
             } else {
                 ProductionConfigBlockedScreen(

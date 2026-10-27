@@ -493,32 +493,19 @@ internal fun DestinationGlyph(
             }
 
             ShellDestination.SETTINGS -> {
-                val center = androidx.compose.ui.geometry.Offset(12f * scale, 12f * scale)
-                drawCircle(
-                    color = color,
-                    radius = 5f * scale,
-                    center = center,
-                    style = stroke,
-                )
-                val spokes = listOf(
-                    androidx.compose.ui.geometry.Offset(12f, 2f) to androidx.compose.ui.geometry.Offset(12f, 5f),
-                    androidx.compose.ui.geometry.Offset(12f, 19f) to androidx.compose.ui.geometry.Offset(12f, 22f),
-                    androidx.compose.ui.geometry.Offset(2f, 12f) to androidx.compose.ui.geometry.Offset(5f, 12f),
-                    androidx.compose.ui.geometry.Offset(19f, 12f) to androidx.compose.ui.geometry.Offset(22f, 12f),
-                    androidx.compose.ui.geometry.Offset(4.9f, 4.9f) to androidx.compose.ui.geometry.Offset(7f, 7f),
-                    androidx.compose.ui.geometry.Offset(17f, 17f) to androidx.compose.ui.geometry.Offset(19.1f, 19.1f),
-                    androidx.compose.ui.geometry.Offset(17f, 7f) to androidx.compose.ui.geometry.Offset(19.1f, 4.9f),
-                    androidx.compose.ui.geometry.Offset(4.9f, 19.1f) to androidx.compose.ui.geometry.Offset(7f, 17f),
-                )
-                spokes.forEach { (start, end) ->
-                    drawLine(
-                        color = color,
-                        start = androidx.compose.ui.geometry.Offset(start.x * scale, start.y * scale),
-                        end = androidx.compose.ui.geometry.Offset(end.x * scale, end.y * scale),
-                        strokeWidth = 2f * scale,
-                        cap = StrokeCap.Round,
-                    )
+                val gear = Path().apply {
+                    for (tooth in 0 until 8) {
+                        listOf(-15f to 8f, -9f to 10f, 9f to 10f, 15f to 8f).forEachIndexed { point, (offset, radius) ->
+                            val angle = (tooth * 45 + offset) * kotlin.math.PI / 180
+                            val x = (12 + kotlin.math.cos(angle) * radius).toFloat() * scale
+                            val y = (12 + kotlin.math.sin(angle) * radius).toFloat() * scale
+                            if (tooth == 0 && point == 0) moveTo(x, y) else lineTo(x, y)
+                        }
+                    }
+                    close()
                 }
+                drawPath(gear, color, style = stroke)
+                drawCircle(color, 3f * scale, androidx.compose.ui.geometry.Offset(12f * scale, 12f * scale), style = stroke)
             }
         }
     }
@@ -998,15 +985,11 @@ private fun String.onboardingErrorMessage(): String = when (this) {
 
 @Composable
 internal fun SummaryCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = {
-                Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                content()
-            },
-        )
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            content()
+        }
     }
 }
 

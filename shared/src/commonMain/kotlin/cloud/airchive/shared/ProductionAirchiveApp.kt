@@ -100,17 +100,20 @@ fun ProductionAirchiveApp(
     onManualRefresh: (() -> Unit)? = null,
     ownerAuthConfigurationMessage: String? = null,
     thinQBindings: ProductionThinQBindings? = null,
+    interfacePreferences: InterfaceDetailPreferences? = null,
 ) {
-    val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = colors) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            ProductionRouteHost(
-                coordinator = coordinator,
-                accountController = accountController,
-                onManualRefresh = onManualRefresh,
-                ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                thinQBindings = thinQBindings,
-            )
+    val preferences = remember(interfacePreferences) { interfacePreferences ?: InMemoryInterfaceDetailPreferences() }
+    InterfaceDetailProvider(preferences) {
+        AirchiveTheme {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                ProductionRouteHost(
+                    coordinator = coordinator,
+                    accountController = accountController,
+                    onManualRefresh = onManualRefresh,
+                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    thinQBindings = thinQBindings,
+                )
+            }
         }
     }
 }
@@ -122,28 +125,15 @@ fun ProductionAirchiveApp(
  */
 @Composable
 fun ProductionConfigBlockedScreen(message: String) {
-    val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = colors) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(WindowInsets.safeDrawing.asPaddingValues())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    "Airchive",
-                    modifier = Modifier.semantics { heading() },
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-                Text("Firebase owner sign-in is not configured", style = MaterialTheme.typography.titleLarge)
-                Text(message, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "This install intentionally does not fall back to demo data. Configure the nonsecret " +
-                        "Firebase client options in config/airchive-mobile.properties, then reopen the app.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+    AirchiveTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.fillMaxSize().padding(WindowInsets.safeDrawing.asPaddingValues()), contentAlignment = Alignment.TopCenter) {
+                InstrumentPage("Airchive") {
+                    SummaryCard("Owner sign-in needs configuration") {
+                        Text(message, style = MaterialTheme.typography.bodyLarge)
+                        Text("Configure the Firebase client options in config/airchive-mobile.properties, then reopen the app. This install does not fall back to demo data.", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
     }
@@ -279,10 +269,14 @@ private fun ProductionRouteHost(
                     onOpenSettings = { route = ProductionRoute.SETTINGS },
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     credentialState = credentialState,
+                    thinQBindings = thinQBindings,
+                    hasSession = session != null,
+                    onOpenEnergy = { route = ProductionRoute.ENERGY },
                 )
 
                 ProductionRoute.DEVICE -> if (partition != null) {
                     ProductionDeviceRoute(
+                        history = history,
                         configuredDeviceId = coordinator.configuredDeviceId,
                         identity = sampledIdentity,
                         thinQBindings = thinQBindings,
@@ -338,49 +332,18 @@ private fun ProductionBottomNavigation(
     current: ProductionRoute,
     onSelect: (ProductionRoute) -> Unit,
 ) {
-    NavigationBar {
-        ProductionRoute.entries.forEach { destination ->
-            NavigationBarItem(
-                selected = current == destination,
-                onClick = { onSelect(destination) },
-                icon = {
-                    DestinationGlyph(
-                        destination = destination.shellDestination(),
-                        selected = current == destination,
-                    )
-                },
-                label = { Text(destination.label()) },
-                alwaysShowLabel = true,
-            )
-        }
-    }
+    InstrumentNavigation(current.ordinal) { onSelect(ProductionRoute.entries[it]) }
 }
 
 @Composable
 private fun ProductionSignedOutRoute(title: String) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        SummaryCard("Sign in required") {
-            Text("Sign in to your Google account from Home to load Airchive history for this device.")
-            Text(
-                "History access and authorization are separate: a Google session alone never grants " +
-                    "Airchive history access.",
-            )
+    InstrumentPage(title) {
+        SummaryCard("Sign in to continue") {
+            Text("Open Home to sign in with the enrolled Google account and load this AC's history.")
+            Text("No other account's cached history is shown.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
-
-// -------------------------------------------------------------------------
-// Home
-// -------------------------------------------------------------------------
 
 @Composable
 private fun ProductionHome(
@@ -396,78 +359,38 @@ private fun ProductionHome(
     onOpenSettings: () -> Unit,
     ownerAuthConfigurationMessage: String?,
     credentialState: ThinQCredentialState,
+    thinQBindings: ProductionThinQBindings?,
+    hasSession: Boolean,
+    onOpenEnergy: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().fillMaxHeight()
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            "Airchive",
-            modifier = Modifier.semantics { heading() },
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
-
-        ProductionConfiguredAcCard(
-            configuredDeviceId = coordinator.configuredDeviceId,
-            identity = (accessState as? OwnerAccessState.Authorized)?.device,
-        )
-
-        ProductionEnergySnapshotCard(history = history, nowEpochMillis = nowEpochMillis)
-
-        ProductionCollectorHealthCard(
-            health = history.collectorHealth,
-            nowEpochMillis = nowEpochMillis,
-        )
-
-        ProductionAccessCard(
-            coordinator = coordinator,
-            accessState = accessState,
-            onAccessChanged = onAccessChanged,
-        )
-
-        ProductionHistorySyncCard(
-            historySync = historySync,
-            isHistorySyncing = isHistorySyncing,
-            onManualRefresh = onManualRefresh,
-        )
-
-        SummaryCard("Device") {
-            Text("Open the configured AC's live state and profile-supported controls.")
-            Button(
-                onClick = onOpenDevice,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp),
-            ) {
-                Text("Open device")
+        Text("Airchive", modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.headlineLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        if (accessState !is OwnerAccessState.Authorized) {
+            ProductionAccessCard(coordinator, accessState, onAccessChanged)
+        }
+        key(history.partition) {
+            ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings)
+        }
+        Text(historySync.lastSuccessfulAgeMillis?.let { "History synced ${instrumentAge(it)} ago" }
+            ?: "History has not synced yet", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (isHistorySyncing || history.sync?.lastError != null || !historySync.hasCachedHistory) {
+            Text(historySync.message, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        onManualRefresh?.let { refresh ->
+            TextButton(shape = MaterialTheme.shapes.small, onClick = refresh, enabled = !isHistorySyncing) {
+                Text(if (isHistorySyncing) "Refreshing history…" else "Refresh history")
             }
         }
-
-        SummaryCard("ThinQ control") {
-            val credentialVisible = accessState !is OwnerAccessState.SignedOut
-            Text(
-                if (credentialVisible) credentialState.productionCredentialStatus()
-                else "ThinQ credential status is hidden while signed out.",
-            )
-            if (credentialVisible && (!credentialState.present || credentialState.unlockFailed)) {
-                Button(onClick = onOpenSettings) { Text("Set up ThinQ PAT") }
-            }
-        }
-
-        ownerAuthConfigurationMessage?.let { configurationMessage ->
-            SummaryCard("Firebase setup") {
-                Text(configurationMessage)
-            }
-        }
+        ownerAuthConfigurationMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
     }
 }
-
 @Composable
 private fun ProductionConfiguredAcCard(
     configuredDeviceId: String,
@@ -622,14 +545,14 @@ private fun ProductionAccessCard(
             style = MaterialTheme.typography.bodyMedium,
         )
         when (accessState) {
-            OwnerAccessState.SignedOut -> Button(
+            OwnerAccessState.SignedOut -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.signIn() } },
             ) {
                 Text(if (busy) "Signing in…" else "Continue with Google")
             }
 
-            is OwnerAccessState.SignInFailed -> Button(
+            is OwnerAccessState.SignInFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.signIn() } },
             ) {
@@ -637,7 +560,7 @@ private fun ProductionAccessCard(
             }
 
             is OwnerAccessState.AccessPending,
-            is OwnerAccessState.AccessCheckFailed -> Button(
+            is OwnerAccessState.AccessCheckFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.retryHistoryAccess() } },
             ) {
@@ -685,7 +608,7 @@ private fun ProductionHistorySyncCard(
         )
         historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${productionAgeLabel(it)} ago.") }
         onManualRefresh?.let { refresh ->
-            Button(
+            Button(shape = MaterialTheme.shapes.small,
                 enabled = !isHistorySyncing,
                 onClick = refresh,
                 modifier = Modifier.heightIn(min = 48.dp),
@@ -701,7 +624,8 @@ private fun ProductionHistorySyncCard(
 // -------------------------------------------------------------------------
 
 @Composable
-private fun ProductionDeviceRoute(
+fun ProductionDeviceRoute(
+    history: HistorySnapshot,
     configuredDeviceId: String,
     identity: DeviceIdentity?,
     thinQBindings: ProductionThinQBindings?,
@@ -709,86 +633,21 @@ private fun ProductionDeviceRoute(
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
-    val device = if (thinQBindings != null) thinQBindings.device.collectAsState().value else null
-    val profile = if (thinQBindings != null) thinQBindings.profile.collectAsState().value else null
-
-    LaunchedEffect(thinQBindings, credentialState.present, credentialState.unlockFailed) {
-        if (credentialState.present && !credentialState.unlockFailed) {
-            try {
-                thinQBindings?.onDeviceOpened?.invoke()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // The graph and live-state controller expose only safe status.
+    val device = thinQBindings?.device?.collectAsState()?.value
+    val profile = thinQBindings?.profile?.collectAsState()?.value
+    InstrumentPage("Device", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Live state and supported controls for your air conditioner." else null) {
+        ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession = true,
+            onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true)
+        InstrumentPanel {
+            InstrumentDisclosure("Device details", "Identity, profile and last confirmed state", informational = true) {
+                ProductionConfiguredAcCard(configuredDeviceId, identity)
+                if (thinQBindings != null && device != null && profile != null) {
+                    DeviceLiveStateCard(thinQBindings.liveStateController, device, profile,
+                        simulated = false, onRefresh = thinQBindings.refreshLiveState, readOnOpen = false)
+                }
             }
         }
-    }
-
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Device", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        ProductionConfiguredAcCard(configuredDeviceId = configuredDeviceId, identity = identity)
-
-        when {
-            thinQBindings == null -> SummaryCard("ThinQ controls unavailable") {
-                Text("The protected ThinQ adapter is not configured in this build.")
-            }
-
-            !credentialState.present || credentialState.unlockFailed -> SummaryCard("ThinQ setup required") {
-                Text(
-                    if (credentialState.unlockFailed) {
-                        "The saved ThinQ credential could not be unlocked. Verify and save it again in Settings."
-                    } else {
-                        "No ThinQ PAT is stored in protected app storage. Set it up from Settings; the token is verified before saving."
-                    },
-                )
-                Button(onClick = onOpenSettings) { Text("Open ThinQ settings") }
-            }
-
-            device == null || profile == null -> SummaryCard("ThinQ device profile unavailable") {
-                Text("The configured AC may be offline or its writable profile could not be verified. Controls remain unavailable.")
-                Button(
-                    onClick = { scope.launch { thinQBindings.onDeviceOpened() } },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("Retry live device read") }
-                Button(onClick = onOpenSettings) { Text("Review ThinQ credential") }
-            }
-
-            else -> {
-                DeviceLiveStateCard(
-                    controller = thinQBindings.liveStateController,
-                    device = device,
-                    profile = profile,
-                    simulated = false,
-                    onRefresh = thinQBindings.refreshLiveState,
-                    readOnOpen = false,
-                )
-                DeviceControlsCard(
-                    profile = profile,
-                    liveStateController = thinQBindings.liveStateController,
-                    commandController = thinQBindings.commandController,
-                    simulated = false,
-                    onCommandOutcome = thinQBindings.liveStateController::acceptCommandOutcome,
-                )
-            }
-        }
-
-        Button(
-            onClick = onBackToHome,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-        ) {
-            Text("Back to Home")
-        }
+        TextButton(shape = MaterialTheme.shapes.small, onClick = onBackToHome, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back to Home") }
     }
 }
 
@@ -797,7 +656,7 @@ private fun ProductionDeviceRoute(
 // -------------------------------------------------------------------------
 
 @Composable
-private fun ProductionSettingsRoute(
+fun ProductionSettingsRoute(
     accountController: ProductionAccountController,
     accessState: OwnerAccessState,
     session: OwnerSession?,
@@ -811,60 +670,30 @@ private fun ProductionSettingsRoute(
     thinQBindings: ProductionThinQBindings?,
     credentialState: ThinQCredentialState,
 ) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        SummaryCard("Settings") {
-            Text("Account, history access, sync, and local cache for this device.", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "Cached state is shown without automatic network work. History refresh is an explicit " +
-                    "action; ThinQ uses a separate protected PAT and live device reads.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+    InstrumentPage("Settings", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Your account, AC connection and saved history." else null) {
+        InstrumentPanel { InterfaceDetailSelector() }
+        InstrumentPanel {
+            ProductionAccountCard(accountController, session, history, afterSettingsAction)
+            if (thinQBindings != null) {
+                ProductionThinQCredentialCard(thinQBindings, credentialState, signedIn = session != null)
+            } else SummaryCard("AC connection") {
+                Text("The protected ThinQ adapter is not configured in this build.")
+            }
         }
-
-        ProductionAccountCard(
-            controller = accountController,
-            session = session,
-            history = history,
-            afterSettingsAction = afterSettingsAction,
-        )
-
-        thinQBindings?.let { bindings ->
-            ProductionThinQCredentialCard(
-                bindings = bindings,
-                credentialState = credentialState,
-                signedIn = session != null,
-            )
-        }
-
-        OwnerAccessStatusCard(ownerAccessState = accessState)
-
-        SyncStatusCard(
-            presentation = historySync,
-            sync = history.sync,
-            nowEpochMillis = nowEpochMillis,
-            onManualRefresh = onManualRefresh,
-            isHistorySyncing = isHistorySyncing,
-        )
-
-        if (partition != null) {
-            LocalDiagnosticsCard(
-                partition = partition,
-                history = history,
-                credentialState = credentialState,
-                credentialIsVisible = session != null,
-                thinQStatusLabel = credentialState.productionCredentialStatus(),
-                nowEpochMillis = nowEpochMillis,
-            )
-        } else {
-            SummaryCard("Local diagnostics · nonsecret") {
-                Text("Signed out: no local cache to inspect for another account.")
+        InstrumentPanel {
+            InstrumentDisclosure("History access", if (accessState is OwnerAccessState.Authorized)
+                "Access verified for this account" else "Review account access", initiallyExpanded = accessState !is OwnerAccessState.Authorized, informational = true) {
+                OwnerAccessStatusCard(ownerAccessState = accessState)
+            }
+            InstrumentDisclosure("History and storage", if (historySync.hasCachedHistory)
+                "${history.observations.size} cached observations" else "No history cached yet", informational = true) {
+                SyncStatusCard(historySync, history.sync, nowEpochMillis, onManualRefresh, isHistorySyncing)
+                if (partition != null) {
+                    LocalDiagnosticsCard(partition, history, credentialState, credentialIsVisible = session != null,
+                        thinQStatusLabel = credentialState.productionCredentialStatus(), nowEpochMillis = nowEpochMillis)
+                } else SummaryCard("Local diagnostics · nonsecret") {
+                    Text("Signed out: no local cache to inspect for another account.")
+                }
             }
         }
     }
@@ -888,24 +717,24 @@ private fun ProductionThinQCredentialCard(
         if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
     }
 
-    SummaryCard("Settings · ThinQ credential") {
+    SummaryCard("AC connection") {
         if (!signedIn) {
             Text("Sign in with Google before setting up the separate ThinQ credential.")
         } else {
             Text(credentialState.productionCredentialStatus())
-            Text("LG client ID: ${credentialState.clientId}")
-            Text(
-                "The PAT is verified against the configured AC before it is stored in Android Keystore. " +
-                    "A successful read does not prove command authority.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            InstrumentDisclosure("Connection details", "Protected storage and command access", inset = 0.dp, showDivider = false, informational = true) {
+                Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("LG client ID: ${credentialState.clientId}", style = MaterialTheme.typography.bodySmall)
+                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
 
             feedback?.let {
                 Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
 
             if (!replacing) {
-                Button(enabled = !busy, onClick = { replacing = true }) {
+                Button(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { replacing = true }) {
                     Text(if (credentialState.present || credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
                 }
             } else {
@@ -928,7 +757,7 @@ private fun ProductionThinQCredentialCard(
                     label = { Text("ThinQ account country") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 )
-                Button(
+                Button(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = {
                         val submittedToken = rawToken
@@ -956,14 +785,14 @@ private fun ProductionThinQCredentialCard(
                 ) {
                     Text(if (busy) "Verifying and saving…" else "Verify and save securely")
                 }
-                TextButton(
+                TextButton(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = { rawToken = ""; replacing = false },
                 ) { Text("Cancel") }
             }
 
             if (credentialState.present || credentialState.unlockFailed) {
-                TextButton(
+                TextButton(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = { confirmingRemoval = true },
                 ) { Text("Remove ThinQ PAT") }
@@ -977,7 +806,7 @@ private fun ProductionThinQCredentialCard(
             title = { Text("Remove ThinQ PAT?", modifier = Modifier.semantics { heading() }) },
             text = { Text("This removes the protected ThinQ credential. Your Google session and cached Airchive history stay intact.") },
             confirmButton = {
-                Button(
+                Button(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = {
                         scope.launch {
@@ -1000,7 +829,7 @@ private fun ProductionThinQCredentialCard(
                 ) { Text("Remove") }
             },
             dismissButton = {
-                TextButton(enabled = !busy, onClick = { confirmingRemoval = false }) { Text("Cancel") }
+                TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { confirmingRemoval = false }) { Text("Cancel") }
             },
         )
     }
@@ -1036,10 +865,10 @@ private fun ProductionAccountCard(
         }
     }
 
-    SummaryCard("Settings · account") {
+    SummaryCard("Google account") {
         Text(
             session?.let { owner ->
-                "Google account: ${owner.displayName ?: owner.email ?: owner.uid} · UID ${owner.uid}"
+                "${owner.displayName ?: owner.email ?: owner.uid}"
             } ?: "Google account: signed out",
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -1061,14 +890,17 @@ private fun ProductionAccountCard(
         }
 
         if (session != null) {
-            Button(enabled = !busy, onClick = controller::requestChangeAccount) {
+            InstrumentDisclosure("Account actions", "Switch account, clear local history or sign out", inset = 0.dp, showDivider = false) {
+            Text("Account UID: ${session.uid}", style = MaterialTheme.typography.bodySmall)
+            TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestChangeAccount) {
                 Text("Switch Google account")
             }
-            Button(enabled = !busy, onClick = controller::requestClearCache) {
+            TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestClearCache) {
                 Text("Clear local history cache")
             }
-            Button(enabled = !busy, onClick = controller::requestSignOut) {
+            TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestSignOut) {
                 Text("Sign out of Google")
+            }
             }
         } else {
             Text("Sign in from the Home screen to load Airchive history for this device.")
@@ -1129,10 +961,10 @@ private fun ProductionConfirmationDialog(
         title = { Text(title, modifier = Modifier.semantics { heading() }) },
         text = { Text(message) },
         confirmButton = {
-            Button(enabled = !busy, onClick = onConfirm) { Text("Confirm") }
+            Button(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = onConfirm) { Text("Confirm") }
         },
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onCancel) { Text("Cancel") }
+            TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = onCancel) { Text("Cancel") }
         },
     )
 }

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T02:35:12Z",
+  "title": "Design System: Airchive",
+  "extensions": {
+    "platform": {
+      "name": "Android-first Compose Multiplatform",
+      "layoutUnit": "dp",
+      "typographyUnit": "sp",
+      "tokenAuthority": "DESIGN.md frontmatter records explicit implementation tokens; Material defaults remain library-owned.",
+      "componentPreviewPolicy": "Native components are described below and mapped to Compose source. HTML/CSS snippets are intentionally absent: this app has no web component implementation.",
+      "palettePolicy": "No synthesized tonal ramps: only implemented light/dark roles are recorded.",
+      "rasterPolicy": "No shipping raster assets were introduced. Generated previews and emulator captures are evidence only."
+    },
+    "colorMeta": {
+      "cobalt": { "role": "primary", "displayName": "Restrained Cobalt", "materialRoles": ["primary", "surfaceTint"], "scheme": "light" },
+      "on-cobalt": { "role": "primary", "displayName": "On Cobalt", "materialRoles": ["onPrimary", "onSecondary"], "scheme": "light" },
+      "cobalt-container": { "role": "primary", "displayName": "Cobalt Container", "materialRoles": ["primaryContainer"], "scheme": "light" },
+      "on-cobalt-container": { "role": "primary", "displayName": "On Cobalt Container", "materialRoles": ["onPrimaryContainer"], "scheme": "light" },
+      "slate-secondary": { "role": "secondary", "displayName": "Slate Secondary", "materialRoles": ["secondary", "onSurfaceVariant"], "scheme": "light" },
+      "slate-container": { "role": "secondary", "displayName": "Slate Container", "materialRoles": ["secondaryContainer"], "scheme": "light" },
+      "porcelain-ground": { "role": "neutral", "displayName": "Porcelain Ground", "materialRoles": ["background", "surfaceContainer"], "scheme": "light" },
+      "porcelain-panel": { "role": "neutral", "displayName": "Porcelain Panel", "materialRoles": ["surface", "surfaceContainerLow"], "scheme": "light" },
+      "slate-ink": { "role": "neutral", "displayName": "Slate Ink", "materialRoles": ["onBackground", "onSurface", "onSecondaryContainer"], "scheme": "light" },
+      "quiet-surface": { "role": "neutral", "displayName": "Quiet Surface", "materialRoles": ["surfaceVariant", "surfaceContainerHighest"], "scheme": "light" },
+      "slate-outline": { "role": "neutral", "displayName": "Slate Outline", "materialRoles": ["outline"], "scheme": "light" },
+      "quiet-rule": { "role": "neutral", "displayName": "Quiet Rule", "materialRoles": ["outlineVariant"], "scheme": "light" },
+      "coverage-amber": { "role": "tertiary", "displayName": "Coverage Amber", "materialRoles": ["tertiary", "onTertiaryContainer"], "scheme": "light" },
+      "coverage-wash": { "role": "tertiary", "displayName": "Coverage Wash", "materialRoles": ["tertiaryContainer"], "scheme": "light" },
+      "dark-cobalt": { "role": "primary", "displayName": "Dark Cobalt", "materialRoles": ["primary", "surfaceTint"], "scheme": "dark" },
+      "dark-on-cobalt": { "role": "primary", "displayName": "Dark On Cobalt", "materialRoles": ["onPrimary"], "scheme": "dark" },
+      "dark-cobalt-container": { "role": "primary", "displayName": "Dark Cobalt Container", "materialRoles": ["primaryContainer"], "scheme": "dark" },
+      "dark-on-cobalt-container": { "role": "primary", "displayName": "Dark On Cobalt Container", "materialRoles": ["onPrimaryContainer"], "scheme": "dark" },
+      "dark-slate-secondary": { "role": "secondary", "displayName": "Dark Slate Secondary", "materialRoles": ["secondary", "onSurfaceVariant"], "scheme": "dark" },
+      "dark-ground": { "role": "neutral", "displayName": "Dark Ground", "materialRoles": ["background", "surfaceContainer"], "scheme": "dark" },
+      "dark-panel": { "role": "neutral", "displayName": "Dark Panel", "materialRoles": ["surface", "surfaceContainerLow", "onSecondary"], "scheme": "dark" },
+      "dark-ink": { "role": "neutral", "displayName": "Dark Ink", "materialRoles": ["onBackground", "onSurface", "onSecondaryContainer"], "scheme": "dark" },
+      "dark-quiet-surface": { "role": "neutral", "displayName": "Dark Quiet Surface", "materialRoles": ["secondaryContainer", "surfaceVariant", "surfaceContainerHighest"], "scheme": "dark" },
+      "dark-outline": { "role": "neutral", "displayName": "Dark Outline", "materialRoles": ["outline"], "scheme": "dark" },
+      "dark-quiet-rule": { "role": "neutral", "displayName": "Dark Quiet Rule", "materialRoles": ["outlineVariant"], "scheme": "dark" },
+      "dark-coverage-amber": { "role": "tertiary", "displayName": "Dark Coverage Amber", "materialRoles": ["tertiary", "onTertiaryContainer"], "scheme": "dark" },
+      "dark-coverage-wash": { "role": "tertiary", "displayName": "Dark Coverage Wash", "materialRoles": ["tertiaryContainer"], "scheme": "dark" }
+    },
+    "typographyMeta": {
+      "reading": { "displayName": "Instrument Reading", "purpose": "Equal set-temperature and sampled-today readouts; native scalable tabular figures.", "source": "InstrumentReading in shared/src/commonMain/kotlin/cloud/airchive/shared/AirchiveTheme.kt" }
+    },
+    "inheritedTypography": {
+      "source": "Material Typography()",
+      "headlineLarge": "Production Home title; semibold override",
+      "titleLarge": "Device name and Today’s record; semibold override",
+      "titleMedium": "Reading units",
+      "titleSmall": "Temperature and finalized energy",
+      "bodyMedium": "Readout labels and setup guidance",
+      "bodySmall": "Freshness, context and command feedback",
+      "labelLarge": "Coverage badge",
+      "labelSmall": "Chart values and hours"
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      { "name": "panel-stack-width", "value": "available width < 300dp", "purpose": "Stack paired readings and coverage/freshness; horizontal divider replaces vertical readout rule." },
+      { "name": "panel-stack-type", "value": "fontScale > 1.2", "purpose": "The same stacking behavior, independently of available width." },
+      { "name": "production-content-limit", "value": "640dp maximum", "purpose": "Centered production route content." }
+    ],
+    "nativeComponents": [
+      { "name": "shared-panel", "source": "SharedInstrumentPanel", "details": "Surface roles; large shape; 3dp primary index band; no explicit shadow/elevation." },
+      { "name": "apply", "source": "Button in SharedInstrumentPanel", "details": "Native filled Material button. Disabled until a changed local draft and a current verified profile/state permit submission." },
+      { "name": "temperature-step", "source": "StepControl", "details": "FilledTonalIconButton with 20dp Canvas stroke icon, native states and explicit accessible labels; changes local draft." },
+      { "name": "choice-row", "source": "InstrumentChoice", "details": "TextButton, quiet top divider, right chevron and native DropdownMenu. Current option marked and disabled; supported options only." },
+      { "name": "power-switch", "source": "Switch in SharedInstrumentPanel", "details": "Real Material switch with On/Off/Unknown context; profile, live state and sending gates apply." },
+      { "name": "coverage-incomplete", "source": "coverageBadge in SharedInstrumentPanel", "details": "Informational Surface with 1dp tertiary border; textual absent/incomplete coverage status." },
+      { "name": "energy-chart", "source": "InstrumentEnergyChart", "details": "76dp native Canvas; eight three-hour Wh groups. Filled bars complete, dashed outlined bars partial, explicit Gap labels and accessible per-group counts." },
+      { "name": "navigation", "source": "InstrumentNavigation", "details": "Material NavigationBar and NavigationBarItem with visible Home, Device, Energy, History, Settings labels and Canvas glyphs." },
+      { "name": "outlined-fields", "source": "ProductionSettingsRoute", "details": "Existing native OutlinedTextField controls; labeled single-line credential fields and password transformation. No new custom field geometry." }
+    ],
+    "implementationScope": {
+      "global": "AirchiveTheme wraps production routes and production configuration-blocked UI.",
+      "composition": "Shared Instrument is implemented on production Home; secondary route layouts were not recomposed.",
+      "legacyDemo": "AirchiveApp still constructs default Material light/dark schemes.",
+      "dataPrinciples": ["Separate live/sample/sync freshness", "Gaps are not zero", "Sampled energy is not instantaneous power", "LG finalized totals are distinct from local interval sums", "Asia/Manila energy-day boundaries", "No invented device measurements or capabilities", "Explicit Apply and no automatic resend of ambiguous commands"],
+      "verificationRecord": ".impeccable/review/final-verification.md",
+      "verified": ["313 shared tests; zero failures", "Android debug and instrumentation APK builds", "Android debug lint", "Native explicit Apply/local draft and stale-state gating", "Phone light/dark and 1.3 text-scale screenshot runs"],
+      "reviewDisposition": "Six application findings resolved; no observed native UI defect warrants another batch within the scored scope.",
+      "pixelGate": "Failed/open, approximately 75% aggregate with hard region/missing classifications; not pixel-perfect and not waived.",
+      "limits": ["Labeled synthetic offline preview", "Signed-in physical-phone acceptance outstanding", "No additional real-device command acceptance", "Tablets, landscape and maximum system text scale not newly validated"]
+    }
+  },
+  "components": [
+    { "name": "Shared Instrument Panel", "kind": "custom", "refersTo": "shared-panel", "description": "Native grouped comfort and recorded-energy surface; see extensions.nativeComponents." },
+    { "name": "Apply", "kind": "button", "refersTo": "apply", "description": "Explicit submission of the local temperature draft." },
+    { "name": "Temperature Step", "kind": "button", "refersTo": "temperature-step", "description": "Native minus/plus tonal buttons within supported profile limits." },
+    { "name": "Mode and Fan Choice", "kind": "custom", "refersTo": "choice-row", "description": "Native selector rows with current value and dropdown choices." },
+    { "name": "Coverage Status", "kind": "custom", "refersTo": "coverage-incomplete", "description": "Informational text badge for complete, incomplete or absent usable coverage." },
+    { "name": "Instrument Reading", "kind": "custom", "refersTo": "instrument-reading", "description": "Paired native tabular figures with separate label and unit text." },
+    { "name": "Bottom Navigation", "kind": "nav", "refersTo": "navigation", "description": "Five persistent, text-labeled native destinations." },
+    { "name": "Credential Fields", "kind": "input", "description": "Existing native labeled outlined fields using Material behavior; see extensions.nativeComponents." }
+  ],
+  "narrative": {
+    "northStar": "Home Instrument",
+    "overview": "Airchive is a precise personal instrument for one AC. Porcelain surfaces, slate text and restrained cobalt make live comfort controls and recorded energy equally legible. The owner selected the Shared Instrument Home layout: paired readings live within one quiet panel, with familiar native controls and clear measurement labels.\n\nThis document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Secondary production routes inherit the shared theme but retain their existing layouts.",
+    "keyCharacteristics": ["Equal comfort and energy readings.", "Flat native surfaces and quiet structural rules.", "Cobalt actions, slate context and explicit coverage status.", "Native controls, scalable text and honest data states."],
+    "rules": [
+      { "name": "The Semantic Color Rule", "body": "Resolve colors through Material roles so the same hierarchy survives light, dark, disabled and selected states; never use color as the only indication of status.", "section": "colors" },
+      { "name": "The Equal Reading Rule", "body": "Temperature and energy use the same reading style and equal-width columns when space allows; enlarged text stacks them instead of shrinking their hierarchy.", "section": "typography" },
+      { "name": "The Stack Before Shrink Rule", "body": "Within the panel, available width below 300dp **or** font scale above 1.2 stacks both readouts and the coverage/freshness row. The readout divider becomes horizontal. At captured 1.3 text scale, lower energy content requires scrolling; native navigation remains accessible.", "section": "layout" },
+      { "name": "The Flat Panel Rule", "body": "Keep Home's grouped instrument structure legible through surface roles and dividers; do not add a bespoke shadow to recreate preview pixels.", "section": "elevation" }
+    ],
+    "dos": ["Do keep comfort and energy readings equally prominent and apply the native stacking rule.", "Do preserve scalable text, readable status text, native semantics and at least 48dp interactive targets.", "Do distinguish live device age, latest usable sample age and history-sync age wherever they affect a decision.", "Do show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.", "Do preserve local temperature drafts, explicit Apply and supported/current-state command gating.", "Do reuse production Material roles in both implemented themes and keep native control states visible."],
+    "donts": ["Don't ship preview rasters as controls, charts, backgrounds or production data.", "Don't infer room temperature, humidity, cost, savings, automation or unsupported writable capabilities.", "Don't turn unavailable measurements into zero or sampled energy into instantaneous power.", "Don't disguise disabled controls or uncertain command outcomes to match a generated comp.", "Don't treat inherited secondary layouts or the legacy demo as a completed Home-style recomposition.", "Don't describe the open failed pixel gate as passed or the implementation as pixel-perfect."]
+  }
+}

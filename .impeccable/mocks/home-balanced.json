@@ -1,0 +1,7 @@
+{
+  "prompt": "Edit this exact Airchive Home Instrument Android concept with one precise typographic correction. Preserve ALL regions, palette, wording, controls, bar values, gaps, status labels, preview-data disclosure, spacing relationships, portrait aspect, and navigation. The setpoint digits \"25\" currently look substantially taller than the energy digits \"1.24\". Make those TWO primary numerical readouts the SAME actual cap height, about110 image pixels in this862px-wide artwork, and the SAME weight. Reduce25 slightly and increase1.24 slightly to meet in the middle. Units remain smaller. These two readings need equal visual prominence because comfort control and energy history are equally important. Do not edit other words, numbers or chart geometry. No new elements. Keep the image straight-on full-screen, without hardware or background.",
+  "basePromptFile": "02-balanced-registers-prompt.txt",
+  "approved": false,
+  "role": "composition option",
+  "previewData": true
+}
