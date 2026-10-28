@@ -16,6 +16,7 @@ import cloud.airchive.shared.data.thinq.ThinQEntryResult
 import cloud.airchive.shared.data.thinq.ThinQLifecycleBoundary
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
+import cloud.airchive.shared.data.thinq.PendingCommandHost
 import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import cloud.airchive.shared.fakes.FakeProviders
 import kotlin.coroutines.cancellation.CancellationException
@@ -36,6 +37,8 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
     val live = remember { ThinQLiveStateController(providers.thinQ, "preview-ac",
         hasVerifiedProfile = { deviceProfile.value?.profile != null }) }
     val commands = remember { AcCommandController(providers.thinQ, "preview-ac") }
+    val commandScope = rememberCoroutineScope()
+    val commandHost = remember(commands, live) { PendingCommandHost(commandScope, commands, live) }
     val account = remember { ProductionAccountController(providers.ownerIdentity, providers.localHistory, "preview", "preview-ac") }
     val bindings = remember {
         ProductionThinQBindings(
@@ -72,6 +75,7 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
             refreshLiveState = { live.refresh() },
             removeCredential = { credential.value = credential.value.copy(present = false, credential = null) },
             clearCachedDeviceProfile = { deviceProfile.value = null },
+            dispatchCommand = commandHost::dispatch,
         )
     }
     var access by remember { mutableStateOf<OwnerAccessState>(OwnerAccessState.SignedOut) }

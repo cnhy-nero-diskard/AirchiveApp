@@ -10,6 +10,8 @@ import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.thinq.ThinQEntryResult
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind
+import cloud.airchive.shared.data.thinq.AcCommandSlotState
+import cloud.airchive.shared.data.thinq.AcCommandUiState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -152,5 +154,18 @@ class ProductionContextFenceTest {
 
         // A suppressed outcome (a superseded attempt records nothing) renders nothing.
         assertNull(productionSetupFeedback(null, activeKey))
+    }
+
+    @Test
+    fun supersededCommandSlotIsNeutralBusyAndDisablesControlsWithoutOldDetails() {
+        val occupiedOldSlot = AcCommandSlotState.Occupied(activeKey)
+        assertTrue(commandSlotIsNeutralBusy(occupiedOldSlot, supersededKey))
+        assertFalse(commandSlotIsNeutralBusy(occupiedOldSlot, activeKey),
+            "same-context sending retains its ordinary command status")
+        assertFalse(commandSlotIsNeutralBusy(AcCommandSlotState.Idle, supersededKey))
+        assertFalse(
+            homeControlsEnabled(current, profile, AcCommandUiState.Idle, commandSlotOccupied = true),
+            "the global slot disables a new-generation command until it is released",
+        )
     }
 }

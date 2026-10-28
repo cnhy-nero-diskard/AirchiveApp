@@ -1,7 +1,9 @@
 package cloud.airchive.shared
 
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
+import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.data.thinq.AcCommandController
+import cloud.airchive.shared.data.thinq.AcCommandDispatchResult
 import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
 import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
@@ -56,4 +58,8 @@ data class ProductionThinQBindings(
     val refreshLiveState: suspend () -> Unit,
     val removeCredential: suspend () -> Unit,
     val clearCachedDeviceProfile: suspend () -> Unit,
+    /** Synchronous non-queueing tap dispatch to the graph-owned command scope. */
+    val dispatchCommand: (AcCommand, ThinQContextKey?) -> AcCommandDispatchResult = { _, _ ->
+        AcCommandDispatchResult.ScopeClosed
+    },
 )

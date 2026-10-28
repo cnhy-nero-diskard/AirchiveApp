@@ -54,6 +54,9 @@ class AndroidProductionThinQGraph(
         temperatureStepOverride = BuildConfig.AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE.toDoubleOrNull(),
     )
 
+    /** Stable owner for command work; route composition never owns these jobs. */
+    private val commandScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     /** Shared lifecycle/context core: boundary, fenced entry, live/command controllers. */
     val coordinator = ThinQContextCoordinator(
         credentialStore = credentialStore,
@@ -62,6 +65,7 @@ class AndroidProductionThinQGraph(
         configuredDeviceId = configuredDeviceId,
         ownerUid = ownerUid,
         projectId = projectId,
+        commandScope = commandScope,
     )
 
     val liveStateController: ThinQLiveStateController get() = coordinator.liveStateController
@@ -122,6 +126,7 @@ class AndroidProductionThinQGraph(
 
     override fun close() {
         credentialObservationScope.cancel()
+        commandScope.cancel()
         client.close()
     }
 }

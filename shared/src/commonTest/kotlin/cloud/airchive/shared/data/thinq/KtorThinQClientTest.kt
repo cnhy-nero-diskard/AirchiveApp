@@ -251,6 +251,39 @@ class KtorThinQClientTest {
     }
 
     @Test
+    fun capturedOperationContextPinsCredentialAcrossControlAndBoundedConfirmation() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val store = stored()
+        val replacementPat = "thinq-pat.example.invalid-replacement-2b7c"
+        val thinq = client(requests, store) { request ->
+            when (request.url.encodedPath) {
+                "/devices/ac-device-1/profile" -> jsonOk(profileJson)
+                "/devices/ac-device-1/control" -> {
+                    // Model a replacement after the operation acquired its
+                    // authorization snapshot but before its confirmation read.
+                    store.save(replacementPat, "PH")
+                    jsonOk("""{"accepted":true}""")
+                }
+                "/devices/ac-device-1/state" -> jsonOk(stateJson(power = "POWER_OFF"))
+                else -> error("Unexpected path: ${request.url.encodedPath}")
+            }
+        }
+
+        val operation = thinq.captureOperationContext()
+        store.save(replacementPat, "PH")
+        val result = operation.setState(AcCommand.SetPower(REQUESTED_AT, powerOn = false))
+
+        assertEquals(CommandStatus.CONFIRMED, result.status)
+        assertEquals(3, requests.size, "the bounded operation is profile + POST + one confirmation GET")
+        assertTrue(
+            requests.all { it.headers[HttpHeaders.Authorization] == "Bearer $pat" },
+            "every step uses the captured credential, never the replacement saved afterward",
+        )
+        assertEquals(replacementPat, store.readToken(), "the replacement remains stored for later operations")
+        thinq.close()
+    }
+
+    @Test
     fun regionRoutingFollowsCountryOnTheWire() = runBlocking {
         for ((country, expectedHost) in listOf("PH" to "api-kic.lgthinq.com", "US" to "api-aic.lgthinq.com", "DE" to "api-eic.lgthinq.com")) {
             val store = FakeThinQCredentialStore(stableClientId)

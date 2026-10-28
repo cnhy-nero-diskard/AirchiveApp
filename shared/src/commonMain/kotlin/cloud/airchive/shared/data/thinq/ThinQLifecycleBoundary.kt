@@ -346,4 +346,4 @@ internal suspend fun ThinQLifecycleBoundary?.publishIfCurrent(
  * key is treated as stale (safe default).
  */
 internal fun ThinQLifecycleBoundary?.isCurrentContext(captured: ThinQContextKey?): Boolean =
-    this == null || (captured != null && isCurrent(captured))
+    this == null || (captured != null && captured.ownerUid != null && isCurrent(captured))

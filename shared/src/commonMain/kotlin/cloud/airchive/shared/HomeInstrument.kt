@@ -66,6 +66,9 @@ internal fun ProductionHomeInstrument(
     val device = publication?.device
     val live = bindings?.liveStateController?.state?.collectAsState()?.value ?: ThinQLiveRefreshState.NotRead
     val command = bindings?.commandController?.state?.collectAsState()?.value ?: AcCommandUiState.Idle
+    val commandSlot = bindings?.commandController?.slotState?.collectAsState()?.value ?: AcCommandSlotState.Idle
+    val commandSlotOccupied = commandSlot is AcCommandSlotState.Occupied
+    val neutralCommandBusy = commandSlotIsNeutralBusy(commandSlot, contextKey)
     var entrySettled by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     var entryReadComplete by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     var entryReadFailed by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
@@ -116,20 +119,17 @@ internal fun ProductionHomeInstrument(
         // Controls dispatch only after a successful matching read for this
         // context; the tap-time context key fences the scheduled submission.
         onCommand = if (canRead && entryReadComplete) { request ->
-            val activeBindings = checkNotNull(bindings)
-            val capturedKey = contextKey
-            scope.launch {
-                submitAndPresentCommand(
-                    request,
-                    activeBindings.commandController,
-                    activeBindings.liveStateController,
-                    capturedKey,
-                )
-            }
+            // The graph-owned host synchronously tries the one device-global
+            // slot and then owns the coroutine beyond this route's lifetime.
+            // The tap-time context key is retained across every command/result
+            // publication; navigation/detail recomposition never resends it.
+            bindings.dispatchCommand(request, contextKey)
         } else null,
         onRefresh = { scope.launch { refresh() } }, onEnergy = onEnergy,
         onSetup = if (!canRead) onSettings else null,
         refreshing = reading,
+        commandSlotOccupied = commandSlotOccupied,
+        neutralCommandBusy = neutralCommandBusy,
         setupMessage = when {
             !hasSession -> "Sign in to connect your AC and recorded history."
             !canRead -> "Connect ThinQ in Settings to read and control your AC."
@@ -180,6 +180,8 @@ fun SharedInstrumentPanel(
     setupMessage: String? = null,
     refreshing: Boolean = false,
     showEnergy: Boolean = true,
+    commandSlotOccupied: Boolean = false,
+    neutralCommandBusy: Boolean = false,
 ) {
     val zone = remember { TimeZone.of(DEFAULT_DAY_TIME_ZONE) }
     val today = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).date
@@ -193,7 +195,7 @@ fun SharedInstrumentPanel(
     val observed = known?.targetTemperature?.takeIf { it.isFinite() }
     var draft by remember(profile, observed) { mutableStateOf(observed?.takeIf { it in allowed }) }
     val selected = draft ?: observed
-    val enabled = homeControlsEnabled(live, profile, commandState) && onCommand != null
+    val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
     val yesterday = today.minus(1, DateTimeUnit.DAY).toString()
     val finalized = snapshot.dailyTotals.firstOrNull {
         it.localDate == yesterday && it.source == DailyTotalSource.LG_FINALIZED && it.finalized &&
@@ -270,6 +272,19 @@ fun SharedInstrumentPanel(
                 Text(feedback, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
+            if (neutralCommandBusy) {
+                Text(
+                    "A previous control request is still finishing. No new command was sent or queued; wait, then retry.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            } else if (commandSlotOccupied && commandState !is AcCommandUiState.Sending) {
+                Text(
+                    "A control request is still finishing. Controls are paused until it completes.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
             if (onSetup != null) TextButton(onClick = onSetup) { Text("Open Settings") }
             else if ((!enabled || !showEnergy) && commandState !is AcCommandUiState.Sending) {
                 TextButton(onClick = onRefresh, enabled = !refreshing) { Text(if (refreshing) "Reading device state…" else "Refresh device state") }
@@ -322,9 +337,17 @@ fun SharedInstrumentPanel(
 }
 }
 
-internal fun homeControlsEnabled(live: ThinQLiveRefreshState, profile: ThinQDeviceProfile?, command: AcCommandUiState): Boolean =
-    live is ThinQLiveRefreshState.Current && live.canIssueCommands && profile != null &&
-        live.state.deviceId == profile.deviceId && command !is AcCommandUiState.Sending
+internal fun homeControlsEnabled(
+    live: ThinQLiveRefreshState,
+    profile: ThinQDeviceProfile?,
+    command: AcCommandUiState,
+    commandSlotOccupied: Boolean = false,
+): Boolean = live is ThinQLiveRefreshState.Current && live.canIssueCommands && profile != null &&
+    live.state.deviceId == profile.deviceId && command !is AcCommandUiState.Sending && !commandSlotOccupied
+
+/** True only when the one device-global command slot belongs to another context. */
+internal fun commandSlotIsNeutralBusy(slot: AcCommandSlotState, currentKey: ThinQContextKey?): Boolean =
+    slot is AcCommandSlotState.Occupied && slot.contextKey != currentKey
 
 @Composable
 private fun InstrumentReadout(label: String, value: String, unit: String) {

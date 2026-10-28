@@ -114,22 +114,31 @@ class KtorThinQClient(
 
     // ------------------------------------------------------------ public API
 
-    override suspend fun listDevices(): List<ThinQDevice> {
-        val ctx = currentCredentialContext()
+    override suspend fun captureOperationContext(): ThinQPort =
+        CredentialBoundThinQPort(currentCredentialContext())
+
+    override suspend fun listDevices(): List<ThinQDevice> =
+        listDevicesWithContext(currentCredentialContext())
+
+    private suspend fun listDevicesWithContext(ctx: CredentialContext): List<ThinQDevice> {
         val payload = requestRead(ctx, "devices")
         return ThinQPayloads.deviceList(payload)
     }
 
-    override suspend fun profile(deviceId: String): ThinQDeviceProfile {
+    override suspend fun profile(deviceId: String): ThinQDeviceProfile =
+        profileWithContext(deviceId, currentCredentialContext())
+
+    private suspend fun profileWithContext(deviceId: String, ctx: CredentialContext): ThinQDeviceProfile {
         requireConfiguredDevice(deviceId)
-        val ctx = currentCredentialContext()
         val payload = requestRead(ctx, "devices/$deviceId/profile")
         return ThinQPayloads.acProfile(deviceId, payload, temperatureStepOverride).toContractProfile()
     }
 
-    override suspend fun liveState(deviceId: String): ThinQLiveState {
+    override suspend fun liveState(deviceId: String): ThinQLiveState =
+        liveStateWithContext(deviceId, currentCredentialContext())
+
+    private suspend fun liveStateWithContext(deviceId: String, ctx: CredentialContext): ThinQLiveState {
         requireConfiguredDevice(deviceId)
-        val ctx = currentCredentialContext()
         // The profile establishes the presentation unit; each live-state read
         // re-reads it so a stale profile can never mislabel a temperature.
         val profile = fetchProfile(ctx, deviceId)
@@ -138,14 +147,7 @@ class KtorThinQClient(
     }
 
     override suspend fun setState(command: AcCommand): CommandOutcome {
-        val deviceId = configuredDeviceId
-        val base = CommandOutcome(
-            commandId = "thinq-${ThinQMessageId.next()}",
-            deviceId = deviceId,
-            command = command,
-            status = CommandStatus.SENDING,
-            submittedAtEpochMillis = command.requestedAtEpochMillis.takeIf { it > 0 } ?: nowEpochMillis(),
-        )
+        val base = commandBase(command)
         val ctx = try {
             currentCredentialContext()
         } catch (cancelled: CancellationException) {
@@ -159,7 +161,15 @@ class KtorThinQClient(
         } catch (_: Exception) {
             return base.failed(CommandFailure.UNKNOWN, "ThinQ credential state could not be read.")
         }
+        return setStateWithContext(command, ctx, base)
+    }
 
+    private suspend fun setStateWithContext(
+        command: AcCommand,
+        ctx: CredentialContext,
+        base: CommandOutcome = commandBase(command),
+    ): CommandOutcome {
+        val deviceId = configuredDeviceId
         // The fresh profile is the source of truth for which values are legal;
         // unsupported properties/values are rejected locally, before any POST.
         val profile = try {
@@ -229,6 +239,14 @@ class KtorThinQClient(
         )
     }
 
+    private fun commandBase(command: AcCommand): CommandOutcome = CommandOutcome(
+        commandId = "thinq-${ThinQMessageId.next()}",
+        deviceId = configuredDeviceId,
+        command = command,
+        status = CommandStatus.SENDING,
+        submittedAtEpochMillis = command.requestedAtEpochMillis.takeIf { it > 0 } ?: nowEpochMillis(),
+    )
+
     // ------------------------------------------------------------- verifier
 
     override suspend fun verify(request: ThinQCredentialVerificationRequest): ThinQVerificationResult {
@@ -286,6 +304,17 @@ class KtorThinQClient(
     // ------------------------------------------------------ internal plumbing
 
     private data class CredentialContext(val token: String, val country: String, val clientId: String)
+
+    /** Opaque facade that pins one protected credential snapshot to one operation. */
+    private inner class CredentialBoundThinQPort(
+        private val context: CredentialContext,
+    ) : ThinQPort {
+        override suspend fun captureOperationContext(): ThinQPort = this
+        override suspend fun listDevices(): List<ThinQDevice> = listDevicesWithContext(context)
+        override suspend fun profile(deviceId: String): ThinQDeviceProfile = profileWithContext(deviceId, context)
+        override suspend fun liveState(deviceId: String): ThinQLiveState = liveStateWithContext(deviceId, context)
+        override suspend fun setState(command: AcCommand): CommandOutcome = setStateWithContext(command, context)
+    }
 
     private enum class SuccessMode { REQUIRE_RESPONSE, IGNORE_BODY }
 

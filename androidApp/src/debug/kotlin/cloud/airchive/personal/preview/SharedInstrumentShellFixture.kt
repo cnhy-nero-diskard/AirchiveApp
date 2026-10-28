@@ -151,6 +151,7 @@ class SharedInstrumentShellFixture(context: Context) {
         ownerUid = null,
         projectId = FIXTURE_PROJECT_ID,
         nowEpochMillis = clock::now,
+        commandScope = scope,
     )
 
     /**

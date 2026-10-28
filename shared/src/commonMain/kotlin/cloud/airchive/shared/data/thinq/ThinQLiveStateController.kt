@@ -138,7 +138,24 @@ class ThinQLiveStateController(
             if (!lifecycle.isCurrentContext(captured)) return@withLock
 
             val live = try {
-                thinQ.liveState(configuredDeviceId).also { result ->
+                // Pin the credential snapshot for this operation before its
+                // first LG request. If the context changes while the local
+                // protected-store read is suspended, drop it before dispatch;
+                // if it changes afterward, the bound port still cannot borrow
+                // a replacement credential.
+                // The credential-context read is local protected-store work,
+                // so capture it under the short lifecycle boundary; this
+                // prevents a token/country pair from straddling replacement.
+                // No LG request runs while the boundary is held.
+                val operationPort = if (lifecycle == null) {
+                    thinQ.captureOperationContext()
+                } else {
+                    lifecycle.withBoundary {
+                        if (lifecycle.isCurrent(captured)) thinQ.captureOperationContext() else null
+                    } ?: return@withLock
+                }
+                if (!lifecycle.isCurrentContext(captured)) return@withLock
+                operationPort.liveState(configuredDeviceId).also { result ->
                     if (result.deviceId != configuredDeviceId) {
                         throw ThinQClientException.MalformedResponse
                     }

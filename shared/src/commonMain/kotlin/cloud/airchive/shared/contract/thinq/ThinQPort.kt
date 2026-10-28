@@ -19,6 +19,21 @@ import kotlin.math.round
  */
 interface ThinQPort {
 
+    /**
+     * Captures an opaque, operation-bound adapter context before an eligible
+     * request starts. Production implementations may return a facade that
+     * privately pins the credential material used for the entire request
+     * sequence (including bounded command confirmation); callers never receive
+     * the token itself. Fakes/default adapters are already single-context and
+     * safely use `this`.
+     *
+     * Lifecycle owners must recheck their captured non-secret context key after
+     * this suspend point and before dispatch. Once a context has been captured,
+     * later credential replacement cannot make this operation borrow the new
+     * credential.
+     */
+    suspend fun captureOperationContext(): ThinQPort = this
+
     /** Devices visible to the configured token (used to verify the intended AC). */
     suspend fun listDevices(): List<ThinQDevice>
 

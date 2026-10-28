@@ -3,6 +3,7 @@ package cloud.airchive.shared.data.thinq
 import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
+import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQCredentialVerifier
@@ -14,7 +15,9 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -92,6 +95,7 @@ class ThinQContextCoordinator(
     ownerUid: String? = null,
     projectId: String = "",
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    private val commandScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
     /** Lifecycle boundary: the single source of truth for the active context. */
@@ -125,6 +129,9 @@ class ThinQContextCoordinator(
         nowEpochMillis = nowEpochMillis,
         lifecycle = lifecycle,
     )
+
+    /** Stable graph-lifetime owner for command submit + bounded outcome publication. */
+    private val pendingCommandHost = PendingCommandHost(commandScope, commandController, liveStateController)
 
     /** Verify-before-save setup; a failure never advances the generation. */
     private val credentialSetup = ThinQCredentialSetupCoordinator(
@@ -188,6 +195,22 @@ class ThinQContextCoordinator(
         val captured = snapshot.contextKey
         if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
 
+        // Capture the protected credential once for list + profile. A setup
+        // replacement can proceed while this local read is suspended, but the
+        // captured key is rechecked before any LG request and the bound port
+        // cannot borrow the replacement PAT if invalidation lands later.
+        val operationPort = try {
+            lifecycle.withBoundary {
+                if (lifecycle.isCurrent(captured)) thinQ.captureOperationContext() else null
+            } ?: return ThinQEntryResult.Superseded
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            clearDeviceProfileIfCurrent(captured)
+            return if (lifecycle.isCurrent(captured)) ThinQEntryResult.Failed else ThinQEntryResult.Superseded
+        }
+        if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
+
         val publication = mutableDeviceProfile.value
         val needsDeviceProfileFetch = publication == null ||
             publication.contextKey != captured ||
@@ -197,7 +220,7 @@ class ThinQContextCoordinator(
         if (needsDeviceProfileFetch) {
             // --- LG network work: no lifecycle/profile mutex held. ---
             val device = try {
-                thinQ.listDevices().firstOrNull { it.deviceId == configuredDeviceId }
+                operationPort.listDevices().firstOrNull { it.deviceId == configuredDeviceId }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -219,7 +242,7 @@ class ThinQContextCoordinator(
             }
 
             val profile = try {
-                thinQ.profile(configuredDeviceId)
+                operationPort.profile(configuredDeviceId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -274,6 +297,15 @@ class ThinQContextCoordinator(
         }
         liveStateController.refresh(captured)
     }
+
+    /**
+     * Graph-owned, non-queueing command dispatch (task 2.5). The owner tap
+     * supplies its captured lifecycle key; the operation survives disposable
+     * Home/Device route composition and uses the same controller slot across
+     * generations.
+     */
+    fun dispatchCommand(command: AcCommand, capturedContext: ThinQContextKey?): AcCommandDispatchResult =
+        pendingCommandHost.dispatch(command, capturedContext)
 
     // ------------------------------------------------------------------
     // Credential lifecycle (task 2.1)
@@ -501,6 +533,7 @@ class ThinQContextCoordinator(
         refreshLiveState = ::refreshLiveState,
         removeCredential = ::removeCredential,
         clearCachedDeviceProfile = ::clearCachedDeviceProfile,
+        dispatchCommand = ::dispatchCommand,
     )
 
     private data class EntrySnapshot(
