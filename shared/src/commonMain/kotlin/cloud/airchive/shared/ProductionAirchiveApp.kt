@@ -63,6 +63,8 @@ import cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult
 import cloud.airchive.shared.data.onboarding.ProductionAccountConfirmStep
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
 import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
+import cloud.airchive.shared.data.thinq.ThinQContextKey
+import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
@@ -646,16 +648,21 @@ fun ProductionDeviceRoute(
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val device = thinQBindings?.device?.collectAsState()?.value
-    val profile = thinQBindings?.profile?.collectAsState()?.value
+    // Read the publication first, then the active context key: a torn read can
+    // then only hide the card (key mismatch), never render a superseded
+    // context's device/profile under the active one (task 2.3).
+    val publication = thinQBindings?.deviceProfile?.collectAsState()?.value
+    val contextKey = thinQBindings?.contextKey?.collectAsState()?.value
     InstrumentPage("Device", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Live state and supported controls for your air conditioner." else null) {
         ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession = true,
             onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true)
         InstrumentPanel {
             InstrumentDisclosure("Device details", "Identity, profile and last confirmed state", informational = true) {
                 ProductionConfiguredAcCard(configuredDeviceId, identity)
-                if (thinQBindings != null && device != null && profile != null) {
-                    DeviceLiveStateCard(thinQBindings.liveStateController, device, profile,
+                if (thinQBindings != null && publication != null && publication.profile != null &&
+                    deviceDetailsReady(publication, contextKey, credentialState)
+                ) {
+                    DeviceLiveStateCard(thinQBindings.liveStateController, publication.device, publication.profile,
                         simulated = false, onRefresh = thinQBindings.refreshLiveState, readOnOpen = false)
                 }
             }
@@ -663,6 +670,26 @@ fun ProductionDeviceRoute(
         TextButton(shape = MaterialTheme.shapes.small, onClick = onBackToHome, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back to Home") }
     }
 }
+
+/**
+ * Device-details rendering fence (task 2.3): the live card only renders when
+ * its publication still belongs to the active lifecycle context, carries a
+ * verified profile, and the credential that produced it is still present and
+ * unlockable — so an absent or key-lost credential never presents an old
+ * reading as current. A superseded or cleared publication is hidden rather
+ * than rendered; opening the disclosure itself stays presentation-only
+ * (`readOnOpen=false` above).
+ */
+internal fun deviceDetailsReady(
+    publication: ThinQDeviceProfilePublication?,
+    currentKey: ThinQContextKey?,
+    credential: ThinQCredentialState,
+): Boolean = publication != null &&
+    publication.profile != null &&
+    credential.present &&
+    !credential.unlockFailed &&
+    currentKey != null &&
+    publication.contextKey == currentKey
 
 // -------------------------------------------------------------------------
 // Settings

@@ -43,6 +43,7 @@ import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.AcCommandSubmitResult
 import cloud.airchive.shared.data.thinq.AcCommandUiState
+import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
@@ -594,12 +595,17 @@ internal suspend fun submitAndPresentCommand(
     command: AcCommand,
     commands: AcCommandController,
     live: ThinQLiveStateController,
+    contextKey: ThinQContextKey? = null,
 ) {
-    if (commands.submit(command) !is AcCommandSubmitResult.Submitted) return
+    // The same context captured at tap time fences the dispatch and every
+    // publication: a command scheduled under a context that ended before it
+    // ran is never sent, and a late outcome never becomes live state for a
+    // replacement context.
+    if (commands.submit(command, contextKey) !is AcCommandSubmitResult.Submitted) return
     when (val result = commands.state.value) {
-        is AcCommandUiState.Accepted -> live.acceptCommandOutcome(result.outcome)
-        is AcCommandUiState.Confirmed -> live.acceptCommandOutcome(result.outcome)
-        is AcCommandUiState.Unconfirmed -> live.acceptCommandOutcome(result.outcome)
+        is AcCommandUiState.Accepted -> live.acceptCommandOutcome(result.outcome, contextKey)
+        is AcCommandUiState.Confirmed -> live.acceptCommandOutcome(result.outcome, contextKey)
+        is AcCommandUiState.Unconfirmed -> live.acceptCommandOutcome(result.outcome, contextKey)
         else -> Unit
     }
 }

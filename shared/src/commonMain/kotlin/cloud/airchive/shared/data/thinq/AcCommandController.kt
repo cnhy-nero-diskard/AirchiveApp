@@ -7,10 +7,12 @@ import cloud.airchive.shared.contract.thinq.CommandStatus
 import cloud.airchive.shared.contract.thinq.ThinQPort
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 
 /**
  * One-at-a-time AC command submission and per-command UI state for exactly one
@@ -69,18 +71,34 @@ import kotlinx.coroutines.sync.Mutex
      *   submitted command is rejected and replaced with a fresh FAILED /
      *   [CommandFailure.UNKNOWN] outcome bound to the configured device/request.
  *
+ * ## Lifecycle fencing (OpenSpec `deliver-shared-instrument-ui` tasks 2.1/2.3)
+ *
+ * [submit] captures its [ThinQContextKey] (from the tap-time caller or at
+ * entry) and fences the whole operation with it: a superseded context is
+ * refused before the slot is taken and again immediately before dispatch, and
+ * every state publication happens inside one [ThinQLifecycleBoundary] section
+ * with a current-key check. An already-dispatched command whose context ends
+ * mid-flight keeps its honest outcome path (it may have gone out and is never
+ * resent), but its late result is discarded instead of becoming the new
+ * context's feedback.
+ *
  * ## Non-goals
  *
  * This controller issues no Firestore calls, no profile reads, and no
  * historical-telemetry writes; it only serializes UI submissions and reports
  * their outcome. Commands are all-or-nothing: the requested [AcCommand] is
  * passed to [ThinQPort.setState] **exactly once** (or zero times when
- * [AcCommandSubmitResult.IgnoredWhilePending] is returned) and never retried.
+ * [AcCommandSubmitResult.IgnoredWhilePending] or
+ * [AcCommandSubmitResult.IgnoredStaleContext] is returned) and never retried.
+ *
+ * @param lifecycle shared lifecycle boundary; `null` (demo/preview graphs)
+ *   means a single context that can never be invalidated.
  */
 class AcCommandController(
     private val thinQ: ThinQPort,
     private val configuredDeviceId: String,
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    private val lifecycle: ThinQLifecycleBoundary? = null,
 ) {
 
     init {
@@ -106,57 +124,98 @@ class AcCommandController(
      * [AcCommandSubmitResult.Submitted] is returned. A new submission is always
      * allowed once the previous one is terminal; only the in-flight window is
      * exclusive.
+     *
+     * ## Lifecycle fencing (tasks 2.1/2.3)
+     *
+     * [contextKey] is the context captured when the owner tapped the control
+     * (`null` captures the current context here). It is checked before taking
+     * the submission slot, rechecked immediately before dispatch, and used to
+     * fence the [AcCommandUiState.Sending] and terminal publications:
+     *
+     *  - a command whose context ended **before dispatch** returns
+     *    [AcCommandSubmitResult.IgnoredStaleContext] without ever reaching the
+     *    port, so scheduled stale work can never use a replacement credential;
+     *  - an already-dispatched command keeps its honest path (it may have been
+     *    sent and is never resent), but its late outcome is discarded when the
+     *    context ended, so it cannot become the new context's feedback.
      */
-    suspend fun submit(command: AcCommand): AcCommandSubmitResult {
+    suspend fun submit(command: AcCommand, contextKey: ThinQContextKey? = null): AcCommandSubmitResult {
+        val captured = contextKey ?: lifecycle?.current()
+        // Dispatch fence — a superseded operation never sends.
+        if (!lifecycle.isCurrentContext(captured)) return AcCommandSubmitResult.IgnoredStaleContext
         if (!mutex.tryLock()) return AcCommandSubmitResult.IgnoredWhilePending
         try {
-            mutableState.value = AcCommandUiState.Sending(command = command)
+            val publishedSending = lifecycle.publishIfCurrent(captured) {
+                mutableState.value = AcCommandUiState.Sending(command = command)
+            }
+            if (!publishedSending) return AcCommandSubmitResult.IgnoredStaleContext
+            // Recheck right before the port call (no boundary is held across it).
+            if (!lifecycle.isCurrentContext(captured)) return AcCommandSubmitResult.IgnoredStaleContext
 
             val outcome = try {
                 thinQ.setState(command)
             } catch (cancelled: CancellationException) {
                 // The command may have gone out before cancellation was observed:
-                // replace Sending with Unconfirmed and keep cancellation propagating.
-                mutableState.value = AcCommandUiState.Unconfirmed(
-                    outcome = controllerOutcome(
-                        command, CommandStatus.UNCONFIRMED, CommandFailure.UNKNOWN, MESSAGE_CANCELLED,
-                    ),
-                )
+                // replace Sending with Unconfirmed (unless the context ended —
+                // then the invalidation already reset the state) and keep
+                // cancellation propagating.
+                withContext(NonCancellable) {
+                    publishTerminal(
+                        captured,
+                        AcCommandUiState.Unconfirmed(
+                            outcome = controllerOutcome(
+                                command, CommandStatus.UNCONFIRMED, CommandFailure.UNKNOWN, MESSAGE_CANCELLED,
+                            ),
+                        ),
+                    )
+                }
                 throw cancelled
             } catch (network: ThinQClientException.Network) {
-                mutableState.value = AcCommandUiState.Unconfirmed(
-                    outcome = controllerOutcome(
-                        command, CommandStatus.UNCONFIRMED, CommandFailure.NETWORK, MESSAGE_AMBIGUOUS_NETWORK,
+                publishTerminal(
+                    captured,
+                    AcCommandUiState.Unconfirmed(
+                        outcome = controllerOutcome(
+                            command, CommandStatus.UNCONFIRMED, CommandFailure.NETWORK, MESSAGE_AMBIGUOUS_NETWORK,
+                        ),
                     ),
                 )
                 return AcCommandSubmitResult.Submitted
             } catch (timeout: ThinQClientException.Timeout) {
-                mutableState.value = AcCommandUiState.Unconfirmed(
-                    outcome = controllerOutcome(
-                        command, CommandStatus.UNCONFIRMED, CommandFailure.TIMEOUT, MESSAGE_AMBIGUOUS_TIMEOUT,
+                publishTerminal(
+                    captured,
+                    AcCommandUiState.Unconfirmed(
+                        outcome = controllerOutcome(
+                            command, CommandStatus.UNCONFIRMED, CommandFailure.TIMEOUT, MESSAGE_AMBIGUOUS_TIMEOUT,
+                        ),
                     ),
                 )
                 return AcCommandSubmitResult.Submitted
             } catch (typed: ThinQClientException) {
-                mutableState.value = AcCommandUiState.Failed(
-                    outcome = controllerOutcome(
-                        command, CommandStatus.FAILED, typed.thinQCommandFailure(), MESSAGE_TYPED_FAILURE,
+                publishTerminal(
+                    captured,
+                    AcCommandUiState.Failed(
+                        outcome = controllerOutcome(
+                            command, CommandStatus.FAILED, typed.thinQCommandFailure(), MESSAGE_TYPED_FAILURE,
+                        ),
                     ),
                 )
                 return AcCommandSubmitResult.Submitted
             } catch (generic: Exception) {
                 // Conservative about a possible send: UNCONFIRMED/UNKNOWN, and the
                 // throwable's text never reaches a published outcome or state.
-                mutableState.value = AcCommandUiState.Unconfirmed(
-                    outcome = controllerOutcome(
-                        command, CommandStatus.UNCONFIRMED, CommandFailure.UNKNOWN, MESSAGE_AMBIGUOUS_GENERIC,
+                publishTerminal(
+                    captured,
+                    AcCommandUiState.Unconfirmed(
+                        outcome = controllerOutcome(
+                            command, CommandStatus.UNCONFIRMED, CommandFailure.UNKNOWN, MESSAGE_AMBIGUOUS_GENERIC,
+                        ),
                     ),
                 )
                 return AcCommandSubmitResult.Submitted
             }
 
             val validated = outcome.ifUnexpectedDeviceUseFailure(command)
-            mutableState.value = when (validated.status) {
+            val terminal = when (validated.status) {
                 CommandStatus.CONFIRMED -> AcCommandUiState.Confirmed(validated)
                 CommandStatus.ACCEPTED -> AcCommandUiState.Accepted(validated)
                 CommandStatus.FAILED -> AcCommandUiState.Failed(validated.ensureFailure())
@@ -167,10 +226,34 @@ class AcCommandController(
                     ),
                 )
             }
+            publishTerminal(captured, terminal)
             return AcCommandSubmitResult.Submitted
         } finally {
             mutex.unlock()
         }
+    }
+
+    /**
+     * Publishes a terminal/starting command state only while [captured] is
+     * still the current context. When the context ended, the invalidation has
+     * already reset presentation and this write is dropped.
+     */
+    private suspend fun publishTerminal(captured: ThinQContextKey?, state: AcCommandUiState) {
+        lifecycle.publishIfCurrent(captured) { mutableState.value = state }
+    }
+
+    /**
+     * Invalidates presentation because the lifecycle context changed: resets to
+     * [AcCommandUiState.Idle] so no superseded command feedback survives.
+     *
+     * Called by the lifecycle owner **while holding the lifecycle boundary**;
+     * deliberately a direct state write that never takes [mutex], so
+     * invalidation never waits for a command suspended in the port. A still
+     * in-flight submission keeps its slot (it is never resent) and its late
+     * outcome is discarded by the same fence.
+     */
+    fun resetForContextChange() {
+        mutableState.value = AcCommandUiState.Idle
     }
 
     /** Rejects a returned outcome for any other device or any other command. */
@@ -229,6 +312,13 @@ class AcCommandController(
 sealed interface AcCommandSubmitResult {
     data object Submitted : AcCommandSubmitResult
     data object IgnoredWhilePending : AcCommandSubmitResult
+
+    /**
+     * The command's originating lifecycle context ended before dispatch:
+     * nothing was sent, no state was published for it, and the replacement
+     * context's credential is never borrowed for it (task 2.3).
+     */
+    data object IgnoredStaleContext : AcCommandSubmitResult
 }
 
 /**

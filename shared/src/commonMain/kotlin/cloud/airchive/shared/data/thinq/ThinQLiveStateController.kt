@@ -7,11 +7,13 @@ import cloud.airchive.shared.contract.thinq.CommandOutcome
 import cloud.airchive.shared.contract.thinq.CommandStatus
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Serialized live ThinQ state for exactly one configured device (OpenSpec task
@@ -39,6 +41,23 @@ import kotlinx.coroutines.sync.withLock
  * failure always downgrades to [ThinQLiveRefreshState.Stale], never back to
  * [ThinQLiveRefreshState.Current].
  *
+ * ## Lifecycle fencing (OpenSpec `deliver-shared-instrument-ui` tasks 2.1/2.3)
+ *
+ * Every operation captures its [ThinQContextKey] at entry (or accepts one from
+ * the caller that captured it earlier, e.g. the coordinator's Device entry) and
+ * then:
+ *
+ *  1. rechecks it immediately before dispatching the LG request, so an
+ *     operation whose context ended never sends — and never borrows a
+ *     replacement credential;
+ *  2. publishes every snapshot inside one [ThinQLifecycleBoundary] section with
+ *     a current-key check, so a late old-context result is discarded instead of
+ *     repopulating cleared presentation or enabling controls.
+ *
+ * [resetForContextChange] is the invalidation hook: a direct state write that
+ * never takes this controller's read [Mutex], so invalidation completes even
+ * while a live read is suspended in the network.
+ *
  * ## Safety
  *
  * - One [Mutex] serializes entry/manual reads so concurrent calls never publish
@@ -56,12 +75,16 @@ import kotlinx.coroutines.sync.withLock
  *
  * The `configuredDeviceId` is fixed at construction; callers cannot request any
  * other device, so unsupported/arbitrary ids are structurally impossible here.
+ *
+ * @param lifecycle shared lifecycle boundary; `null` (demo/preview graphs)
+ *   means a single context that can never be invalidated.
  */
 class ThinQLiveStateController(
     private val thinQ: ThinQPort,
     private val configuredDeviceId: String,
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val hasVerifiedProfile: () -> Boolean = { false },
+    private val lifecycle: ThinQLifecycleBoundary? = null,
 ) {
 
     init {
@@ -80,21 +103,39 @@ class ThinQLiveStateController(
      * The owner opened the Device screen. Always performs a direct live read for
      * [configuredDeviceId]; the screen/platform graph owns any auto-sync policy,
      * not this controller.
+     *
+     * @param contextKey context captured by a caller (the Device entry captured
+     *   it before starting); `null` captures the current context here, so a
+     *   follow-up read can never borrow a replacement context's credential.
      */
-    suspend fun onDeviceOpened() = refresh()
+    suspend fun onDeviceOpened(contextKey: ThinQContextKey? = null) = refresh(contextKey)
 
     /**
      * Explicit manual refresh. Performs a direct live read and **always** bypasses
      * any cached or freshness gate: even immediately after a recent
      * [ThinQLiveRefreshState.Current], an entirely new request reaches the adapter.
      * Serialized with any in-flight entry/refresh read by the internal [Mutex].
+     *
+     * Fenced against [contextKey] (default: captured at entry): dispatch is
+     * refused when that context already ended, and every publication — Loading,
+     * failure, success and the cancellation restore — only happens while it is
+     * still current.
      */
-    suspend fun refresh() {
+    suspend fun refresh(contextKey: ThinQContextKey? = null) {
+        val captured = contextKey ?: lifecycle?.current()
         mutex.withLock {
             val previous = mutableState.value
-            mutableState.value = ThinQLiveRefreshState.Loading(
-                previous = previous.takeUnless { it is ThinQLiveRefreshState.NotRead },
-            )
+            // Fence: an operation whose context ended before dispatch never sends.
+            if (!lifecycle.isCurrentContext(captured)) return@withLock
+            val publishedLoading = lifecycle.publishIfCurrent(captured) {
+                mutableState.value = ThinQLiveRefreshState.Loading(
+                    previous = previous.takeUnless { it is ThinQLiveRefreshState.NotRead },
+                )
+            }
+            if (!publishedLoading) return@withLock
+            // Fence: recheck immediately before the LG request; no boundary is
+            // ever held across the network call itself.
+            if (!lifecycle.isCurrentContext(captured)) return@withLock
 
             val live = try {
                 thinQ.liveState(configuredDeviceId).also { result ->
@@ -104,14 +145,17 @@ class ThinQLiveStateController(
                 }
             } catch (cancelled: CancellationException) {
                 // Cancellation is not a read failure: restore the pre-flight
-                // snapshot (never a phantom Loading or an error state) and
-                // rethrow so the cancellation keeps propagating.
-                mutableState.value = previous
+                // snapshot (never a phantom Loading or an error state) — but only
+                // for the same context, so a late restore cannot repopulate an
+                // invalidated one — and rethrow so the cancellation keeps propagating.
+                withContext(NonCancellable) {
+                    lifecycle.publishIfCurrent(captured) { mutableState.value = previous }
+                }
                 throw cancelled
             } catch (failure: Exception) {
                 val kind = classifyRefreshFailure(failure)
                 val lastKnown = lastKnownState(previous)
-                mutableState.value = if (lastKnown != null) {
+                val next = if (lastKnown != null) {
                     ThinQLiveRefreshState.Stale(
                         lastKnownState = lastKnown,
                         errorKind = kind,
@@ -123,6 +167,10 @@ class ThinQLiveStateController(
                         failedAtEpochMillis = nowEpochMillis(),
                     )
                 }
+                // Fence: a late failure from a superseded context is discarded;
+                // in the unchanged context it stays the explicitly labeled
+                // stale/unavailable state with commands disabled.
+                lifecycle.publishIfCurrent(captured) { mutableState.value = next }
                 return@withLock
             }
 
@@ -131,11 +179,28 @@ class ThinQLiveStateController(
             } catch (_: Exception) {
                 false
             }
-            mutableState.value = ThinQLiveRefreshState.Current(
-                state = live,
-                profileVerified = profileVerified,
-            )
+            // Fence: a late success from a superseded context never becomes
+            // current state and never enables controls.
+            lifecycle.publishIfCurrent(captured) {
+                mutableState.value = ThinQLiveRefreshState.Current(
+                    state = live,
+                    profileVerified = profileVerified,
+                )
+            }
         }
+    }
+
+    /**
+     * Invalidates presentation because the lifecycle context changed: resets to
+     * [ThinQLiveRefreshState.NotRead] so no old-context reading can be shown,
+     * even by a late completion (its publication is fenced by the same key).
+     *
+     * Called by the lifecycle owner **while holding the lifecycle boundary**;
+     * deliberately a direct state write that never takes [mutex], so
+     * invalidation never waits for a read suspended in the network.
+     */
+    fun resetForContextChange() {
+        mutableState.value = ThinQLiveRefreshState.NotRead
     }
 
     /**
@@ -152,8 +217,14 @@ class ThinQLiveStateController(
      * controller has no fresh observation to publish. A definite FAILED command
      * leaves the prior live snapshot alone because the adapter says no command
      * was sent. This method issues no network request itself.
+     *
+     * Every publication is fenced by [contextKey] — pass the key captured when
+     * the command was submitted so an outcome from a superseded context can
+     * never become the active context's live state. `null` captures the current
+     * context here.
      */
-    suspend fun acceptCommandOutcome(outcome: CommandOutcome) {
+    suspend fun acceptCommandOutcome(outcome: CommandOutcome, contextKey: ThinQContextKey? = null) {
+        val captured = contextKey ?: lifecycle?.current()
         mutex.withLock {
             if (outcome.deviceId != configuredDeviceId) return@withLock
             when (outcome.status) {
@@ -176,16 +247,18 @@ class ThinQLiveStateController(
                             } catch (_: Exception) {
                                 false
                             }
-                            mutableState.value = ThinQLiveRefreshState.Current(
-                                state = observed,
-                                profileVerified = profileVerified,
-                            )
+                            lifecycle.publishIfCurrent(captured) {
+                                mutableState.value = ThinQLiveRefreshState.Current(
+                                    state = observed,
+                                    profileVerified = profileVerified,
+                                )
+                            }
                         }
                     } else {
                         val prior = mutableState.value
                         val errorKind = outcome.failure?.toRefreshFailureKind() ?: ThinQRefreshFailureKind.UNKNOWN
                         val lastKnown = lastKnownState(prior)
-                        mutableState.value = if (lastKnown != null) {
+                        val next = if (lastKnown != null) {
                             ThinQLiveRefreshState.Stale(
                                 lastKnownState = lastKnown,
                                 errorKind = errorKind,
@@ -197,6 +270,7 @@ class ThinQLiveStateController(
                                 failedAtEpochMillis = nowEpochMillis(),
                             )
                         }
+                        lifecycle.publishIfCurrent(captured) { mutableState.value = next }
                     }
                 }
             }

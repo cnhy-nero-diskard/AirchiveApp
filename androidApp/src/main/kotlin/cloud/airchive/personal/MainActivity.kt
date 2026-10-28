@@ -155,6 +155,9 @@ class MainActivity : ComponentActivity() {
         val productionThinQGraph = AndroidProductionThinQGraph(
             context = applicationContext,
             configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+            // Lifecycle partition (task 2.1): owner/project/device + generation.
+            ownerUid = configuration.identity.currentSession?.uid,
+            projectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
         )
         val productionCoordinator = ProductionHistoryCoordinator(
             identity = configuration.identity,
@@ -166,11 +169,15 @@ class MainActivity : ComponentActivity() {
         )
 
         // Cancel any in-flight refresh the moment the owner session changes
-        // (sign-out, account switch, or Firebase session restore settle).
+        // (sign-out, account switch, or Firebase session restore settle) and
+        // invalidate the ThinQ lifecycle context with it, so the previous
+        // owner's readings/profile/command feedback can never reappear
+        // (OpenSpec deliver-shared-instrument-ui task 2.1).
         lifecycleScope.launch {
             productionCoordinator.session.collect {
                 activeRefreshJob?.cancel()
                 activeRefreshJob = null
+                productionThinQGraph.onOwnerChanged(it?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
             }
         }
 
@@ -184,6 +191,18 @@ class MainActivity : ComponentActivity() {
             configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
             serializedAction = { action -> productionCoordinator.runExclusive(action) },
             credentialStore = productionThinQGraph.credentialStore,
+            beforeOwnerTransition = {
+                // Invalidate before the account controller clears the PAT or
+                // changes Firebase identity. The session observer below remains
+                // the backstop for external identity changes.
+                productionThinQGraph.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+            },
+            afterOwnerTransition = { session ->
+                // If cleanup/sign-in fails and the old owner remains active,
+                // re-bind only after the prior context has been cleared; the
+                // next Home entry must perform a fresh matching read.
+                productionThinQGraph.onOwnerChanged(session?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+            },
         )
 
         coordinator = productionCoordinator

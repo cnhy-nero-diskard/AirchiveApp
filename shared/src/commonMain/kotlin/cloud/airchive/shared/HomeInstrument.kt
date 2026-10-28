@@ -35,7 +35,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
 
-/** A new owner/credential must finish its own read before retained controller state can appear. */
+/**
+ * A new owner/credential must finish its own read before retained controller
+ * state can appear (OpenSpec `deliver-shared-instrument-ui` tasks 2.1/2.3).
+ *
+ * All entry state is keyed on the active lifecycle context, so an invalidation
+ * — including a replacement whose credential mask and timestamp are identical
+ * to the old one — resets it and starts a fresh entry read. Readiness is
+ * computed by [homeEntryReady]: a successful device-matching live read plus a
+ * matching verified profile **for the captured context**, never because the
+ * entry callback merely returned. A superseded read never settles under the
+ * old context; a same-context failure settles as failed and shows only the
+ * controller's explicitly labeled old state with commands disabled.
+ */
 @Composable
 internal fun ProductionHomeInstrument(
     history: HistorySnapshot,
@@ -48,52 +60,109 @@ internal fun ProductionHomeInstrument(
     nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     val scope = rememberCoroutineScope()
-    val profile = bindings?.profile?.collectAsState()?.value
-    val device = bindings?.device?.collectAsState()?.value
+    val contextKey = bindings?.contextKey?.collectAsState()?.value
+    val publication = bindings?.deviceProfile?.collectAsState()?.value
+    val profile = publication?.profile
+    val device = publication?.device
     val live = bindings?.liveStateController?.state?.collectAsState()?.value ?: ThinQLiveRefreshState.NotRead
     val command = bindings?.commandController?.state?.collectAsState()?.value ?: AcCommandUiState.Idle
-    var entryReadComplete by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
-    var entryReadFailed by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
-    var reading by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
+    var entrySettled by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
+    var entryReadComplete by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
+    var entryReadFailed by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
+    var reading by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     val now by produceState(nowProvider()) {
         while (true) { value = nowProvider(); delay(30_000) }
     }
     suspend fun refresh() {
         if (reading) return
         reading = true
+        entrySettled = false
         entryReadComplete = false
         entryReadFailed = false
-        try { bindings?.onDeviceOpened?.invoke(); entryReadComplete = true }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { entryReadFailed = true }
-        finally { reading = false }
+        val capturedKey = contextKey
+        try {
+            val entryBindings = bindings ?: return
+            val result = entryBindings.onDeviceOpened()
+            entryReadComplete = homeEntryReady(
+                result = result,
+                capturedKey = capturedKey,
+                currentKey = entryBindings.contextKey.value,
+                live = entryBindings.liveStateController.state.value,
+                profile = entryBindings.deviceProfile.value?.profile,
+            )
+            entryReadFailed = result == ThinQEntryResult.Failed
+            // A superseded read must not settle: the new context's remembered
+            // state and LaunchedEffect take over as soon as the key changes.
+            entrySettled = result != ThinQEntryResult.Superseded
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            entrySettled = true
+            entryReadFailed = true
+        } finally {
+            reading = false
+        }
     }
-    LaunchedEffect(bindings, history.partition, credential, hasSession) {
+    LaunchedEffect(bindings, history.partition, credential, hasSession, contextKey) {
         if (hasSession && credential.present && !credential.unlockFailed) refresh()
     }
     val canRead = hasSession && credential.present && !credential.unlockFailed && bindings != null
     SharedInstrumentPanel(
         snapshot = history, nowEpochMillis = now, showEnergy = !comfortOnly,
-        live = if (canRead && entryReadComplete) live else ThinQLiveRefreshState.NotRead,
-        profile = profile?.takeIf { canRead && entryReadComplete },
-        deviceName = device?.alias?.takeIf { canRead && entryReadComplete } ?: "Air conditioner",
-        commandState = if (canRead && entryReadComplete) command else AcCommandUiState.Idle,
-        onCommand = if (canRead && entryReadComplete) { request -> scope.launch {
-            submitAndPresentCommand(request, bindings.commandController, bindings.liveStateController)
-        } } else null,
+        live = if (canRead && entrySettled) live else ThinQLiveRefreshState.NotRead,
+        profile = profile?.takeIf { canRead && entrySettled },
+        deviceName = device?.alias?.takeIf { canRead && entrySettled } ?: "Air conditioner",
+        commandState = if (canRead && entrySettled) command else AcCommandUiState.Idle,
+        // Controls dispatch only after a successful matching read for this
+        // context; the tap-time context key fences the scheduled submission.
+        onCommand = if (canRead && entryReadComplete) { request ->
+            val activeBindings = checkNotNull(bindings)
+            val capturedKey = contextKey
+            scope.launch {
+                submitAndPresentCommand(
+                    request,
+                    activeBindings.commandController,
+                    activeBindings.liveStateController,
+                    capturedKey,
+                )
+            }
+        } else null,
         onRefresh = { scope.launch { refresh() } }, onEnergy = onEnergy,
         onSetup = if (!canRead) onSettings else null,
         refreshing = reading,
         setupMessage = when {
             !hasSession -> "Sign in to connect your AC and recorded history."
             !canRead -> "Connect ThinQ in Settings to read and control your AC."
+            !entrySettled -> "Reading device state… Controls will appear after verification."
             entryReadFailed -> "The device read failed. Check the connection and retry."
-            !entryReadComplete -> "Reading device state… Controls will appear after verification."
-            profile == null -> "Device profile unavailable. Retry the device read."
+            !entryReadComplete -> "Device profile unavailable. Retry the device read."
             else -> null
         },
     )
 }
+
+/**
+ * Home entry readiness (task 2.3): ready only after a successful
+ * device-matching live read **and** a matching verified profile that both
+ * belong to the active context.
+ *
+ * The entry callback merely returning is never enough — a failed read, a
+ * superseded context, a missing/unverified profile, or a device mismatch all
+ * stay unready, so no control can be dispatched on them.
+ */
+internal fun homeEntryReady(
+    result: ThinQEntryResult?,
+    capturedKey: ThinQContextKey?,
+    currentKey: ThinQContextKey?,
+    live: ThinQLiveRefreshState,
+    profile: ThinQDeviceProfile?,
+): Boolean = result == ThinQEntryResult.Success &&
+    capturedKey != null &&
+    capturedKey == currentKey &&
+    profile != null &&
+    live is ThinQLiveRefreshState.Current &&
+    live.canIssueCommands &&
+    live.state.deviceId == profile.deviceId
 
 /** Semantic native implementation of the approved Shared Instrument; no concept values ship here. */
 @Composable

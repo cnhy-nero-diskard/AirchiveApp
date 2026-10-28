@@ -60,6 +60,63 @@ class ProductionAccountControllerTest {
     }
 
     @Test
+    fun confirmedOwnerTransitionInvalidatesThinQBeforeClearingHistoryCredentialOrIdentity() = runBlocking {
+        val events = mutableListOf<String>()
+        val delegateIdentity = FakeOwnerIdentity(fixedSession = owner)
+        delegateIdentity.signIn()
+        val identity = object : OwnerIdentityPort by delegateIdentity {
+            override suspend fun signOut() {
+                events += "identity-sign-out"
+                delegateIdentity.signOut()
+            }
+        }
+        val delegateLocal = FakeLocalHistory()
+        val local = object : LocalHistoryPort by delegateLocal {
+            override suspend fun clear(partition: HistoryPartition) {
+                events += "history-clear"
+                delegateLocal.clear(partition)
+            }
+        }
+        val delegateCredentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val credentialStore = object : ThinQCredentialStore by delegateCredentialStore {
+            override suspend fun clear() {
+                events += "credential-clear"
+                delegateCredentialStore.clear()
+            }
+        }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+            beforeOwnerTransition = {
+                events += "context-invalidate"
+                assertNotNull(identity.currentSession, "the old owner is still active at invalidation")
+                assertEquals("fixture-token", credentialStore.readToken(), "the PAT is still present at invalidation")
+            },
+            afterOwnerTransition = { session ->
+                events += "context-rebind:${session?.uid ?: "signed-out"}"
+            },
+        )
+
+        controller.requestSignOut()
+        assertIs<OwnerSettingsActionResult.Success>(controller.signOutConfirmed())
+
+        assertEquals(
+            listOf(
+                "context-invalidate",
+                "history-clear",
+                "credential-clear",
+                "identity-sign-out",
+                "context-rebind:signed-out",
+            ),
+            events,
+            "old ThinQ presentation is invalidated before any owner data/session transition",
+        )
+    }
+
+    @Test
     fun signOutRequiresExplicitConfirmation(): Unit = runBlocking {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()

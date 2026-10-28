@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import cloud.airchive.shared.ProductionAirchiveApp
-import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.contract.credentials.SaveThinQResult
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
@@ -32,11 +31,8 @@ import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.contract.thinq.ThinQPort
 import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
-import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupCoordinator
-import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
-import cloud.airchive.shared.data.thinq.AcCommandController
-import cloud.airchive.shared.data.thinq.ThinQLiveStateController
+import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
 import cloud.airchive.shared.fakes.FakeAirchiveTelemetry
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
@@ -45,15 +41,14 @@ import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 /**
  * Debug/test-only composition of the **actual** production shell
@@ -141,41 +136,38 @@ class SharedInstrumentShellFixture(context: Context) {
         credentialStore = credentialStore,
     )
 
-    private val credentialSetup = ThinQCredentialSetupCoordinator(
+    /**
+     * Production lifecycle/context core over the fake ports (OpenSpec tasks
+     * 2.1–2.3): the owner/project/device + credential-generation boundary, the
+     * snapshot → unlocked-network → conditional-publication entry read, and the
+     * fenced live/command controllers — the same shared implementation the
+     * Android production graph wires, but on in-memory fakes only.
+     */
+    val thinQContext = ThinQContextCoordinator(
         credentialStore = credentialStore,
+        thinQ = thinQ,
         verifier = verifier,
         configuredDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
-    )
-
-    private val mutableDevice = MutableStateFlow<ThinQDevice?>(null)
-    private val mutableProfile = MutableStateFlow<ThinQDeviceProfile?>(null)
-
-    val liveStateController = ThinQLiveStateController(
-        thinQ = thinQ,
-        configuredDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
-        nowEpochMillis = clock::now,
-        hasVerifiedProfile = { mutableProfile.value?.deviceId == FakeAirchiveTelemetry.DEMO_DEVICE_ID },
-    )
-
-    val commandController = AcCommandController(
-        thinQ = thinQ,
-        configuredDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
+        ownerUid = null,
+        projectId = FIXTURE_PROJECT_ID,
         nowEpochMillis = clock::now,
     )
 
-    private val bindings = ProductionThinQBindings(
-        credentialState = credentialStore.observe(),
-        clientId = credentialStore.clientId,
-        device = mutableDevice.asStateFlow(),
-        profile = mutableProfile.asStateFlow(),
-        liveStateController = liveStateController,
-        commandController = commandController,
-        setupCredential = ::setupCredential,
-        onDeviceOpened = ::onDeviceOpened,
-        refreshLiveState = { liveStateController.refresh() },
-        removeCredential = ::removeCredential,
-        clearCachedDeviceProfile = ::clearCachedDeviceProfile,
-    )
+    /**
+     * Session → lifecycle wiring (mirrors MainActivity's session collector):
+     * the owner session partition drives the ThinQ lifecycle context, so
+     * sign-out/owner switch invalidate it. Cancelled together with the fixture
+     * scope in [close]. No credential-store observation is started here because
+     * the fake store emits synchronously on the caller's thread (production
+     * observes on a `Dispatchers.Default` scope instead, so a synchronous
+     * emission can never re-enter an invalidation on the boundary-holding
+     * thread).
+     */
+    val sessionWatcher = scope.launch {
+        coordinator.session.collect { thinQContext.onOwnerChanged(it?.uid, FIXTURE_PROJECT_ID) }
+    }
+
+    private val bindings = thinQContext.bindings()
 
     /** Runtime implementation types actually wired into the shell graph. */
     val constructedGraph: List<String> = listOf(
@@ -193,9 +185,10 @@ class SharedInstrumentShellFixture(context: Context) {
         thinQ.delegateTypeName,
         coordinator.javaClass.simpleName,
         accountController.javaClass.simpleName,
-        credentialSetup.javaClass.simpleName,
-        liveStateController.javaClass.simpleName,
-        commandController.javaClass.simpleName,
+        thinQContext.javaClass.simpleName,
+        thinQContext.credentialSetup.javaClass.simpleName,
+        thinQContext.liveStateController.javaClass.simpleName,
+        thinQContext.commandController.javaClass.simpleName,
         bindings.javaClass.simpleName,
     )
 
@@ -226,70 +219,6 @@ class SharedInstrumentShellFixture(context: Context) {
     /** Releases the coordinator's session-observation scope; call from onDestroy. */
     fun close() {
         scope.cancel()
-    }
-
-    // ------------------------------------------------------------------
-    // Fake ThinQ bindings (same shape as the production Android graph,
-    // but every operation stays on the in-memory fake client).
-    // ------------------------------------------------------------------
-
-    /** Verify-before-save setup through the fake verifier and in-memory store. */
-    private suspend fun setupCredential(rawToken: String, country: String): ThinQCredentialSetupResult {
-        val result = credentialSetup.setup(rawToken, country)
-        if (result is ThinQCredentialSetupResult.Success) {
-            mutableDevice.value = result.device
-            mutableProfile.value = result.profile.takeIf {
-                it.deviceId == FakeAirchiveTelemetry.DEMO_DEVICE_ID
-            }
-        }
-        return result
-    }
-
-    /**
-     * Device-route entry: mirrors the production graph's shape (no ThinQ call
-     * without a stored credential) but reads only the fake client.
-     */
-    private suspend fun onDeviceOpened() {
-        if (credentialStore.readToken().isNullOrBlank()) {
-            clearCachedDeviceProfile()
-            return
-        }
-        try {
-            val device = thinQ.listDevices()
-                .firstOrNull { it.deviceId == FakeAirchiveTelemetry.DEMO_DEVICE_ID }
-            if (device == null) {
-                clearCachedDeviceProfile()
-                return
-            }
-            if (device.online == false) {
-                mutableDevice.value = device
-                mutableProfile.value = null
-                return
-            }
-            val profile = thinQ.profile(FakeAirchiveTelemetry.DEMO_DEVICE_ID)
-            if (profile.deviceId != FakeAirchiveTelemetry.DEMO_DEVICE_ID) {
-                clearCachedDeviceProfile()
-                return
-            }
-            mutableDevice.value = device
-            mutableProfile.value = profile
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            clearCachedDeviceProfile()
-            return
-        }
-        liveStateController.onDeviceOpened()
-    }
-
-    private suspend fun removeCredential() {
-        credentialStore.clear()
-        clearCachedDeviceProfile()
-    }
-
-    private fun clearCachedDeviceProfile() {
-        mutableDevice.value = null
-        mutableProfile.value = null
     }
 
     companion object {
