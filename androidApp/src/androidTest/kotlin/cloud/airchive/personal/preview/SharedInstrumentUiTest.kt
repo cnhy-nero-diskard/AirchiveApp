@@ -324,6 +324,61 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun temperatureDraftSurvivesHomeDeviceSettingsAndDetailRoundTrips() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+
+            clickText("Home")
+            awaitNode { it.text?.toString() == "25" }
+            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
+                AccessibilityNodeInfo.ACTION_CLICK,
+            )
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+
+            // The shell owns the draft, so Settings and its immediate display
+            // preference changes cannot dispose it or submit a command.
+            clickText("Settings")
+            clickText("Detailed")
+            clickText("Simple")
+            clickText("Home")
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+
+            clickText("Device")
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            clickText("Device details")
+            awaitNode { it.text?.toString()?.startsWith("Device ID:") == true }
+            clickText("Device details")
+            clickText("Settings")
+            clickText("Device")
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+
+            clickText("Home")
+            awaitNode { it.text?.toString() == "26" }
+            var apply = awaitNode { it.text?.toString() == "Apply" }
+            while (!apply.isClickable && apply.parent != null) apply = apply.parent
+            assertTrue("the explicit Apply action remains available", apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            awaitTrue("only the explicit Apply submits a command") {
+                var count = 0
+                scene.onActivity { count = it.shellFixture!!.counters.thinQCommandSubmissions.get() }
+                count == 1
+            }
+        }
+    }
+
     @Test fun captureLightDarkAndLargeText() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode

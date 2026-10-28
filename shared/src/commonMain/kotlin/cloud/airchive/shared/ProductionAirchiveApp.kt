@@ -197,6 +197,11 @@ private fun ProductionRouteHost(
     } else {
         thinQBindings.credentialState.collectAsState(initial = emptyCredentialState).value
     }
+    val activeThinQContextKey = thinQBindings?.contextKey?.collectAsState()?.value
+    // Keep an unapplied setpoint above the conditional route composition. The
+    // lifecycle key intentionally resets it when the owner/device/credential
+    // context changes, but navigation and display-detail changes do not.
+    var temperatureDraft by remember(activeThinQContextKey) { mutableStateOf<Double?>(null) }
     val historyFlow = remember(coordinator, partition) {
         partition?.let { coordinator.local.observe(it) } ?: flowOf(placeholderHistory)
     }
@@ -283,6 +288,8 @@ private fun ProductionRouteHost(
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     credentialState = credentialState,
                     thinQBindings = thinQBindings,
+                    temperatureDraft = temperatureDraft,
+                    onTemperatureDraftChange = { temperatureDraft = it },
                     hasSession = session != null,
                     onOpenEnergy = { route = ProductionRoute.ENERGY },
                     nowProvider = nowProvider,
@@ -297,6 +304,8 @@ private fun ProductionRouteHost(
                         credentialState = credentialState,
                         onBackToHome = { route = ProductionRoute.HOME },
                         onOpenSettings = { route = ProductionRoute.SETTINGS },
+                        temperatureDraft = temperatureDraft,
+                        onTemperatureDraftChange = { temperatureDraft = it },
                     )
                 } else {
                     ProductionSignedOutRoute(title = "Device")
@@ -375,6 +384,8 @@ private fun ProductionHome(
     ownerAuthConfigurationMessage: String?,
     credentialState: ThinQCredentialState,
     thinQBindings: ProductionThinQBindings?,
+    temperatureDraft: Double?,
+    onTemperatureDraftChange: (Double?) -> Unit,
     hasSession: Boolean,
     onOpenEnergy: () -> Unit,
     nowProvider: () -> Long,
@@ -391,7 +402,8 @@ private fun ProductionHome(
         }
         key(history.partition) {
             ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings,
-                nowProvider = nowProvider)
+                nowProvider = nowProvider, temperatureDraft = temperatureDraft,
+                onTemperatureDraftChange = onTemperatureDraftChange)
         }
         Text(historySync.lastSuccessfulAgeMillis?.let { "History synced ${instrumentAge(it)} ago" }
             ?: "History has not synced yet", style = MaterialTheme.typography.bodySmall,
@@ -651,6 +663,8 @@ fun ProductionDeviceRoute(
     credentialState: ThinQCredentialState,
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
+    temperatureDraft: Double? = null,
+    onTemperatureDraftChange: (Double?) -> Unit = {},
 ) {
     // Read the publication first, then the active context key: a torn read can
     // then only hide the card (key mismatch), never render a superseded
@@ -659,7 +673,8 @@ fun ProductionDeviceRoute(
     val contextKey = thinQBindings?.contextKey?.collectAsState()?.value
     InstrumentPage("Device", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Live state and supported controls for your air conditioner." else null) {
         ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession = true,
-            onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true)
+            onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true,
+            temperatureDraft = temperatureDraft, onTemperatureDraftChange = onTemperatureDraftChange)
         InstrumentPanel {
             InstrumentDisclosure("Device details", "Identity, profile and last confirmed state", informational = true) {
                 ProductionConfiguredAcCard(configuredDeviceId, identity)

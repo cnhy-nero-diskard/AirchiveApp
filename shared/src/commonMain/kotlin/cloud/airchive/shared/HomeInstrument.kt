@@ -58,6 +58,8 @@ internal fun ProductionHomeInstrument(
     onSettings: () -> Unit,
     comfortOnly: Boolean = false,
     nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    temperatureDraft: Double? = null,
+    onTemperatureDraftChange: ((Double?) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val contextKey = bindings?.contextKey?.collectAsState()?.value
@@ -130,6 +132,8 @@ internal fun ProductionHomeInstrument(
         refreshing = reading,
         commandSlotOccupied = commandSlotOccupied,
         neutralCommandBusy = neutralCommandBusy,
+        temperatureDraft = temperatureDraft,
+        onTemperatureDraftChange = onTemperatureDraftChange,
         setupMessage = when {
             !hasSession -> "Sign in to connect your AC and recorded history."
             !canRead -> "Connect ThinQ in Settings to read and control your AC."
@@ -182,6 +186,8 @@ fun SharedInstrumentPanel(
     showEnergy: Boolean = true,
     commandSlotOccupied: Boolean = false,
     neutralCommandBusy: Boolean = false,
+    temperatureDraft: Double? = null,
+    onTemperatureDraftChange: ((Double?) -> Unit)? = null,
 ) {
     val zone = remember { TimeZone.of(DEFAULT_DAY_TIME_ZONE) }
     val today = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).date
@@ -193,7 +199,11 @@ fun SharedInstrumentPanel(
     val capability = profile?.controls?.targetTemperature
     val allowed = remember(capability) { capability?.allowedValues().orEmpty() }
     val observed = known?.targetTemperature?.takeIf { it.isFinite() }
-    var draft by remember(profile, observed) { mutableStateOf(observed?.takeIf { it in allowed }) }
+    var localDraft by remember(profile, observed) { mutableStateOf(observed?.takeIf { it in allowed }) }
+    val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
+    fun updateDraft(value: Double?) {
+        if (onTemperatureDraftChange != null) onTemperatureDraftChange(value) else localDraft = value
+    }
     val selected = draft ?: observed
     val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
     val yesterday = today.minus(1, DateTimeUnit.DAY).toString()
@@ -250,8 +260,8 @@ fun SharedInstrumentPanel(
                     Text("Temperature", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         val index = allowed.indexOf(selected)
-                        StepControl(false, enabled && index > 0) { draft = allowed[index - 1] }
-                        StepControl(true, enabled && index >= 0 && index < allowed.lastIndex) { draft = allowed[index + 1] }
+                        StepControl(false, enabled && index > 0) { updateDraft(allowed[index - 1]) }
+                        StepControl(true, enabled && index >= 0 && index < allowed.lastIndex) { updateDraft(allowed[index + 1]) }
                         Button(onClick = { draft?.let { onCommand?.invoke(AcCommand.SetTargetTemperature(nowEpochMillis, it, capability!!.unit)) } },
                             enabled = enabled && draft != null && draft != observed,
                             shape = MaterialTheme.shapes.small,
