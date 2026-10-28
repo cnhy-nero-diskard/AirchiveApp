@@ -189,8 +189,17 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("History")
             awaitNode { it.text?.toString() == "Sample status guide" }
-            val row = awaitNode { it.contentDescription?.toString()?.startsWith("Sample at ") == true }
-            clickNode(row)
+            var row: AccessibilityNodeInfo? = null
+            repeat(6) {
+                if (row == null) {
+                    row = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                        it.contentDescription?.toString()?.startsWith("Sample at ") == true
+                    }
+                    if (row == null) scrollForward()
+                }
+            }
+            val selectedRow = row ?: throw AssertionError("A cached sample row must be reachable")
+            clickNode(selectedRow)
             awaitNode { it.text?.toString() == "Sample detail" }
 
             val readsBefore = AtomicInteger()
@@ -202,13 +211,18 @@ class SharedInstrumentUiTest {
             }
 
             awaitTrue("the fixture must observe the new history partition") {
-                scene.onActivity { it.shellFixture!!.coordinator.session.value?.uid == "sample-owner-b" }
+                var observed = false
+                scene.onActivity { observed = it.shellFixture!!.coordinator.session.value?.uid == "sample-owner-b" }
+                observed
             }
             awaitTrue("the new owner's matching sample IDs must be populated") {
+                var populated = false
                 scene.onActivity {
-                    it.shellFixture!!.counters.telemetryReads.get() > readsBefore.get() &&
+                    populated =
+                        it.shellFixture!!.counters.telemetryReads.get() > readsBefore.get() &&
                         it.shellFixture!!.counters.localHistoryWrites.get() > writesBefore.get()
                 }
+                populated
             }
             instrumentation.waitForIdleSync()
             assertNull("a selected sample detail from owner A cannot reopen on owner B's matching sampleId",
