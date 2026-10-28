@@ -347,21 +347,52 @@ class SharedInstrumentUiTest {
             // The shell owns the draft, so Settings and its immediate display
             // preference changes cannot dispose it or submit a command.
             clickText("Settings")
+            val operationsBeforeSelection = AtomicReference<List<Int>>()
+            scene.onActivity { operationsBeforeSelection.set(operationSnapshot(it.shellFixture!!)) }
             clickText("Detailed")
             clickText("Simple")
+            scene.onActivity {
+                assertEquals(operationsBeforeSelection.get(), operationSnapshot(it.shellFixture!!))
+            }
+            val homeEntryReadsBefore = AtomicInteger()
+            scene.onActivity { homeEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
             clickText("Home")
+            awaitTrue("Home's normal route-entry read remains eligible after preference selection") {
+                var reads = 0
+                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
+                reads > homeEntryReadsBefore.get()
+            }
             awaitNode { it.text?.toString() == "26" }
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
 
+            val deviceEntryReadsBefore = AtomicInteger()
+            scene.onActivity { deviceEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
             clickText("Device")
+            awaitTrue("Device's normal route-entry read remains attributable to navigation") {
+                var reads = 0
+                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
+                reads > deviceEntryReadsBefore.get()
+            }
             awaitNode { it.text?.toString() == "26" }
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            val deviceDetailsReadsBefore = AtomicInteger()
+            scene.onActivity { deviceDetailsReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
             clickText("Device details")
             awaitNode { it.text?.toString()?.startsWith("Device ID:") == true }
             clickText("Device details")
+            scene.onActivity {
+                assertEquals(deviceDetailsReadsBefore.get(), it.shellFixture!!.counters.thinQLiveStateReads.get())
+            }
             clickText("Settings")
+            val deviceReentryReadsBefore = AtomicInteger()
+            scene.onActivity { deviceReentryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
             clickText("Device")
+            awaitTrue("returning to Device may run its normal route-entry read") {
+                var reads = 0
+                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
+                reads > deviceReentryReadsBefore.get()
+            }
             awaitNode { it.text?.toString() == "26" }
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
@@ -376,6 +407,98 @@ class SharedInstrumentUiTest {
                 scene.onActivity { count = it.shellFixture!!.counters.thinQCommandSubmissions.get() }
                 count == 1
             }
+        }
+    }
+
+    @Test fun interfaceDetailSelectionPreservesSetupFormAndConfirmationDialogWithoutPortCalls() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            setTextByHint("ThinQ account country", "US")
+            val tokenBefore = awaitNode { it.hintText?.toString() == "ThinQ Personal Access Token" }.text?.toString()
+            assertNotNull("the synthetic PAT remains represented by the protected-entry field", tokenBefore)
+            val formOperations = AtomicReference<List<Int>>()
+            scene.onActivity { formOperations.set(operationSnapshot(it.shellFixture!!)) }
+
+            clickText("Detailed")
+            clickText("Simple")
+            val tokenAfter = awaitNode { it.hintText?.toString() == "ThinQ Personal Access Token" }.text?.toString()
+            assertEquals(tokenBefore, tokenAfter, "the same-owner password field value survives preference changes")
+            awaitNode { it.text?.toString() == "US" }
+            scene.onActivity { assertEquals(formOperations.get(), operationSnapshot(it.shellFixture!!)) }
+
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            clickText("Remove ThinQ PAT")
+            awaitNode { it.text?.toString() == "Remove ThinQ PAT?" }
+            val dialogOperations = AtomicReference<List<Int>>()
+            scene.onActivity { fixture ->
+                dialogOperations.set(operationSnapshot(fixture.shellFixture!!))
+                fixture.shellFixture!!.interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.DETAILED)
+            }
+            awaitNode { it.text?.toString() == "Remove ThinQ PAT?" }
+            scene.onActivity { assertEquals(dialogOperations.get(), operationSnapshot(it.shellFixture!!)) }
+            clickText("Cancel")
+            awaitNode { it.text?.toString() == "Remove ThinQ PAT" }
+        }
+    }
+
+    @Test fun interfaceDetailSelectionDoesNotRestartOrCancelPendingCommand() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            clickText("Home")
+            awaitNode { it.text?.toString() == "25" }
+            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
+                AccessibilityNodeInfo.ACTION_CLICK,
+            )
+            awaitNode { it.text?.toString() == "26" }
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity {
+                fixture.set(it.shellFixture!!)
+                fixture.get().thinQGate.hold()
+            }
+            var apply = awaitNode { it.text?.toString() == "Apply" }
+            while (!apply.isClickable && apply.parent != null) apply = apply.parent
+            assertTrue(apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            awaitTrue("the fake command reaches its deferred gate") {
+                fixture.get().counters.thinQCommandSubmissions.get() == 1
+            }
+            awaitTrue("the graph-owned command remains pending while held") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Sending
+            }
+
+            clickText("Settings")
+            val pendingOperations = operationSnapshot(fixture.get())
+            clickText("Detailed")
+            clickText("Simple")
+            scene.onActivity { assertEquals(pendingOperations, operationSnapshot(it.shellFixture!!)) }
+            assertTrue(
+                "preference changes do not cancel the graph-owned command",
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Sending,
+            )
+
+            fixture.get().thinQGate.release()
+            awaitTrue("the original command completes exactly once") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
+            }
+            clickText("Home")
+            awaitNode { it.text?.toString()?.contains("Confirmed: AC currently reports") == true }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
     }
 
@@ -583,6 +706,25 @@ class SharedInstrumentUiTest {
             SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
             android.content.Context.MODE_PRIVATE,
         ).edit().clear().commit()
+    }
+
+    private fun operationSnapshot(fixture: SharedInstrumentShellFixture): List<Int> = with(fixture.counters) {
+        listOf(
+            ownerSignInAttempts.get(),
+            ownerSignOuts.get(),
+            telemetryReads.get(),
+            deviceIdentityReads.get(),
+            localHistoryObserves.get(),
+            localHistoryWrites.get(),
+            thinQDeviceListReads.get(),
+            thinQProfileReads.get(),
+            thinQLiveStateReads.get(),
+            thinQCommandSubmissions.get(),
+            credentialSaves.get(),
+            credentialTokenReads.get(),
+            credentialClears.get(),
+            credentialVerifications.get(),
+        )
     }
 
     private fun accessibilitySnapshot(node: AccessibilityNodeInfo?): String {
