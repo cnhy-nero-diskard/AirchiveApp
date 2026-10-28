@@ -42,15 +42,18 @@ import kotlinx.coroutines.sync.withLock
  * invalidation never waits for an in-flight LG request; locks are only
  * re-acquired for local, conditional publication. The boundary may cover a
  * protected-store read/clear when that is necessary to keep a context snapshot
- * atomic with credential availability; it is never held across LG I/O or while
- * waiting for an in-flight command.
+ * atomic with credential availability; it is also the home of the short
+ * protected-store setup commit (task 2.4), which runs only after the
+ * current-attempt gate in the same boundary section. It is never held across
+ * LG I/O or while waiting for an in-flight command.
  *
  * ## Invalidation triggers (task 2.1)
  *
  *  - owner switch / confirmed sign-out → [onOwnerChanged];
  *  - credential removal → [removeCredential] or [clearCachedDeviceProfile];
  *  - verified replacement (even with an identical mask/country/timestamp) →
- *    [setupCredential] success through [onCredentialReplaced];
+ *    [setupCredential] success, whose protected-store commit and generation
+ *    advance are one atomic transition (task 2.4);
  *  - protected-key loss → [onCredentialState] / the entry prelude;
  *  - a **failed** same-owner replacement invalidates nothing, so the working
  *    credential context survives it.
@@ -251,23 +254,65 @@ class ThinQContextCoordinator(
     // ------------------------------------------------------------------
 
     /**
-     * Verify-before-save setup. A successful replacement advances the
-     * credential generation (even when the observable mask/country/timestamp is
-     * byte-identical), clears live/command presentation, and publishes the
-     * verified device/profile **under the new key**. A failed same-owner
-     * replacement advances nothing: the working context stays intact.
+     * Fenced verify-before-save setup (task 2.4, design D2).
      *
-     * Note (task 2.4 scope): the protected-store save still happens inside
-     * [credentialSetup.setup] before this generation advance; making the commit
-     * and the increment one atomic transition behind a conditional-commit seam
-     * is deliberately left to that task.
+     * Each call begins its own [ThinQSetupAttempt] (monotonic attempt id +
+     * captured owner/project/device + credential-generation context). LG
+     * verification runs with **no** lock held; the verified candidate's
+     * protected-store save then runs inside the boundary's single
+     * commit transition ([ThinQLifecycleBoundary.commitSetupAttemptIfCurrent]):
+     *
+     *  - a **current** attempt atomically saves the verified candidate,
+     *    advances the credential generation (even when the observable
+     *    mask/country/timestamp is byte-identical), resets live/command
+     *    presentation to unread/idle, and publishes the verified device/profile
+     *    **under the resulting key** — the success's masked credential is read
+     *    from the store in that same section, so it always agrees with the new
+     *    context;
+     *  - an owner transition, credential removal/replacement, protected-key
+     *    loss, a newer attempt, or an explicit/coroutine cancellation
+     *    supersedes the attempt: no store save, no generation advance, no
+     *    profile publication, and [ThinQCredentialSetupResult.Superseded] — no
+     *    success feedback;
+     *  - a **failed** same-owner replacement (verification or save) advances
+     *    nothing: the working credential context and its stored token stay
+     *    intact.
      */
     suspend fun setupCredential(rawToken: String, country: String): ThinQCredentialSetupResult {
-        val result = credentialSetup.setup(rawToken, country)
-        if (result is ThinQCredentialSetupResult.Success) {
-            onCredentialReplaced(result.device, result.profile)
+        val attempt = lifecycle.beginSetupAttempt()
+        return credentialSetup.setup(rawToken, country) { commitVerified ->
+            val outcome = lifecycle.commitSetupAttemptIfCurrent(attempt) { advanceGeneration ->
+                val result = commitVerified()
+                if (result is ThinQCredentialSetupResult.Success) {
+                    val resultingKey = advanceGeneration()
+                    liveStateController.resetForContextChange()
+                    commandController.resetForContextChange()
+                    profileMutex.withLock {
+                        mutableDeviceProfile.value = ThinQDeviceProfilePublication(
+                            contextKey = resultingKey,
+                            device = result.device,
+                            profile = result.profile.takeIf { it.deviceId == configuredDeviceId },
+                        )
+                    }
+                }
+                result
+            }
+            when (outcome) {
+                is ThinQSetupCommit.Committed -> outcome.result
+                ThinQSetupCommit.Superseded -> ThinQCredentialSetupResult.Superseded
+            }
         }
-        return result
+    }
+
+    /**
+     * Explicit cancel-attempt hook (task 2.4) for setup-form and route
+     * cancellation: supersedes **only** the in-flight setup attempt, which can
+     * then never save its candidate or advance/publish anything. It never
+     * advances the generation, never touches the protected store, and never
+     * affects a newer or later attempt.
+     */
+    suspend fun cancelSetupAttempt() {
+        lifecycle.cancelSetupAttempt()
     }
 
     /**
@@ -328,21 +373,6 @@ class ThinQContextCoordinator(
     // Presentation publication/clearing (all under the lifecycle boundary)
     // ------------------------------------------------------------------
 
-    /** A verified replacement supersedes the previous credential generation. */
-    private suspend fun onCredentialReplaced(device: ThinQDevice, profile: ThinQDeviceProfile) {
-        lifecycle.invalidateCredential { newKey ->
-            liveStateController.resetForContextChange()
-            commandController.resetForContextChange()
-            profileMutex.withLock {
-                mutableDeviceProfile.value = ThinQDeviceProfilePublication(
-                    contextKey = newKey,
-                    device = device,
-                    profile = profile.takeIf { it.deviceId == configuredDeviceId },
-                )
-            }
-        }
-    }
-
     private suspend fun invalidateForProtectedKeyLoss() {
         lifecycle.invalidateCredential { clearPresentationUnderBoundary() }
     }
@@ -389,6 +419,7 @@ class ThinQContextCoordinator(
         liveStateController = liveStateController,
         commandController = commandController,
         setupCredential = ::setupCredential,
+        cancelSetupAttempt = ::cancelSetupAttempt,
         onDeviceOpened = ::onDeviceOpened,
         refreshLiveState = ::refreshLiveState,
         removeCredential = ::removeCredential,
