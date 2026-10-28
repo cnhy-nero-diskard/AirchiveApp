@@ -10,6 +10,8 @@ import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -138,6 +140,33 @@ class ProductionAccountControllerTest {
         identity.signOut()
         assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
         assertTrue(local.clearedPartitions.isEmpty())
+    }
+
+    @Test
+    fun refreshClearsConfirmationAndFeedbackWhenTheOwnerChangesExternally() = runBlocking {
+        val otherOwner = OwnerSession(
+            uid = "owner-uid-2",
+            displayName = "Owner Two",
+            email = "owner2@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 1L,
+        )
+        val identity = SwitchingIdentity(owner, otherOwner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestClearCache()
+        assertEquals(ProductionAccountConfirmStep.CLEAR_CACHE, controller.state.value.confirmStep)
+
+        identity.signOut()
+        identity.signIn()
+        controller.refresh()
+
+        assertEquals(otherOwner, controller.state.value.session)
+        assertEquals(
+            ProductionAccountConfirmStep.NONE,
+            controller.state.value.confirmStep,
+            "a confirmation opened by the previous owner cannot survive an external account switch",
+        )
+        assertNull(controller.state.value.lastActionResult, "prior-owner action feedback is cleared too")
+        assertTrue(identity.currentSession == otherOwner)
     }
 
     @Test
@@ -299,5 +328,19 @@ class ProductionAccountControllerTest {
         override suspend fun signOut() {
             current = null
         }
+    }
+
+    private class SwitchingIdentity(
+        initial: OwnerSession,
+        private val next: OwnerSession,
+    ) : OwnerIdentityPort {
+        private val session = MutableStateFlow<OwnerSession?>(initial)
+        override val currentSession: OwnerSession? get() = session.value
+        override fun observeSession(): Flow<OwnerSession?> = session.asStateFlow()
+        override suspend fun signIn(): SignInResult {
+            session.value = next
+            return SignInResult.Success(next)
+        }
+        override suspend fun signOut() { session.value = null }
     }
 }

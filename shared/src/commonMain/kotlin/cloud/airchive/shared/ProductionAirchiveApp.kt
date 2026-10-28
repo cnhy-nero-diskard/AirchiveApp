@@ -749,19 +749,36 @@ private fun ProductionThinQCredentialCard(
     signedIn: Boolean,
 ) {
     val scope = rememberCoroutineScope()
-    var busy by remember(bindings) { mutableStateOf(false) }
-    var replacing by remember(bindings) { mutableStateOf(false) }
-    var confirmingRemoval by remember(bindings) { mutableStateOf(false) }
-    var rawToken by remember(bindings) { mutableStateOf("") }
-    var country by remember(bindings) { mutableStateOf("PH") }
+    val activeContextKey by bindings.contextKey.collectAsState()
+    // PAT/country/form/confirmation state is ephemeral and belongs to exactly
+    // one owner+credential generation. It is neither saveable nor shared with a
+    // replacement owner. A same-owner verification failure leaves the context
+    // key unchanged, so the form remains available for a retry.
+    var busy by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    var replacing by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    var confirmingRemoval by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    var rawToken by remember(bindings, activeContextKey) { mutableStateOf("") }
+    var country by remember(bindings, activeContextKey) { mutableStateOf("PH") }
     var setupRequestId by remember(bindings) { mutableStateOf(0L) }
-    var setupJob by remember(bindings) { mutableStateOf<Job?>(null) }
+    var setupJob by remember(bindings, activeContextKey) { mutableStateOf<Job?>(null) }
     // Setup/removal feedback is scoped to the lifecycle context it was
     // produced under (task 2.4): after any owner/credential transition the
     // old attempt's message is hidden instead of being shown for the new
     // context. A superseded attempt records no feedback at all.
-    var feedbackFor by remember(bindings) { mutableStateOf<Pair<ThinQContextKey, String>?>(null) }
-    val activeContextKey by bindings.contextKey.collectAsState()
+    // Preserve a valid successful same-owner feedback across that commit's
+    // credential-generation advance, but discard the bucket when the owner /
+    // project / device partition changes. Exact-generation rendering is still
+    // fenced by productionSetupFeedback below.
+    var feedbackFor by remember(
+        bindings,
+        activeContextKey.ownerUid,
+        activeContextKey.projectId,
+        activeContextKey.deviceId,
+    ) { mutableStateOf<Pair<ThinQContextKey, String>?>(null) }
+
+    LaunchedEffect(bindings, activeContextKey) {
+        if (feedbackFor?.first != activeContextKey) feedbackFor = null
+    }
 
     LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
         if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
@@ -904,18 +921,22 @@ private fun ProductionThinQCredentialCard(
                 Button(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = {
+                        val submittedContextKey = activeContextKey
                         scope.launch {
                             busy = true
                             try {
-                                bindings.removeCredential()
+                                val outcome = bindings.removeCredential()
                                 rawToken = ""
                                 replacing = false
-                                feedbackFor = bindings.contextKey.value to
+                                feedbackFor = outcome.contextKey to if (outcome.removed) {
                                     "ThinQ PAT removed. Cached Airchive history was kept."
+                                } else {
+                                    "The ThinQ PAT could not be removed. Your current session and cached history remain."
+                                }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                feedbackFor = bindings.contextKey.value to
+                                feedbackFor = submittedContextKey to
                                     "The ThinQ PAT could not be removed. Your current session and cached history remain."
                             } finally {
                                 busy = false
@@ -954,8 +975,13 @@ private fun ProductionAccountCard(
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
-    var busy by remember(controller) { mutableStateOf(false) }
-    var feedback by remember(controller) { mutableStateOf<String?>(null) }
+    var busy by remember(controller, session?.uid) { mutableStateOf(false) }
+    var feedback by remember(controller, session?.uid) { mutableStateOf<String?>(null) }
+    // A controller can briefly retain the previous snapshot while the session
+    // observer is catching up. Never render a prior owner's destructive dialog
+    // during that frame; refresh() also clears the stale step at the source.
+    val visibleConfirmStep = state.confirmStep.takeIf { state.session?.uid == session?.uid }
+        ?: ProductionAccountConfirmStep.NONE
 
     LaunchedEffect(controller, session?.uid) { controller.refresh() }
 
@@ -1017,7 +1043,7 @@ private fun ProductionAccountCard(
         }
     }
 
-    when (state.confirmStep) {
+    when (visibleConfirmStep) {
         ProductionAccountConfirmStep.NONE -> Unit
         ProductionAccountConfirmStep.SIGN_OUT -> ProductionConfirmationDialog(
             title = "Sign out of Google?",
