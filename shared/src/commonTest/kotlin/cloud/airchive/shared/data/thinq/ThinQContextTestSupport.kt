@@ -1,5 +1,7 @@
 package cloud.airchive.shared.data.thinq
 
+import cloud.airchive.shared.contract.credentials.SaveThinQResult
+import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInResult
@@ -7,10 +9,14 @@ import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.contract.thinq.AcControls
 import cloud.airchive.shared.contract.thinq.CommandOutcome
 import cloud.airchive.shared.contract.thinq.CommandStatus
+import cloud.airchive.shared.contract.thinq.ThinQCredentialVerificationRequest
+import cloud.airchive.shared.contract.thinq.ThinQCredentialVerifier
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.contract.thinq.ThinQPort
+import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
+import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Shared deterministic doubles for the lifecycle/context tests (OpenSpec
- * `deliver-shared-instrument-ui` tasks 2.1–2.3).
+ * `deliver-shared-instrument-ui` tasks 2.1–2.4).
  *
  * Everything here is in-memory: no real credential, no Firebase, no Keystore
  * and no HTTP client is ever constructed. Synthetic tokens are clearly marked
@@ -146,5 +152,58 @@ internal class SwitchingIdentity(
 
     override suspend fun signOut() {
         session.value = null
+    }
+}
+
+/**
+ * Verifier whose LG round trip can be **held open deterministically** (task
+ * 2.4): set [onVerify] to a [NetworkStep]-backed gate to suspend exactly one
+ * verification between "entered" and "released", so a test can interleave an
+ * account change, removal, cancellation or newer attempt with an in-flight
+ * verification. With no hook set, the configured device verifies immediately.
+ */
+internal class GateableVerifier(
+    private val deviceId: String = TEST_DEVICE_ID,
+) : ThinQCredentialVerifier {
+
+    /** Invoked inside [verify], before the scripted result is returned. */
+    var onVerify: (suspend () -> Unit)? = null
+
+    /** The single scripted outcome; `null` verifies the configured device. */
+    var result: ThinQVerificationResult? = null
+
+    var callCount: Int = 0
+        private set
+
+    override suspend fun verify(request: ThinQCredentialVerificationRequest): ThinQVerificationResult {
+        callCount += 1
+        onVerify?.invoke()
+        return result ?: ThinQVerificationResult.Verified(testDevice(deviceId), testProfile(deviceId))
+    }
+}
+
+/**
+ * In-memory credential store counting protected-store **saves** and **clears**
+ * (task 2.4): superseded-attempt tests assert that the save counter never
+ * moves, and removal tests assert the clear happened exactly once. It never
+ * touches a real Keystore.
+ */
+internal class CountingCredentialStore(
+    private val delegate: FakeThinQCredentialStore = FakeThinQCredentialStore(),
+) : ThinQCredentialStore by delegate {
+
+    var saveCalls: Int = 0
+        private set
+    var clearCalls: Int = 0
+        private set
+
+    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+        saveCalls += 1
+        return delegate.save(rawToken, accountCountry)
+    }
+
+    override suspend fun clear() {
+        clearCalls += 1
+        delegate.clear()
     }
 }

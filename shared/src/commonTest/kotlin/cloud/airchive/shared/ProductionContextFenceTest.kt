@@ -11,7 +11,9 @@ import cloud.airchive.shared.data.thinq.ThinQEntryResult
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -130,5 +132,25 @@ class ProductionContextFenceTest {
             ),
             "a key-lost credential never renders an old reading as current",
         )
+    }
+
+    @Test
+    fun setupFeedbackIsScopedToTheLifecycleContextThatProducedIt() {
+        // Feedback recorded under the active context renders normally.
+        assertEquals(
+            "The configured AC and profile were verified.",
+            productionSetupFeedback(activeKey to "The configured AC and profile were verified.", activeKey),
+        )
+
+        // After any owner/credential transition, the old attempt's outcome is
+        // never shown for the new context (task 2.4).
+        assertNull(
+            productionSetupFeedback(activeKey to "The configured AC and profile were verified.", supersededKey),
+            "stale attempt feedback must be hidden after the context changed",
+        )
+        assertNull(productionSetupFeedback(activeKey to "Saved.", null), "an unknown active context shows nothing")
+
+        // A suppressed outcome (a superseded attempt records nothing) renders nothing.
+        assertNull(productionSetupFeedback(null, activeKey))
     }
 }
