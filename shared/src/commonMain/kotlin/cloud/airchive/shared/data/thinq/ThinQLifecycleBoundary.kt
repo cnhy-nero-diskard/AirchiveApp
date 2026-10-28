@@ -243,16 +243,14 @@ class ThinQLifecycleBoundary(
         }
     }
 
-    /**
-     * Boundary-serialized currency check for [attempt] (task 2.4): true only
-     * while it is still the single active attempt **and** its captured context
-     * is unchanged. Used to fence the exposure of non-committed outcomes
-     * (delayed verification failures), so a stale result is never exposed for
-     * the now-active context. An attempt consumed by a successful gate passage
-     * is no longer current here — commit-path results are already final.
-     */
-    suspend fun isSetupAttemptCurrent(attempt: ThinQSetupAttempt): Boolean = withBoundary {
-        activeSetupAttempt == attempt && mutableKey.value == attempt.contextKey
+    /** Completes a non-committed attempt without changing the credential generation. */
+    suspend fun finishSetupAttemptIfCurrent(attempt: ThinQSetupAttempt): Boolean = withBoundary {
+        if (activeSetupAttempt != attempt || mutableKey.value != attempt.contextKey) {
+            false
+        } else {
+            activeSetupAttempt = null
+            true
+        }
     }
 
     /**

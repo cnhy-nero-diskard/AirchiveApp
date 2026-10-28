@@ -1,6 +1,7 @@
 package cloud.airchive.shared.data.thinq
 
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
+import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
@@ -145,6 +146,37 @@ class ThinQLifecycleInvalidationTest {
             fixture.coordinator.contextKey.value.credentialGeneration > after.credentialGeneration,
             "clearing an absent credential's presentation also advances the generation",
         )
+    }
+
+    @Test
+    fun failedCredentialRemovalStillReturnsItsInvalidatedContextWithoutRevivingPresentation() = runBlocking {
+        val delegate = FakeThinQCredentialStore()
+        delegate.save(SEED_TOKEN, "PH")
+        val store = object : ThinQCredentialStore by delegate {
+            override suspend fun clear() {
+                error("synthetic protected-store clear failure")
+            }
+        }
+        val coordinator = ThinQContextCoordinator(
+            credentialStore = store,
+            thinQ = ScriptedThinQPort(),
+            verifier = testVerifier(),
+            configuredDeviceId = TEST_DEVICE_ID,
+            ownerUid = "owner-a",
+            projectId = TEST_PROJECT_ID,
+        )
+        assertEquals(ThinQEntryResult.Success, coordinator.onDeviceOpened())
+        val keyBefore = coordinator.contextKey.value
+
+        val result = coordinator.removeCredential()
+
+        assertFalse(result.removed)
+        assertEquals(coordinator.contextKey.value, result.contextKey,
+            "failure feedback is labeled with the exact generation invalidated by the removal attempt")
+        assertTrue(result.contextKey.credentialGeneration > keyBefore.credentialGeneration)
+        assertEquals(SEED_TOKEN, delegate.readToken(), "failed protected removal leaves the stored credential intact")
+        assertNull(coordinator.deviceProfile.value)
+        assertTrue(coordinator.liveStateController.state.value is ThinQLiveRefreshState.NotRead)
     }
 
     // ------------------------------------------------------ replacement rules

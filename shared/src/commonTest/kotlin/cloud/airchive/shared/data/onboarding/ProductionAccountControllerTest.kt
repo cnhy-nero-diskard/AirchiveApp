@@ -170,6 +170,45 @@ class ProductionAccountControllerTest {
     }
 
     @Test
+    fun refreshClearsCompletedPriorOwnerActionFeedbackAfterAnExternalSwitch() = runBlocking {
+        val otherOwner = OwnerSession(
+            uid = "owner-uid-3",
+            displayName = "Owner Three",
+            email = "owner3@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 2L,
+        )
+        val identity = SwitchingIdentity(owner, otherOwner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestClearCache()
+        assertIs<OwnerSettingsActionResult.Success>(controller.clearCacheConfirmed())
+        assertNotNull(controller.state.value.lastActionResult)
+
+        identity.signOut()
+        identity.signIn()
+        controller.refresh()
+
+        assertEquals(otherOwner, controller.state.value.session)
+        assertNull(
+            controller.state.value.lastActionResult,
+            "completed feedback from an unrelated prior owner is removed when the owner partition changes",
+        )
+    }
+
+    @Test
+    fun refreshClearsAConfirmationRequestedWithoutAnOwner() = runBlocking {
+        val identity = FakeOwnerIdentity(fixedSession = owner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestSignOut()
+        assertEquals(ProductionAccountConfirmStep.SIGN_OUT, controller.state.value.confirmStep)
+
+        controller.refresh()
+
+        assertEquals(ProductionAccountConfirmStep.NONE, controller.state.value.confirmStep,
+            "a destructive confirmation without an owner is never shown to a later account")
+        assertNull(controller.state.value.session)
+    }
+
+    @Test
     fun clearCacheFailureAbortsSignOutAndKeepsSession(): Unit = runBlocking {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()

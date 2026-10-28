@@ -157,6 +157,16 @@ class ProductionContextFenceTest {
     }
 
     @Test
+    fun credentialFormIsHiddenUntilOwnerAndLifecyclePartitionAgree() {
+        assertTrue(productionSetupOwnerReady("owner-a", activeKey))
+        assertFalse(productionSetupOwnerReady(null, activeKey), "signed-out UI cannot render a prior owner's form")
+        assertFalse(
+            productionSetupOwnerReady("owner-b", activeKey),
+            "a new session cannot render a form while the lifecycle boundary still names the old owner",
+        )
+    }
+
+    @Test
     fun supersededCommandSlotIsNeutralBusyAndDisablesControlsWithoutOldDetails() {
         val occupiedOldSlot = AcCommandSlotState.Occupied(activeKey)
         assertTrue(commandSlotIsNeutralBusy(occupiedOldSlot, supersededKey))

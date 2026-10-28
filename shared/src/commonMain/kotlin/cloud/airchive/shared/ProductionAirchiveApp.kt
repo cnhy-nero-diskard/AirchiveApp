@@ -36,6 +36,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -522,7 +523,8 @@ private fun ProductionAccessCard(
     nowProvider: () -> Long,
 ) {
     val scope = rememberCoroutineScope()
-    var busy by remember(coordinator) { mutableStateOf(false) }
+    val activeOwnerUid = coordinator.session.collectAsState().value?.uid
+    var busy by remember(coordinator, activeOwnerUid) { mutableStateOf(false) }
 
     fun runAction(action: suspend () -> OwnerAccessState) {
         scope.launch {
@@ -718,7 +720,7 @@ fun ProductionSettingsRoute(
         InstrumentPanel {
             ProductionAccountCard(accountController, session, history, afterSettingsAction, nowProvider)
             if (thinQBindings != null) {
-                ProductionThinQCredentialCard(thinQBindings, credentialState, signedIn = session != null)
+                ProductionThinQCredentialCard(thinQBindings, credentialState, ownerUid = session?.uid)
             } else SummaryCard("AC connection") {
                 Text("The protected ThinQ adapter is not configured in this build.")
             }
@@ -746,15 +748,22 @@ fun ProductionSettingsRoute(
 private fun ProductionThinQCredentialCard(
     bindings: ProductionThinQBindings,
     credentialState: ThinQCredentialState,
-    signedIn: Boolean,
+    ownerUid: String?,
 ) {
     val scope = rememberCoroutineScope()
     val activeContextKey by bindings.contextKey.collectAsState()
+    val ownerContextReady = productionSetupOwnerReady(ownerUid, activeContextKey)
     // PAT/country/form/confirmation state is ephemeral and belongs to exactly
     // one owner+credential generation. It is neither saveable nor shared with a
     // replacement owner. A same-owner verification failure leaves the context
     // key unchanged, so the form remains available for a retry.
-    var busy by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    // Operation-busy state belongs to the owner/session lifetime, not the
+    // credential generation: a successful replacement/removal advances the
+    // key mid-operation but must not briefly re-enable another action before
+    // its result is published.
+    var busy by remember(bindings, activeContextKey.ownerUid, activeContextKey.projectId, activeContextKey.deviceId) {
+        mutableStateOf(false)
+    }
     var replacing by remember(bindings, activeContextKey) { mutableStateOf(false) }
     var confirmingRemoval by remember(bindings, activeContextKey) { mutableStateOf(false) }
     var rawToken by remember(bindings, activeContextKey) { mutableStateOf("") }
@@ -775,9 +784,10 @@ private fun ProductionThinQCredentialCard(
         activeContextKey.projectId,
         activeContextKey.deviceId,
     ) { mutableStateOf<Pair<ThinQContextKey, String>?>(null) }
+    val latestFeedbackFor by rememberUpdatedState(feedbackFor)
 
     LaunchedEffect(bindings, activeContextKey) {
-        if (feedbackFor?.first != activeContextKey) feedbackFor = null
+        if (latestFeedbackFor?.first != activeContextKey) feedbackFor = null
     }
 
     LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
@@ -785,9 +795,10 @@ private fun ProductionThinQCredentialCard(
     }
 
     SummaryCard("AC connection") {
-        if (!signedIn) {
-            Text("Sign in with Google before setting up the separate ThinQ credential.")
-        } else {
+        when {
+            ownerUid == null -> Text("Sign in with Google before setting up the separate ThinQ credential.")
+            !ownerContextReady -> Text("Updating the AC connection for the active account. Please wait.")
+            else -> {
             Text(credentialState.productionCredentialStatus())
             InstrumentDisclosure("Connection details", "Protected storage and command access", inset = 0.dp, showDivider = false, informational = true) {
                 Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -909,10 +920,11 @@ private fun ProductionThinQCredentialCard(
                     onClick = { confirmingRemoval = true },
                 ) { Text("Remove ThinQ PAT") }
             }
+            }
         }
     }
 
-    if (confirmingRemoval) {
+    if (confirmingRemoval && ownerContextReady) {
         AlertDialog(
             onDismissRequest = { if (!busy) confirmingRemoval = false },
             title = { Text("Remove ThinQ PAT?", modifier = Modifier.semantics { heading() }) },
@@ -922,6 +934,7 @@ private fun ProductionThinQCredentialCard(
                     enabled = !busy,
                     onClick = {
                         val submittedContextKey = activeContextKey
+                        feedbackFor = null
                         scope.launch {
                             busy = true
                             try {
@@ -965,6 +978,10 @@ internal fun productionSetupFeedback(
     activeContextKey: ThinQContextKey?,
 ): String? = feedbackFor?.takeIf { it.first == activeContextKey }?.second
 
+/** A sensitive credential form is visible only after owner/lifecycle observers agree. */
+internal fun productionSetupOwnerReady(ownerUid: String?, activeContextKey: ThinQContextKey): Boolean =
+    ownerUid != null && ownerUid == activeContextKey.ownerUid
+
 @Composable
 private fun ProductionAccountCard(
     controller: ProductionAccountController,
@@ -976,14 +993,22 @@ private fun ProductionAccountCard(
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
     var busy by remember(controller, session?.uid) { mutableStateOf(false) }
-    var feedback by remember(controller, session?.uid) { mutableStateOf<String?>(null) }
+    var feedback by remember(controller) { mutableStateOf<String?>(null) }
+    var feedbackOwnerUid by remember(controller) { mutableStateOf<String?>(session?.uid) }
+    val latestFeedbackOwnerUid by rememberUpdatedState(feedbackOwnerUid)
     // A controller can briefly retain the previous snapshot while the session
     // observer is catching up. Never render a prior owner's destructive dialog
     // during that frame; refresh() also clears the stale step at the source.
-    val visibleConfirmStep = state.confirmStep.takeIf { state.session?.uid == session?.uid }
+    val visibleConfirmStep = state.confirmStep.takeIf { session != null && state.session?.uid == session.uid }
         ?: ProductionAccountConfirmStep.NONE
 
-    LaunchedEffect(controller, session?.uid) { controller.refresh() }
+    LaunchedEffect(controller, session?.uid) {
+        controller.refresh()
+        if (latestFeedbackOwnerUid != session?.uid) {
+            feedback = null
+            feedbackOwnerUid = session?.uid
+        }
+    }
 
     fun launchAction(action: suspend () -> Unit) {
         scope.launch {
@@ -995,6 +1020,7 @@ private fun ProductionAccountCard(
                 throw cancelled
             } catch (_: Exception) {
                 feedback = "The action could not be completed. Your saved data remains unchanged; retry when ready."
+                feedbackOwnerUid = controller.state.value.session?.uid
             } finally {
                 busy = false
             }
@@ -1017,7 +1043,7 @@ private fun ProductionAccountCard(
             )
         }
 
-        feedback?.let { message ->
+        feedback?.takeIf { feedbackOwnerUid == session?.uid }?.let { message ->
             Text(
                 message,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -1053,6 +1079,7 @@ private fun ProductionAccountCard(
             onConfirm = {
                 launchAction {
                     feedback = controller.signOutConfirmed().productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )
@@ -1064,6 +1091,7 @@ private fun ProductionAccountCard(
             onConfirm = {
                 launchAction {
                     feedback = controller.changeAccountConfirmed().productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )
@@ -1078,6 +1106,7 @@ private fun ProductionAccountCard(
                     feedback = if (result is OwnerSettingsActionResult.Success) {
                         "This account's local history cache was cleared. Google sign-in is unchanged."
                     } else result.productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )

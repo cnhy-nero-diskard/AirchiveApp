@@ -402,7 +402,7 @@ class ThinQContextCoordinator(
 
             override suspend fun exposeOutcome(
                 outcome: ThinQCredentialSetupResult,
-            ): ThinQCredentialSetupResult = if (lifecycle.isSetupAttemptCurrent(attempt)) {
+            ): ThinQCredentialSetupResult = if (lifecycle.finishSetupAttemptIfCurrent(attempt)) {
                 outcome
             } else {
                 ThinQCredentialSetupResult.Superseded

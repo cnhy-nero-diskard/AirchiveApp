@@ -103,7 +103,10 @@ class ProductionAccountController(
         // A confirmation belongs to the UID that opened it. An external
         // identity switch can arrive while Settings is still composed; discard
         // that dialog/result before the new owner's snapshot is published.
-        if (confirmationOwnerUid != null && confirmationOwnerUid != identity.currentSession?.uid) {
+        if (_state.value.session?.uid != identity.currentSession?.uid ||
+            (confirmationOwnerUid != null && confirmationOwnerUid != identity.currentSession?.uid) ||
+            (confirmationOwnerUid == null && _state.value.confirmStep != ProductionAccountConfirmStep.NONE)
+        ) {
             confirmationOwnerUid = null
             _state.value = _state.value.copy(
                 confirmStep = ProductionAccountConfirmStep.NONE,

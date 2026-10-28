@@ -28,9 +28,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: Long, onHome: () -> Unit, onSettings: () -> Unit) {
     val providers = remember { FakeProviders(now, "preview-ac") }
     val session by providers.ownerIdentity.observeSession().collectAsState(initial = null)
-    // Single-context preview lifecycle: the key never advances, but its shape
-    // (publication carrying its context key) matches the production bindings.
+    // Synthetic owner partition for this preview; its device/profile
+    // publication uses the same key shape as the production bindings.
     val previewLifecycle = remember { ThinQLifecycleBoundary(null, "preview", "preview-ac") }
+    LaunchedEffect(session?.uid) {
+        previewLifecycle.invalidateOwner(session?.uid, "preview")
+    }
     val deviceProfile = remember { MutableStateFlow<ThinQDeviceProfilePublication?>(null) }
     val credential = remember { MutableStateFlow(ThinQCredentialState(true, "preview-client",
         ThinQCredential("•••• demo", "PH", now))) }
