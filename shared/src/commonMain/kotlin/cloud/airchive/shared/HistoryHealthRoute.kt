@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.history.CoveredRange
+import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
 import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
@@ -114,8 +115,8 @@ fun HistoryHealthRoute(
     }
     val counters = remember(observations) { countSampleTypes(observations) }
 
-    var selectedSampleId by remember { mutableStateOf<String?>(null) }
-    val selected = selectedSampleId?.let { id -> observations.firstOrNull { it.sampleId == id } }
+    var selectedSample by remember(snapshot.partition) { mutableStateOf<HistorySampleSelection?>(null) }
+    val selected = selectedHistoryObservation(selectedSample, snapshot)
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -177,7 +178,10 @@ fun HistoryHealthRoute(
                     // cached snapshot can include thousands of explicitly loaded
                     // historical observations.
                     val row = observationRowUi(sample)
-                    ObservationRow(row = row, onClick = { selectedSampleId = row.sample.sampleId })
+                    ObservationRow(
+                        row = row,
+                        onClick = { selectedSample = HistorySampleSelection(snapshot.partition, row.sample.sampleId) },
+                    )
                 }
             }
         }
@@ -185,8 +189,23 @@ fun HistoryHealthRoute(
 
     val selectedRow = selected?.let(::observationRowUi)
     if (selectedRow != null) {
-        ObservationDetailDialog(row = selectedRow, onDismiss = { selectedSampleId = null })
+        ObservationDetailDialog(row = selectedRow, onDismiss = { selectedSample = null })
     }
+}
+
+/** History detail selection belongs to the owner/project/device partition, not the PAT generation. */
+internal data class HistorySampleSelection(
+    val partition: HistoryPartition,
+    val sampleId: String,
+)
+
+/** Prevents an old partition's identifier from selecting a same-id row in another owner's cache. */
+internal fun selectedHistoryObservation(
+    selection: HistorySampleSelection?,
+    snapshot: HistorySnapshot,
+): Observation? {
+    if (selection == null || selection.partition != snapshot.partition) return null
+    return snapshot.observations.firstOrNull { it.sampleId == selection.sampleId }
 }
 
 // ---------------------------------------------------------------------------
