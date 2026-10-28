@@ -47,6 +47,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -59,9 +61,9 @@ import kotlinx.coroutines.launch
  * deliberately, unmistakably synthetic:
  *
  *  - Owner identity, Airchive telemetry, local history, the ThinQ credential
- *    store/verifier, and the ThinQ client are the shared `cloud.airchive.shared.fakes`
- *    implementations wrapped by the per-operation counters and deferred-response
- *    gates below — no live account, device, or network is ever contacted.
+ *    store/verifier, and the ThinQ client are isolated in-memory fakes wrapped by
+ *    the per-operation counters and deferred-response gates below — no live
+ *    account, device, or network is ever contacted.
  *  - The shell receives an injectable [ControlledFixtureClock] through the
  *    `nowProvider` seam instead of the system clock.
  *  - The interface-detail preference uses its own dedicated file,
@@ -101,7 +103,7 @@ class SharedInstrumentShellFixture(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val ownerIdentity =
-        CountingOwnerIdentity(FakeOwnerIdentity(), counters, ownerSignInGate)
+        CountingOwnerIdentity(MutableFixtureOwnerIdentity(), counters, ownerSignInGate)
     private val telemetry = CountingTelemetry(FakeAirchiveTelemetry(FIXTURE_NOW_EPOCH_MILLIS), counters)
     private val localHistory = CountingLocalHistory(FakeLocalHistory(), counters)
     private val credentialStore = CountingCredentialStore(FakeThinQCredentialStore(), counters)
@@ -126,16 +128,6 @@ class SharedInstrumentShellFixture(context: Context) {
         scope = scope,
     )
 
-    /** Production Settings account actions over the same fake ports. */
-    val accountController = ProductionAccountController(
-        identity = ownerIdentity,
-        local = localHistory,
-        firebaseProjectId = FIXTURE_PROJECT_ID,
-        configuredDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
-        serializedAction = { action -> coordinator.runExclusive(action) },
-        credentialStore = credentialStore,
-    )
-
     /**
      * Production lifecycle/context core over the fake ports (OpenSpec tasks
      * 2.1–2.3): the owner/project/device + credential-generation boundary, the
@@ -152,6 +144,18 @@ class SharedInstrumentShellFixture(context: Context) {
         projectId = FIXTURE_PROJECT_ID,
         nowEpochMillis = clock::now,
         commandScope = scope,
+    )
+
+    /** Production Settings account actions over the same fake ports/context. */
+    val accountController = ProductionAccountController(
+        identity = ownerIdentity,
+        local = localHistory,
+        firebaseProjectId = FIXTURE_PROJECT_ID,
+        configuredDeviceId = FakeAirchiveTelemetry.DEMO_DEVICE_ID,
+        serializedAction = { action -> coordinator.runExclusive(action) },
+        credentialStore = credentialStore,
+        beforeOwnerTransition = { thinQContext.onOwnerChanged(null, FIXTURE_PROJECT_ID) },
+        afterOwnerTransition = { thinQContext.onOwnerChanged(it?.uid, FIXTURE_PROJECT_ID) },
     )
 
     /**
@@ -219,6 +223,30 @@ class SharedInstrumentShellFixture(context: Context) {
     /** Releases the coordinator's session-observation scope; call from onDestroy. */
     fun close() {
         scope.cancel()
+    }
+
+    /** Chooses the synthetic identity returned by the next fake Google sign-in. */
+    fun setNextOwner(ownerUid: String) {
+        ownerIdentity.setNextSession(
+            OwnerSession(
+                uid = ownerUid,
+                displayName = "Synthetic owner",
+                email = "$ownerUid@example.invalid",
+                signedInAtEpochMillis = FIXTURE_NOW_EPOCH_MILLIS,
+            ),
+        )
+    }
+
+    /** External identity emission for partition-bound UI tests (in-memory only). */
+    fun switchOwnerImmediately(ownerUid: String) {
+        ownerIdentity.switchTo(
+            OwnerSession(
+                uid = ownerUid,
+                displayName = "Synthetic owner",
+                email = "$ownerUid@example.invalid",
+                signedInAtEpochMillis = FIXTURE_NOW_EPOCH_MILLIS + 1L,
+            ),
+        )
     }
 
     companion object {
@@ -312,6 +340,16 @@ private class CountingOwnerIdentity(
 ) : OwnerIdentityPort {
     val delegateTypeName: String get() = delegate.javaClass.simpleName
 
+    fun setNextSession(session: OwnerSession) {
+        (delegate as? MutableFixtureOwnerIdentity)?.setNextSession(session)
+            ?: error("The fixture owner identity is not switchable")
+    }
+
+    fun switchTo(session: OwnerSession) {
+        (delegate as? MutableFixtureOwnerIdentity)?.switchTo(session)
+            ?: error("The fixture owner identity is not switchable")
+    }
+
     override val currentSession: OwnerSession? get() = delegate.currentSession
     override fun observeSession(): Flow<OwnerSession?> = delegate.observeSession()
 
@@ -324,6 +362,32 @@ private class CountingOwnerIdentity(
     override suspend fun signOut() {
         counters.ownerSignOuts.incrementAndGet()
         delegate.signOut()
+    }
+}
+
+/** Switchable Google-session fake used only by isolated shell tests. */
+private class MutableFixtureOwnerIdentity : OwnerIdentityPort {
+    private val session = MutableStateFlow<OwnerSession?>(null)
+    private var nextSession = FakeOwnerIdentity.DEFAULT_SESSION
+
+    override val currentSession: OwnerSession? get() = session.value
+    override fun observeSession(): Flow<OwnerSession?> = session.asStateFlow()
+
+    fun setNextSession(session: OwnerSession) {
+        nextSession = session
+    }
+
+    fun switchTo(session: OwnerSession) {
+        this.session.value = session
+    }
+
+    override suspend fun signIn(): SignInResult {
+        session.value = nextSession
+        return SignInResult.Success(nextSession)
+    }
+
+    override suspend fun signOut() {
+        session.value = null
     }
 }
 

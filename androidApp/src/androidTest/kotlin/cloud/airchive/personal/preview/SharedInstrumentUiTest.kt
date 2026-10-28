@@ -4,6 +4,7 @@ import android.content.Intent
 import android.app.UiModeManager
 import android.os.ParcelFileDescriptor
 import android.graphics.Bitmap
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -11,6 +12,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -141,6 +143,76 @@ class SharedInstrumentUiTest {
                 "Fixture graph must not compose $productionType; composed: $composed",
                 productionType in shell.constructedGraph,
             )
+        }
+    }
+
+    @Test fun accountSwitchClearsThinQFormAndSyntheticPatDraft() {
+        val syntheticMarker = "synthetic-ui-pat-marker-2468"
+        launchShell().use { scene ->
+            awaitNode { it.text?.toString() == "Continue with Google" }
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", syntheticMarker)
+            setTextByHint("ThinQ account country", "US")
+            awaitNode { it.text?.toString() == "US" }
+            scene.onActivity { it.shellFixture!!.setNextOwner("shell-fixture-owner-b") }
+
+            // The real production account confirmation path clears the
+            // protected fake store and changes the lifecycle owner partition.
+            clickText("Account actions")
+            clickText("Switch Google account")
+            awaitNode { it.text?.toString() == "Switch Google account?" }
+            clickText("Confirm")
+
+            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+            instrumentation.waitForIdleSync()
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            assertNull("a prior owner's token-entry field must not survive account change",
+                find(root) { it.hintText?.toString() == "ThinQ Personal Access Token" })
+            assertNull("a prior owner's country draft must not survive account change",
+                find(root) { it.hintText?.toString() == "ThinQ account country" })
+            assertNull("the synthetic plaintext marker must not resurface in the new owner UI",
+                find(root) { it.text?.toString()?.contains(syntheticMarker) == true })
+            scene.onActivity { fixtureActivity ->
+                assertEquals("shell-fixture-owner-b", fixtureActivity.shellFixture!!.coordinator.session.value?.uid)
+                assertEquals(1, fixtureActivity.shellFixture!!.counters.credentialClears.get())
+            }
+        }
+    }
+
+    @Test fun selectedHistoryDetailDoesNotReopenForAnotherOwnersMatchingSampleId() {
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("History")
+            awaitNode { it.text?.toString() == "Sample status guide" }
+            val row = awaitNode { it.contentDescription?.toString()?.startsWith("Sample at ") == true }
+            clickNode(row)
+            awaitNode { it.text?.toString() == "Sample detail" }
+
+            val readsBefore = AtomicInteger()
+            val writesBefore = AtomicInteger()
+            scene.onActivity { activity ->
+                readsBefore.set(activity.shellFixture!!.counters.telemetryReads.get())
+                writesBefore.set(activity.shellFixture!!.counters.localHistoryWrites.get())
+                activity.shellFixture!!.switchOwnerImmediately("sample-owner-b")
+            }
+
+            awaitTrue("the fixture must observe the new history partition") {
+                scene.onActivity { it.shellFixture!!.coordinator.session.value?.uid == "sample-owner-b" }
+            }
+            awaitTrue("the new owner's matching sample IDs must be populated") {
+                scene.onActivity {
+                    it.shellFixture!!.counters.telemetryReads.get() > readsBefore.get() &&
+                        it.shellFixture!!.counters.localHistoryWrites.get() > writesBefore.get()
+                }
+            }
+            instrumentation.waitForIdleSync()
+            assertNull("a selected sample detail from owner A cannot reopen on owner B's matching sampleId",
+                find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == "Sample detail" })
         }
     }
 
@@ -309,6 +381,17 @@ class SharedInstrumentUiTest {
             scrollForward()
         }
         clickNode(awaitNode { it.text?.toString() == text })
+    }
+
+    private fun setTextByHint(hint: String, value: String) {
+        val field = awaitNode {
+            it.className?.toString()?.contains("EditText") == true && it.hintText?.toString() == hint
+        }
+        val arguments = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+        }
+        assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments))
+        instrumentation.waitForIdleSync()
     }
 
     private fun scrollForward() {
