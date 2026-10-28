@@ -201,7 +201,7 @@ private fun ProductionRouteHost(
     // Keep an unapplied setpoint above the conditional route composition. The
     // lifecycle key intentionally resets it when the owner/device/credential
     // context changes, but navigation and display-detail changes do not.
-    var temperatureDraft by remember(activeThinQContextKey) { mutableStateOf<Double?>(null) }
+    var temperatureDraft by remember(activeThinQContextKey) { mutableStateOf<TemperatureDraft?>(null) }
     val historyFlow = remember(coordinator, partition) {
         partition?.let { coordinator.local.observe(it) } ?: flowOf(placeholderHistory)
     }
@@ -384,8 +384,8 @@ private fun ProductionHome(
     ownerAuthConfigurationMessage: String?,
     credentialState: ThinQCredentialState,
     thinQBindings: ProductionThinQBindings?,
-    temperatureDraft: Double?,
-    onTemperatureDraftChange: (Double?) -> Unit,
+    temperatureDraft: TemperatureDraft?,
+    onTemperatureDraftChange: (TemperatureDraft?) -> Unit,
     hasSession: Boolean,
     onOpenEnergy: () -> Unit,
     nowProvider: () -> Long,
@@ -663,8 +663,8 @@ fun ProductionDeviceRoute(
     credentialState: ThinQCredentialState,
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
-    temperatureDraft: Double? = null,
-    onTemperatureDraftChange: (Double?) -> Unit = {},
+    temperatureDraft: TemperatureDraft? = null,
+    onTemperatureDraftChange: (TemperatureDraft?) -> Unit = {},
 ) {
     // Read the publication first, then the active context key: a torn read can
     // then only hide the card (key mismatch), never render a superseded

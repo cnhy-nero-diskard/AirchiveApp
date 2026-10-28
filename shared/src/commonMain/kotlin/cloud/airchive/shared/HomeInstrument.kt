@@ -58,8 +58,8 @@ internal fun ProductionHomeInstrument(
     onSettings: () -> Unit,
     comfortOnly: Boolean = false,
     nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
-    temperatureDraft: Double? = null,
-    onTemperatureDraftChange: ((Double?) -> Unit)? = null,
+    temperatureDraft: TemperatureDraft? = null,
+    onTemperatureDraftChange: ((TemperatureDraft?) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val contextKey = bindings?.contextKey?.collectAsState()?.value
@@ -186,8 +186,8 @@ fun SharedInstrumentPanel(
     showEnergy: Boolean = true,
     commandSlotOccupied: Boolean = false,
     neutralCommandBusy: Boolean = false,
-    temperatureDraft: Double? = null,
-    onTemperatureDraftChange: ((Double?) -> Unit)? = null,
+    temperatureDraft: TemperatureDraft? = null,
+    onTemperatureDraftChange: ((TemperatureDraft?) -> Unit)? = null,
 ) {
     val zone = remember { TimeZone.of(DEFAULT_DAY_TIME_ZONE) }
     val today = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).date
@@ -199,12 +199,13 @@ fun SharedInstrumentPanel(
     val capability = profile?.controls?.targetTemperature
     val allowed = remember(capability) { capability?.allowedValues().orEmpty() }
     val observed = known?.targetTemperature?.takeIf { it.isFinite() }
-    var localDraft by remember(profile, observed) { mutableStateOf(observed?.takeIf { it in allowed }) }
+    var localDraft by remember { mutableStateOf<TemperatureDraft?>(null) }
     val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
-    fun updateDraft(value: Double?) {
+    val draftResolution = resolveTemperatureDraft(draft, observed, capability)
+    fun updateDraft(value: TemperatureDraft?) {
         if (onTemperatureDraftChange != null) onTemperatureDraftChange(value) else localDraft = value
     }
-    val selected = draft ?: observed
+    val selected = draftResolution.displayValue
     val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
     val yesterday = today.minus(1, DateTimeUnit.DAY).toString()
     val finalized = snapshot.dailyTotals.firstOrNull {
@@ -238,7 +239,8 @@ fun SharedInstrumentPanel(
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stack = maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f
                 val target: @Composable () -> Unit = {
-                    InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—", capability?.unit?.symbol() ?: "°C")
+                    InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
+                        (draftResolution.displayUnit ?: capability?.unit)?.symbol() ?: "°C")
                 }
                 val usage: @Composable () -> Unit = {
                     InstrumentReadout("Sampled today", day.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—", "kWh")
@@ -253,21 +255,48 @@ fun SharedInstrumentPanel(
             }
             if (profile != null) {
                 if (allowed.isNotEmpty()) {
-                    if (draft != null && draft != observed) Text(
-                        "Currently ${observed?.let(::formatTemperature) ?: "unknown"} ${capability?.unit?.symbol().orEmpty()}",
+                    if (draft != null) Text(
+                        "${if (live is ThinQLiveRefreshState.Current) "Currently" else "Last confirmed"} " +
+                            "${observed?.let(::formatTemperature) ?: "unknown"} ${capability?.unit?.symbol().orEmpty()}",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    draftResolution.unsupportedDraft?.let { unsupported ->
+                        Text(
+                            "${formatTemperature(unsupported.value)} ${unsupported.unit.symbol()} is no longer supported. " +
+                                "Choose a supported temperature; the value will not be changed or applied automatically.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     Text("Temperature", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val index = allowed.indexOf(selected)
-                        StepControl(false, enabled && index > 0) { updateDraft(allowed[index - 1]) }
-                        StepControl(true, enabled && index >= 0 && index < allowed.lastIndex) { updateDraft(allowed[index + 1]) }
-                        Button(onClick = { draft?.let { onCommand?.invoke(AcCommand.SetTargetTemperature(nowEpochMillis, it, capability!!.unit)) } },
-                            enabled = enabled && draft != null && draft != observed,
+                        val controlBase = selected?.takeIf { it in allowed }
+                            ?: observed?.takeIf { it in allowed }
+                            ?: allowed.first()
+                        val index = allowed.indexOf(controlBase)
+                        StepControl(false, enabled && index > 0) {
+                            updateDraft(TemperatureDraft(allowed[index - 1], capability!!.unit))
+                        }
+                        StepControl(true, enabled && index < allowed.lastIndex) {
+                            updateDraft(TemperatureDraft(allowed[index + 1], capability!!.unit))
+                        }
+                        Button(onClick = {
+                            draft?.takeIf { draftResolution.canApply }?.let {
+                                onCommand?.invoke(AcCommand.SetTargetTemperature(nowEpochMillis, it.value, it.unit))
+                            }
+                        },
+                            enabled = enabled && draftResolution.canApply,
                             shape = MaterialTheme.shapes.small,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Apply") }
                     }
-                } else Text("Temperature adjustment is unavailable on this profile.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    draftResolution.unsupportedDraft?.let { unsupported ->
+                        Text(
+                            "${formatTemperature(unsupported.value)} ${unsupported.unit.symbol()} is no longer supported by this profile; " +
+                                "temperature adjustment is unavailable.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } ?: Text("Temperature adjustment is unavailable on this profile.", style = MaterialTheme.typography.bodySmall)
+                }
                 InstrumentChoice("Mode", known?.mode, profile.controls.allowedModes, enabled,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
                     onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) })
@@ -354,6 +383,57 @@ internal fun homeControlsEnabled(
     commandSlotOccupied: Boolean = false,
 ): Boolean = live is ThinQLiveRefreshState.Current && live.canIssueCommands && profile != null &&
     live.state.deviceId == profile.deviceId && command !is AcCommandUiState.Sending && !commandSlotOccupied
+
+/** Ephemeral setpoint selection; carries its unit and is never persisted. */
+data class TemperatureDraft(val value: Double, val unit: TemperatureUnit)
+
+internal enum class TemperatureDraftStatus { NONE, DIRTY, MATCHES_OBSERVATION, UNSUPPORTED }
+
+internal data class TemperatureDraftResolution(
+    val displayValue: Double?,
+    val displayUnit: TemperatureUnit?,
+    val status: TemperatureDraftStatus,
+    val observedValue: Double?,
+    val unsupportedDraft: TemperatureDraft? = null,
+) {
+    val canApply: Boolean get() = status == TemperatureDraftStatus.DIRTY
+}
+
+/**
+ * Reconcile a context-scoped draft with the latest successful same-context
+ * observation and profile without replacing, clamping, or submitting it.
+ */
+internal fun resolveTemperatureDraft(
+    draft: TemperatureDraft?,
+    observed: Double?,
+    capability: TemperatureCapability?,
+): TemperatureDraftResolution {
+    val safeObserved = observed?.takeIf { it.isFinite() }
+    if (draft == null) {
+        return TemperatureDraftResolution(
+            displayValue = safeObserved,
+            displayUnit = capability?.unit,
+            status = TemperatureDraftStatus.NONE,
+            observedValue = safeObserved,
+        )
+    }
+    if (capability == null || draft.unit != capability.unit || !capability.allows(draft.value)) {
+        return TemperatureDraftResolution(
+            displayValue = null,
+            displayUnit = capability?.unit ?: draft.unit,
+            status = TemperatureDraftStatus.UNSUPPORTED,
+            observedValue = safeObserved,
+            unsupportedDraft = draft,
+        )
+    }
+    val matchesObservation = safeObserved != null && abs(draft.value - safeObserved) <= 1e-9
+    return TemperatureDraftResolution(
+        displayValue = draft.value,
+        displayUnit = capability.unit,
+        status = if (matchesObservation) TemperatureDraftStatus.MATCHES_OBSERVATION else TemperatureDraftStatus.DIRTY,
+        observedValue = safeObserved,
+    )
+}
 
 /** True only when the one device-global command slot belongs to another context. */
 internal fun commandSlotIsNeutralBusy(slot: AcCommandSlotState, currentKey: ThinQContextKey?): Boolean =

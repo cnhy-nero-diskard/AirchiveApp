@@ -379,6 +379,45 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun ownerSwitchDiscardsTheShellHeldTemperatureDraft() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+
+            clickText("Home")
+            awaitNode { it.text?.toString() == "25" }
+            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
+                AccessibilityNodeInfo.ACTION_CLICK,
+            )
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            scene.onActivity { it.shellFixture!!.setNextOwner("temperature-draft-owner-b") }
+
+            clickText("Settings")
+            clickText("Account actions")
+            clickText("Switch Google account")
+            awaitNode { it.text?.toString() == "Switch Google account?" }
+            clickText("Confirm")
+            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+            clickText("Home")
+            awaitTrue("the new synthetic owner must not inherit the old setpoint draft") {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                find(root) { it.text?.toString()?.contains("Currently 25") == true } == null &&
+                    find(root) { it.text?.toString() == "26" } == null
+            }
+            scene.onActivity {
+                assertEquals("temperature-draft-owner-b", it.shellFixture!!.coordinator.session.value?.uid)
+                assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get())
+            }
+        }
+    }
+
     @Test fun captureLightDarkAndLargeText() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode

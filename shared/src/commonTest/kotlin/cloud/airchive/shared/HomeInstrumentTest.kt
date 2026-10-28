@@ -12,6 +12,12 @@ import kotlin.test.*
 class HomeInstrumentTest {
     private val state = ThinQLiveState("ac", 100, true, 25.0)
     private val profile = ThinQDeviceProfile("ac", controls = AcControls(powerWritable = true))
+    private val temperatureCapability = TemperatureCapability(
+        min = 18.0,
+        max = 30.0,
+        step = 1.0,
+        unit = TemperatureUnit.CELSIUS,
+    )
 
     @Test fun controlsRequireTheSameVerifiedLiveDeviceAndNoPendingCommand() {
         assertTrue(homeControlsEnabled(ThinQLiveRefreshState.Current(state, true), profile, AcCommandUiState.Idle))
@@ -30,6 +36,74 @@ class HomeInstrumentTest {
         assertEquals("−1.24", instrumentNumber(-1.24))
         assertEquals("30000000.00", instrumentNumber(30_000_000.0))
         assertEquals("—", instrumentNumber(Double.NaN))
+    }
+
+    @Test fun sameContextObservationRefreshPreservesDirtyDraftAndRecomputesApplyState() {
+        val draft = TemperatureDraft(26.0, TemperatureUnit.CELSIUS)
+
+        val beforeRefresh = resolveTemperatureDraft(draft, observed = 25.0, capability = temperatureCapability)
+        assertEquals(TemperatureDraftStatus.DIRTY, beforeRefresh.status)
+        assertEquals(26.0, beforeRefresh.displayValue)
+        assertTrue(beforeRefresh.canApply)
+
+        val afterRefresh = resolveTemperatureDraft(draft, observed = 27.0, capability = temperatureCapability)
+        assertEquals(TemperatureDraftStatus.DIRTY, afterRefresh.status)
+        assertEquals(26.0, afterRefresh.displayValue)
+        assertEquals(27.0, afterRefresh.observedValue, "the newly confirmed observation remains separately identifiable")
+        assertTrue(afterRefresh.canApply)
+
+        val observedMatch = resolveTemperatureDraft(draft, observed = 26.0, capability = temperatureCapability)
+        assertEquals(TemperatureDraftStatus.MATCHES_OBSERVATION, observedMatch.status)
+        assertEquals(26.0, observedMatch.displayValue)
+        assertFalse(observedMatch.canApply, "a matching observation does not mean an unapplied draft should be resubmitted")
+    }
+
+    @Test fun changedProfileInvalidatesUnsupportedDraftWithoutClampingOrSubstitution() {
+        val draft = TemperatureDraft(26.0, TemperatureUnit.CELSIUS)
+        val stillSupported = resolveTemperatureDraft(
+            draft,
+            observed = 25.0,
+            capability = TemperatureCapability(20.0, 28.0, 2.0, TemperatureUnit.CELSIUS),
+        )
+        assertEquals(TemperatureDraftStatus.DIRTY, stillSupported.status)
+        assertEquals(26.0, stillSupported.displayValue)
+        assertTrue(stillSupported.canApply)
+
+        val unsupportedProfiles = listOf(
+            TemperatureCapability(18.0, 25.0, 1.0, TemperatureUnit.CELSIUS),
+            TemperatureCapability(18.0, 30.0, 3.0, TemperatureUnit.CELSIUS),
+            TemperatureCapability(64.0, 86.0, 1.0, TemperatureUnit.FAHRENHEIT),
+            TemperatureCapability(18.0, 30.0, 1.0, TemperatureUnit.CELSIUS, excludedValues = setOf(26.0)),
+        )
+
+        unsupportedProfiles.forEach { changedCapability ->
+            val resolved = resolveTemperatureDraft(draft, observed = 25.0, capability = changedCapability)
+            assertEquals(TemperatureDraftStatus.UNSUPPORTED, resolved.status)
+            assertEquals(draft, resolved.unsupportedDraft)
+            assertNull(resolved.displayValue, "unsupported draft values are never clamped or substituted")
+            assertFalse(resolved.canApply, "an unsupported profile value must never be applied")
+        }
+    }
+
+    @Test fun absentDraftAfterOwnerOrCredentialContextChangeCannotEnableApply() {
+        val ownerA = ThinQContextKey("synthetic-owner-a", "synthetic-project", "synthetic-ac", 0L)
+        val ownerB = ownerA.copy(ownerUid = "synthetic-owner-b", credentialGeneration = 1L)
+        val replacement = ownerA.copy(credentialGeneration = 1L)
+        assertNotEquals(ownerA, ownerB)
+        assertNotEquals(ownerA, replacement)
+
+        // ProductionRouteHost keys the shell-held draft to this complete key;
+        // either transition supplies an empty draft to the same resolver.
+        listOf(ownerB, replacement).forEach { nextContext ->
+            assertNotEquals(ownerA, nextContext)
+            val afterInvalidation = resolveTemperatureDraft(
+                draft = null,
+                observed = 25.0,
+                capability = temperatureCapability,
+            )
+            assertEquals(TemperatureDraftStatus.NONE, afterInvalidation.status)
+            assertFalse(afterInvalidation.canApply)
+        }
     }
 
     @Test fun chartKeepsPartialCoverageGapsAndMeasuredZeroAndFreshnessIgnoresTrailingGap() {
