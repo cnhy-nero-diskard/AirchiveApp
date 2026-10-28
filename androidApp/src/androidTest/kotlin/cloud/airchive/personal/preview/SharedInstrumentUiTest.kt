@@ -13,9 +13,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.runBlocking
 
 /** The debug-only preview never constructs a production graph or contacts an AC. */
 @RunWith(AndroidJUnit4::class)
@@ -148,6 +150,7 @@ class SharedInstrumentUiTest {
 
     @Test fun accountSwitchClearsThinQFormAndSyntheticPatDraft() {
         val syntheticMarker = "synthetic-ui-pat-marker-2468"
+        clearFixturePreferences()
         launchShell().use { scene ->
             awaitNode { it.text?.toString() == "Continue with Google" }
             clickText("Continue with Google")
@@ -184,6 +187,7 @@ class SharedInstrumentUiTest {
     }
 
     @Test fun selectedHistoryDetailDoesNotReopenForAnotherOwnersMatchingSampleId() {
+        clearFixturePreferences()
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
@@ -227,6 +231,78 @@ class SharedInstrumentUiTest {
             instrumentation.waitForIdleSync()
             assertNull("a selected sample detail from owner A cannot reopen on owner B's matching sampleId",
                 find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == "Sample detail" })
+        }
+    }
+
+    @Test fun cancelledSetupStateAndSavedInstanceParcelDoNotRetainSyntheticPat() {
+        val marker = SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", marker)
+
+            clickText("Cancel")
+            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+            assertNull(
+                "cancelled plaintext entry is cleared from the form",
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.hintText?.toString() == "ThinQ Personal Access Token"
+                },
+            )
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.credentialSaves.get()) }
+
+            // Re-enter the marker only into the ephemeral password field, then
+            // force Activity save/recreation. The fixture inspects the in-memory
+            // Bundle parcel only; it never opens a credential file.
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", marker)
+            SharedInstrumentPreviewActivity.lastSavedStateContainsSyntheticPatMarker = false
+            scene.recreate()
+            assertFalse(
+                "plaintext PAT input is not written into the Activity saved-instance Bundle",
+                SharedInstrumentPreviewActivity.lastSavedStateContainsSyntheticPatMarker,
+            )
+        }
+    }
+
+    @Test fun syntheticPatIsAbsentFromPreferencesHistoryDiagnosticsAndCapturedSafeRecords() = runBlocking {
+        val marker = SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER
+        val context = instrumentation.targetContext
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", marker)
+            clickText("Verify and save securely")
+            awaitNode {
+                it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true
+            }
+            clickText("History and storage")
+            clickText("Detailed")
+            awaitNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+
+            val visibleUi = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val capturedSafeRecords = runBlocking {
+                fixture.get().captureSafeDiagnosticOutputs().joinToString("\n")
+            }
+            val displayPreferences = context.getSharedPreferences(
+                SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
+                android.content.Context.MODE_PRIVATE,
+            ).all.values.joinToString("\n")
+
+            assertTrue("the dedicated display preference is readable", displayPreferences.contains("detailed"))
+            assertTrue("verification log record captured", capturedSafeRecords.contains("credential-verification="))
+            assertTrue("setup result log record captured", capturedSafeRecords.contains("credential-setup="))
+            assertFalse("visible UI/diagnostics never render the plaintext PAT", marker in visibleUi)
+            assertFalse("history/state/credential/log projections omit the plaintext PAT", marker in capturedSafeRecords)
+            assertFalse("the installation display preference never contains the PAT", marker in displayPreferences)
         }
     }
 
@@ -406,6 +482,25 @@ class SharedInstrumentUiTest {
         }
         assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments))
         instrumentation.waitForIdleSync()
+    }
+
+    private fun clearFixturePreferences() {
+        instrumentation.targetContext.getSharedPreferences(
+            SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
+            android.content.Context.MODE_PRIVATE,
+        ).edit().clear().commit()
+    }
+
+    private fun accessibilitySnapshot(node: AccessibilityNodeInfo?): String {
+        if (node == null) return ""
+        return buildString {
+            node.text?.toString()?.let { append(it).append('\n') }
+            node.contentDescription?.toString()?.let { append(it).append('\n') }
+            node.hintText?.toString()?.let { append(it).append('\n') }
+            for (index in 0 until node.childCount) {
+                append(accessibilitySnapshot(node.getChild(index)))
+            }
+        }
     }
 
     private fun scrollForward() {

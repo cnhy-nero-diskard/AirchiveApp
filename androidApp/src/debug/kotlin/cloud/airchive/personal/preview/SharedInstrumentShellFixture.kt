@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -100,6 +101,9 @@ class SharedInstrumentShellFixture(context: Context) {
     val interfacePreferences =
         AndroidInterfaceDetailPreferences(context, FIXTURE_INTERFACE_PREFERENCES_FILE)
 
+    /** Test-only capture of safe object projections; raw PAT values are never passed here. */
+    private val capturedSafeLogRecords = mutableListOf<String>()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val ownerIdentity =
@@ -111,6 +115,7 @@ class SharedInstrumentShellFixture(context: Context) {
         FakeThinQCredentialVerifier(FakeAirchiveTelemetry.DEMO_DEVICE_ID),
         counters,
         credentialVerificationGate,
+        recordSafeLog = { record -> synchronized(capturedSafeLogRecords) { capturedSafeLogRecords += record } },
     )
     private val thinQ = CountingThinQClient(
         FakeThinQClient(FakeAirchiveTelemetry.DEMO_DEVICE_ID, FIXTURE_NOW_EPOCH_MILLIS),
@@ -172,7 +177,18 @@ class SharedInstrumentShellFixture(context: Context) {
         coordinator.session.collect { thinQContext.onOwnerChanged(it?.uid, FIXTURE_PROJECT_ID) }
     }
 
-    private val bindings = thinQContext.bindings()
+    private val baseBindings = thinQContext.bindings()
+    private val bindings = baseBindings.copy(
+        setupCredential = { rawToken, country ->
+            baseBindings.setupCredential(rawToken, country).also { result ->
+                // The only captured setup record is the result's redacted
+                // toString; the raw UI token is deliberately excluded.
+                synchronized(capturedSafeLogRecords) {
+                    capturedSafeLogRecords += "credential-setup=$result"
+                }
+            }
+        },
+    )
 
     /** Runtime implementation types actually wired into the shell graph. */
     val constructedGraph: List<String> = listOf(
@@ -249,6 +265,24 @@ class SharedInstrumentShellFixture(context: Context) {
         )
     }
 
+    /** Safe test projections from fake history/preferences/credential state only. */
+    suspend fun captureSafeDiagnosticOutputs(): List<String> {
+        val session = ownerIdentity.currentSession
+        val history = session?.let { owner ->
+            localHistory.observe(coordinator.partitionFor(owner)).first()
+        }
+        val credential = credentialStore.observe().first()
+        return listOf(
+            "credential-state=$credential",
+            "history-snapshot=$history",
+            "interface-detail=${interfacePreferences.detail.value}",
+            "context-key=${thinQContext.contextKey.value}",
+            "device-profile=${thinQContext.deviceProfile.value}",
+            "live-state=${thinQContext.liveStateController.state.value}",
+            "command-state=${thinQContext.commandController.state.value}",
+        ) + synchronized(capturedSafeLogRecords) { capturedSafeLogRecords.toList() }
+    }
+
     companion object {
         /**
          * Dedicated interface-detail preference file — distinct from both the
@@ -261,6 +295,9 @@ class SharedInstrumentShellFixture(context: Context) {
 
         /** Fixed clock baseline so all rendered ages are deterministic. */
         const val FIXTURE_NOW_EPOCH_MILLIS = 1_750_000_000_000L
+
+        /** Synthetic-only marker used by privacy/save-state instrumentation tests. */
+        const val SYNTHETIC_PAT_MARKER = "synthetic-shell-pat-marker-2468"
     }
 }
 
@@ -567,12 +604,18 @@ private class CountingCredentialVerifier(
     private val delegate: ThinQCredentialVerifier,
     private val counters: FixtureOperationCounters,
     private val gate: DeferredResponseGate,
+    private val recordSafeLog: (String) -> Unit,
 ) : ThinQCredentialVerifier {
     val delegateTypeName: String get() = delegate.javaClass.simpleName
 
     override suspend fun verify(request: ThinQCredentialVerificationRequest): ThinQVerificationResult {
         counters.credentialVerifications.incrementAndGet()
+        // This is a test-side capture of the request's redacted representation,
+        // not a production logger. The request's custom toString masks rawToken.
+        recordSafeLog("credential-verification=$request")
         gate.awaitTurn()
-        return delegate.verify(request)
+        val result = delegate.verify(request)
+        recordSafeLog("credential-verification-result=$result")
+        return result
     }
 }

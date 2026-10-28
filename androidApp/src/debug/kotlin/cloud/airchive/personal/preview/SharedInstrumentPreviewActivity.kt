@@ -1,6 +1,7 @@
 package cloud.airchive.personal.preview
 
 import android.os.Bundle
+import android.os.Parcel
 import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,11 @@ import kotlin.time.Instant
 
 /** Debug-only visual/interaction fixture: no Firebase, credentials, HTTP clients or real devices. */
 class SharedInstrumentPreviewActivity : ComponentActivity() {
+    companion object {
+        /** Test-only result of scanning the just-created saved-state parcel for the synthetic PAT marker. */
+        @Volatile var lastSavedStateContainsSyntheticPatMarker: Boolean = false
+    }
+
     var submittedCommands = 0
         private set
 
@@ -97,6 +103,24 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
         shellFixture?.close()
         shellFixture = null
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        val parcel = Parcel.obtain()
+        try {
+            outState.writeToParcel(parcel, 0)
+            val bytes = parcel.marshall()
+            val marker = SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER
+            // Inspect only the transient in-memory Bundle emitted by this
+            // synthetic debug fixture; no credential file or production store
+            // is opened, and the Bundle itself is never retained or logged.
+            lastSavedStateContainsSyntheticPatMarker =
+                String(bytes, Charsets.UTF_16LE).contains(marker) ||
+                    String(bytes, Charsets.UTF_8).contains(marker)
+        } finally {
+            parcel.recycle()
+        }
     }
 }
 

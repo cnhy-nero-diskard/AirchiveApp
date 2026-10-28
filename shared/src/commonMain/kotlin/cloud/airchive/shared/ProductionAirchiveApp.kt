@@ -1215,7 +1215,7 @@ private fun OwnerSettingsActionResult.productionOutcomeMessage(): String = when 
     }
 }
 
-private fun ThinQCredentialState.productionCredentialStatus(): String = when {
+internal fun ThinQCredentialState.productionCredentialStatus(): String = when {
     unlockFailed -> "Saved ThinQ PAT could not be unlocked. Verify and save it again."
     present -> "ThinQ PAT saved: ${credential?.maskedToken ?: "••••"} · country ${credential?.accountCountry ?: "unknown"}."
     else -> "No ThinQ PAT is saved in the app's protected storage."
