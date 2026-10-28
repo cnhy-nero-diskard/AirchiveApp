@@ -278,7 +278,7 @@ fun SharedInstrumentPanel(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
-            } else if (commandSlotOccupied && commandState !is AcCommandUiState.Sending) {
+            } else if (commandSlotOccupied && commandState == AcCommandUiState.Idle) {
                 Text(
                     "A control request is still finishing. Controls are paused until it completes.",
                     style = MaterialTheme.typography.bodySmall,
