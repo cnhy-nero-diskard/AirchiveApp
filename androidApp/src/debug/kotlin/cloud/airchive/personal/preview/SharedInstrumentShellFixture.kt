@@ -186,7 +186,6 @@ class SharedInstrumentShellFixture(context: Context) {
         coordinator.javaClass.simpleName,
         accountController.javaClass.simpleName,
         thinQContext.javaClass.simpleName,
-        thinQContext.credentialSetup.javaClass.simpleName,
         thinQContext.liveStateController.javaClass.simpleName,
         thinQContext.commandController.javaClass.simpleName,
         bindings.javaClass.simpleName,

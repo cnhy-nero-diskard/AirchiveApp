@@ -4,12 +4,11 @@ import android.content.Context
 import cloud.airchive.personal.BuildConfig
 import cloud.airchive.personal.data.credentials.AndroidEncryptedThinQCredentialStore
 import cloud.airchive.shared.ProductionThinQBindings
-import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupCoordinator
-import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.KtorThinQClient
 import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
+import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,8 +64,6 @@ class AndroidProductionThinQGraph(
         projectId = projectId,
     )
 
-    val credentialSetup: ThinQCredentialSetupCoordinator get() = coordinator.credentialSetup
-
     val liveStateController: ThinQLiveStateController get() = coordinator.liveStateController
 
     val commandController: AcCommandController get() = coordinator.commandController
@@ -79,9 +76,9 @@ class AndroidProductionThinQGraph(
         coordinator.startCredentialStateObservation(credentialObservationScope)
     }
 
-    /** Verify-before-save setup; failed replacement leaves the previous PAT/profile intact. */
-    suspend fun setupCredential(rawToken: String, country: String): ThinQCredentialSetupResult =
-        coordinator.setupCredential(rawToken, country)
+    /** Verify-before-save setup; the result carries its exact resulting context key for feedback. */
+    suspend fun setupCredential(rawToken: String, country: String): ThinQSetupOutcome =
+        coordinator.setupCredentialDetailed(rawToken, country)
 
     /**
      * Explicit cancel-attempt hook (task 2.4) for setup-form/route

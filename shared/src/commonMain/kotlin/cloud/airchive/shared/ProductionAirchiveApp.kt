@@ -29,7 +29,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,10 +71,10 @@ import cloud.airchive.shared.data.sync.presentHistorySync
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlin.time.Instant
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -755,6 +754,8 @@ private fun ProductionThinQCredentialCard(
     var confirmingRemoval by remember(bindings) { mutableStateOf(false) }
     var rawToken by remember(bindings) { mutableStateOf("") }
     var country by remember(bindings) { mutableStateOf("PH") }
+    var setupRequestId by remember(bindings) { mutableStateOf(0L) }
+    var setupJob by remember(bindings) { mutableStateOf<Job?>(null) }
     // Setup/removal feedback is scoped to the lifecycle context it was
     // produced under (task 2.4): after any owner/credential transition the
     // old attempt's message is hidden instead of being shown for the new
@@ -764,17 +765,6 @@ private fun ProductionThinQCredentialCard(
 
     LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
         if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
-    }
-
-    // Route cancellation: when this form leaves composition, explicitly
-    // supersede any in-flight setup attempt it owns. The card's own coroutine
-    // scope is cancelled with composition (aborting the suspended LG
-    // verification); this one-shot job outlives the composition frame only
-    // long enough to close the lifecycle commit gate behind it.
-    DisposableEffect(bindings) {
-        onDispose {
-            CoroutineScope(Dispatchers.Default).launch { bindings.cancelSetupAttempt() }
-        }
     }
 
     SummaryCard("AC connection") {
@@ -821,51 +811,77 @@ private fun ProductionThinQCredentialCard(
                     enabled = !busy,
                     onClick = {
                         val submittedToken = rawToken
+                        val submittedContextKey = bindings.contextKey.value
+                        val requestId = setupRequestId + 1L
+                        setupRequestId = requestId
                         rawToken = ""
-                        scope.launch {
-                            busy = true
-                            feedbackFor = try {
-                                when (val result = bindings.setupCredential(submittedToken, country)) {
+                        feedbackFor = null
+                        busy = true
+                        val job = scope.launch(start = CoroutineStart.LAZY) {
+                            try {
+                                // Feedback is labeled ONLY by the outcome's
+                                // own captured/result context key (task 2.4)
+                                // — never by sampling the active key after
+                                // the fact, so an invalidation landing
+                                // between the result and this write can
+                                // never attribute an old attempt's outcome
+                                // to the new context.
+                                val outcome = bindings.setupCredential(submittedToken, country)
+                                val (nextFeedback, closeForm) = when (val result = outcome.result) {
                                     is ThinQCredentialSetupResult.Success -> {
-                                        replacing = false
-                                        bindings.contextKey.value to (
+                                        (outcome.contextKey to (
                                             "The configured AC and profile were verified; the PAT was saved in protected storage. " +
                                                 "LG may still require a control-capable PAT for commands."
-                                            )
+                                            )) to true
                                     }
                                     is ThinQCredentialSetupResult.Failure ->
-                                        bindings.contextKey.value to result.productionFailureMessage()
+                                        (outcome.contextKey to result.productionFailureMessage()) to false
                                     ThinQCredentialSetupResult.Superseded -> {
                                         // The attempt was superseded (owner
                                         // change, removal, a newer attempt or
-                                        // cancellation): it saved nothing and
-                                        // must never surface stale feedback.
-                                        replacing = false
-                                        null
+                                        // cancellation) — including a delayed
+                                        // verification failure: it saved
+                                        // nothing and must never surface
+                                        // stale feedback.
+                                        null to true
                                     }
+                                }
+                                if (setupRequestId == requestId) {
+                                    feedbackFor = nextFeedback
+                                    if (closeForm) replacing = false
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                bindings.contextKey.value to
-                                    "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
+                                if (setupRequestId == requestId) {
+                                    feedbackFor = submittedContextKey to
+                                        "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
+                                }
                             } finally {
-                                busy = false
+                                if (setupRequestId == requestId) {
+                                    busy = false
+                                    setupJob = null
+                                }
                             }
                         }
+                        setupJob = job
+                        job.start()
                     },
                 ) {
                     Text(if (busy) "Verifying and saving…" else "Verify and save securely")
                 }
                 TextButton(shape = MaterialTheme.shapes.small,
-                    enabled = !busy,
                     onClick = {
+                        // Cancel the request coroutine itself: its coordinator
+                        // catches CancellationException and supersedes exactly
+                        // that attempt before it can reach the commit gate.
+                        setupRequestId += 1L
+                        setupJob?.cancel()
+                        setupJob = null
+                        busy = false
                         rawToken = ""
                         replacing = false
                         feedbackFor = null
-                        // Explicit form cancellation: supersede the in-flight
-                        // attempt so it can never save its verified candidate.
-                        scope.launch { bindings.cancelSetupAttempt() }
                     },
                 ) { Text("Cancel") }
             }

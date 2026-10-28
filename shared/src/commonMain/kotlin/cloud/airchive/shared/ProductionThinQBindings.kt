@@ -7,7 +7,7 @@ import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.thinq.ThinQEntryResult
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
-import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
+import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -37,7 +37,14 @@ data class ProductionThinQBindings(
     val deviceProfile: StateFlow<ThinQDeviceProfilePublication?>,
     val liveStateController: ThinQLiveStateController,
     val commandController: AcCommandController,
-    val setupCredential: suspend (rawToken: String, country: String) -> ThinQCredentialSetupResult,
+    /**
+     * Fenced setup returning the outcome **bound to its exact lifecycle
+     * context** (task 2.4): label any setup feedback only by
+     * [ThinQSetupOutcome.contextKey], never by sampling the active key
+     * afterwards, so a stale attempt's outcome can never be attributed to a
+     * newer context.
+     */
+    val setupCredential: suspend (rawToken: String, country: String) -> ThinQSetupOutcome,
     /**
      * Explicit cancel-attempt hook (task 2.4) for setup-form/route
      * cancellation: supersedes only the in-flight setup attempt, which can

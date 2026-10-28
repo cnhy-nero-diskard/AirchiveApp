@@ -10,25 +10,40 @@ import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 
 /**
  * Narrow conditional-commit seam (OpenSpec `deliver-shared-instrument-ui` task
  * 2.4, design D2): decides, inside one lifecycle-boundary transition, whether
- * a **verified** setup candidate may run its protected-store save right now.
+ * a **verified** setup candidate may run its protected-store save right now —
+ * and whether a non-committed outcome may be exposed at all.
  *
  * [commitVerifiedCandidate] receives the store-save + result-mapping closure
  * and must either run it (the attempt is still the current one: its owner/
  * project/device/credential context is unchanged and no newer attempt or
  * explicit cancellation superseded it) or refuse it without invoking it,
- * returning [ThinQCredentialSetupResult.Superseded]. Implementations must not
- * run LG verification or any network I/O here — only the short store commit,
- * the credential-generation advance and local publication/reset state changes.
+ * returning [ThinQCredentialSetupResult.Superseded].
+ *
+ * [exposeOutcome] fences **every** outcome that did not pass through the
+ * commit — including delayed verification failures (invalid token, wrong
+ * account, network, remote failure): a failure returned after the attempt was
+ * superseded is stale like a stale success, and the gate must map it to
+ * [ThinQCredentialSetupResult.Superseded] instead of letting the old reason
+ * surface for the now-active context.
+ *
+ * Implementations must not run LG verification or any network I/O here — only
+ * the short store commit, the credential-generation advance and local
+ * publication/reset state changes.
  */
-fun interface ThinQSetupCommitGate {
+interface ThinQSetupCommitGate {
     suspend fun commitVerifiedCandidate(
         commit: suspend () -> ThinQCredentialSetupResult,
     ): ThinQCredentialSetupResult
+
+    /** Fences a non-committed outcome; returns `Superseded` when stale. */
+    suspend fun exposeOutcome(outcome: ThinQCredentialSetupResult): ThinQCredentialSetupResult
 }
 
 /**
@@ -63,8 +78,9 @@ fun interface ThinQSetupCommitGate {
  * appear in a result, its `toString()`, metadata, or a log line. Coroutine
  * [CancellationException] is re-thrown and never recorded as a failure. A
  * [ThinQCredentialSetupResult.Superseded] outcome carries nothing at all: its
- * gate refused the commit, so no store write and no lifecycle transition
- * happened.
+ * gate refused the commit — or fence-checked a **delayed** outcome against an
+ * attempt that was superseded meanwhile — so no store write and no lifecycle
+ * transition happened and no stale reason may surface.
  *
  * @param credentialStore protected PAT storage (its `clientId` is the stable
  *   per-install LG client ID passed to the verifier).
@@ -82,10 +98,15 @@ class ThinQCredentialSetupCoordinator(
      *
      * @param commitGate optional conditional-commit seam (task 2.4). When
      *   supplied, the verified candidate's store save runs **inside** the
-     *   gate's lifecycle-boundary transition; a refused gate returns
-     *   [ThinQCredentialSetupResult.Superseded] and nothing is saved. When
+     *   gate's lifecycle-boundary transition (a refused gate returns
+     *   [ThinQCredentialSetupResult.Superseded] and nothing is saved), and
+     *   **every** non-committed outcome — including a delayed verification
+     *   failure — is fence-checked through
+     *   [ThinQSetupCommitGate.exposeOutcome] before it is exposed, so a stale
+     *   failure can never surface after the attempt was superseded. When
      *   `null` (direct onboarding/settings callers and their tests), the save
-     *   is unconditional and the original behavior is preserved exactly.
+     *   is unconditional, no outcome is fence-checked, and the original
+     *   behavior is preserved exactly.
      * @return a safe [ThinQCredentialSetupResult.Success] (verified device +
      *   profile + observable masked credential) or a distinct typed
      *   [ThinQCredentialSetupResult.Failure] whose
@@ -103,7 +124,7 @@ class ThinQCredentialSetupCoordinator(
         if (rawToken.isBlank() || !COUNTRY_PATTERN.matches(normalizedCountry)) {
             // Input never reached the verifier or the store; the observable
             // credential is exactly what it was.
-            return ThinQCredentialSetupResult.Failure.MalformedInput(currentCredential())
+            return expose(ThinQCredentialSetupResult.Failure.MalformedInput(currentCredential()), commitGate)
         }
         val request = ThinQCredentialVerificationRequest(
             rawToken = rawToken,
@@ -120,34 +141,57 @@ class ThinQCredentialSetupCoordinator(
             // A verifier crash is neither token evidence nor a secret worth
             // surfacing; report the stable remote-failure reason with no
             // exception message and keep the previous credential.
-            return ThinQCredentialSetupResult.Failure.RemoteFailure(priorCredential)
+            return expose(ThinQCredentialSetupResult.Failure.RemoteFailure(priorCredential), commitGate)
         }
         return when (verification) {
             is ThinQVerificationResult.Verified -> {
                 val foundExactly = verification.device.deviceId == configuredDeviceId &&
                     verification.profile.deviceId == configuredDeviceId
                 if (foundExactly) {
+                    // The only outcome that reaches the commit gate: its save
+                    // and result are final for this attempt (a same-context
+                    // save failure is a committed, honest failure).
                     persist(request, verification.device, verification.profile, priorCredential, commitGate)
                 } else {
-                    ThinQCredentialSetupResult.Failure.WrongAccount(priorCredential)
+                    expose(ThinQCredentialSetupResult.Failure.WrongAccount(priorCredential), commitGate)
                 }
             }
 
             ThinQVerificationResult.InvalidToken ->
-                ThinQCredentialSetupResult.Failure.InvalidToken(priorCredential)
+                expose(ThinQCredentialSetupResult.Failure.InvalidToken(priorCredential), commitGate)
 
             ThinQVerificationResult.WrongAccount ->
-                ThinQCredentialSetupResult.Failure.WrongAccount(priorCredential)
+                expose(ThinQCredentialSetupResult.Failure.WrongAccount(priorCredential), commitGate)
 
             ThinQVerificationResult.DeviceUnavailable ->
-                ThinQCredentialSetupResult.Failure.DeviceUnavailable(priorCredential)
+                expose(ThinQCredentialSetupResult.Failure.DeviceUnavailable(priorCredential), commitGate)
 
             ThinQVerificationResult.Network ->
-                ThinQCredentialSetupResult.Failure.NetworkFailure(priorCredential)
+                expose(ThinQCredentialSetupResult.Failure.NetworkFailure(priorCredential), commitGate)
 
             ThinQVerificationResult.RemoteFailure ->
-                ThinQCredentialSetupResult.Failure.RemoteFailure(priorCredential)
+                expose(ThinQCredentialSetupResult.Failure.RemoteFailure(priorCredential), commitGate)
         }
+    }
+
+    /**
+     * Fence-checks a non-committed outcome (task 2.4): verification failures
+     * (and malformed input) can be **delayed** past an owner change, removal,
+     * newer attempt or cancellation, so their exposure is delegated to the
+     * gate, which maps a stale outcome to
+     * [ThinQCredentialSetupResult.Superseded] instead of letting the old
+     * reason (and its preserved old credential mask) surface for the
+     * now-active context. A `null` gate exposes the outcome unchanged.
+     */
+    private suspend fun expose(
+        outcome: ThinQCredentialSetupResult,
+        commitGate: ThinQSetupCommitGate?,
+    ): ThinQCredentialSetupResult {
+        // A verifier may ignore caller cancellation and return a typed failure;
+        // do not expose that stale outcome (or leave a dead attempt active) on
+        // an already-cancelled setup coroutine.
+        currentCoroutineContext().ensureActive()
+        return commitGate?.exposeOutcome(outcome) ?: outcome
     }
 
     /**
@@ -254,10 +298,12 @@ sealed interface ThinQCredentialSetupResult {
     ) : ThinQCredentialSetupResult
 
     /**
-     * The attempt was superseded before its protected-store commit (task 2.4):
-     * the owner changed or signed out, the credential was removed or replaced,
-     * the protected key was lost, a newer attempt began, or the attempt was
-     * explicitly cancelled (form/route cancellation or coroutine
+     * The attempt was superseded before its protected-store commit — or a
+     * **delayed** verification outcome (a success or a failure such as an
+     * invalid token or network error) arrived after the attempt ended
+     * (task 2.4): the owner changed or signed out, the credential was removed
+     * or replaced, the protected key was lost, a newer attempt began, or the
+     * attempt was explicitly cancelled (form/route cancellation or coroutine
      * cancellation). Nothing was saved, no credential generation was advanced,
      * and no verified profile or success feedback belongs to it — the UI must
      * suppress setup feedback for this outcome rather than present it as an

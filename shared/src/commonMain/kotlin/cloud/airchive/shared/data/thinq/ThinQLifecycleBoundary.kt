@@ -3,6 +3,8 @@ package cloud.airchive.shared.data.thinq
 import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -242,6 +244,18 @@ class ThinQLifecycleBoundary(
     }
 
     /**
+     * Boundary-serialized currency check for [attempt] (task 2.4): true only
+     * while it is still the single active attempt **and** its captured context
+     * is unchanged. Used to fence the exposure of non-committed outcomes
+     * (delayed verification failures), so a stale result is never exposed for
+     * the now-active context. An attempt consumed by a successful gate passage
+     * is no longer current here — commit-path results are already final.
+     */
+    suspend fun isSetupAttemptCurrent(attempt: ThinQSetupAttempt): Boolean = withBoundary {
+        activeSetupAttempt == attempt && mutableKey.value == attempt.contextKey
+    }
+
+    /**
      * The protected-store commit fence (task 2.4): the **final** attempt +
      * context gate and the caller's [commit] run in one boundary transition,
      * so an invalidation can never slip between "this attempt is current" and
@@ -268,22 +282,30 @@ class ThinQLifecycleBoundary(
     suspend fun <T> commitSetupAttemptIfCurrent(
         attempt: ThinQSetupAttempt,
         commit: suspend (advanceCredentialGeneration: () -> ThinQContextKey) -> T,
-    ): ThinQSetupCommit<T> = withBoundary {
-        if (activeSetupAttempt != attempt || mutableKey.value != attempt.contextKey) {
-            return@withBoundary ThinQSetupCommit.Superseded
-        }
-        activeSetupAttempt = null
-        withContext(NonCancellable) {
-            var resultingKey: ThinQContextKey? = null
-            val result = commit {
-                val next = mutableKey.value.copy(
-                    credentialGeneration = mutableKey.value.credentialGeneration + 1L,
-                )
-                mutableKey.value = next
-                resultingKey = next
-                next
+    ): ThinQSetupCommit<T> {
+        // A caller cancelled while LG verification was in flight must not pass
+        // a gate merely because its verifier ignored cancellation and returned.
+        currentCoroutineContext().ensureActive()
+        return withBoundary {
+            if (activeSetupAttempt != attempt ||
+                mutableKey.value != attempt.contextKey ||
+                attempt.contextKey.ownerUid == null
+            ) {
+                return@withBoundary ThinQSetupCommit.Superseded
             }
-            ThinQSetupCommit.Committed(result, resultingKey)
+            activeSetupAttempt = null
+            withContext(NonCancellable) {
+                var resultingKey: ThinQContextKey? = null
+                val result = commit {
+                    val next = mutableKey.value.copy(
+                        credentialGeneration = mutableKey.value.credentialGeneration + 1L,
+                    )
+                    mutableKey.value = next
+                    resultingKey = next
+                    next
+                }
+                ThinQSetupCommit.Committed(result, resultingKey)
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ import cloud.airchive.shared.data.thinq.ThinQEntryResult
 import cloud.airchive.shared.data.thinq.ThinQLifecycleBoundary
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
+import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import cloud.airchive.shared.fakes.FakeProviders
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,7 +45,12 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
             deviceProfile = deviceProfile,
             liveStateController = live,
             commandController = commands,
-            setupCredential = { _, _ -> ThinQCredentialSetupResult.Failure.InvalidToken(credential.value) },
+            setupCredential = { _, _ ->
+                ThinQSetupOutcome(
+                    ThinQCredentialSetupResult.Failure.InvalidToken(credential.value),
+                    previewLifecycle.current(),
+                )
+            },
             cancelSetupAttempt = {},
             onDeviceOpened = {
                 try {

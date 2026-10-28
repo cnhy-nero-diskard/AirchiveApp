@@ -13,6 +13,7 @@ import cloud.airchive.shared.data.onboarding.ProductionAccountController
 import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
+import cloud.airchive.shared.productionSetupFeedback
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -27,7 +28,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.NonCancellable
 
 /**
  * Setup-attempt fence at the protected-store commit (OpenSpec
@@ -46,6 +49,13 @@ import kotlinx.coroutines.withTimeout
  *    boundary transition: a stale/cancelled/superseded attempt records **zero**
  *    save calls and never advances the credential generation, publishes a
  *    profile, or becomes success feedback;
+ *  - **every** outcome is fence-checked against the captured attempt before
+ *    exposure — a delayed verification *failure* (invalid token, network …)
+ *    after an owner change/removal/newer attempt returns
+ *    [ThinQCredentialSetupResult.Superseded], never a stale typed failure;
+ *  - each outcome carries the exact context key it belongs to (the resulting
+ *    key for a committed success, the attempt's captured key otherwise), so
+ *    feedback can never be mislabeled by sampling the active key afterwards;
  *  - a valid current attempt atomically saves the verified candidate, advances
  *    the generation (even with identical masked metadata), resets live/command
  *    state to unread/idle, publishes its verified profile under the resulting
@@ -77,6 +87,26 @@ class ThinQSetupAttemptFenceTest {
         }
     }
 
+    @Test
+    fun setupWithoutAnActiveOwnerIsSupersededBeforeVerificationOrStoreAccess() = runBlocking {
+        val fixture = Fixture(ownerUid = null)
+        fixture.seedCredential()
+        val keyBefore = fixture.coordinator.contextKey.value
+        val savesBefore = fixture.store.saveCalls
+        val verifierCallsBefore = fixture.verifier.callCount
+
+        val outcome = fixture.coordinator.setupCredentialDetailed("synthetic-unowned-pat-1111", "PH")
+
+        assertIs<ThinQCredentialSetupResult.Superseded>(outcome.result)
+        assertEquals(keyBefore, outcome.contextKey)
+        assertEquals(0, fixture.verifier.callCount - verifierCallsBefore,
+            "a setup attempt without an active owner never performs LG verification")
+        assertEquals(savesBefore, fixture.store.saveCalls,
+            "a setup attempt without an active owner never saves a candidate")
+        assertEquals(SEED_TOKEN, fixture.store.readToken(), "the pre-existing protected credential stays untouched")
+        assertNull(fixture.coordinator.deviceProfile.value)
+    }
+
     // ------------------------------------ (a) account change during verification
 
     @Test
@@ -105,7 +135,7 @@ class ThinQSetupAttemptFenceTest {
 
         val verifyStep = NetworkStep()
         fixture.verifier.onVerify = { verifyStep.hold() }
-        val attempt = async { fixture.coordinator.setupCredential("synthetic-late-pat-7777", "PH") }
+        val attempt = async { fixture.coordinator.setupCredentialDetailed("synthetic-late-pat-7777", "PH") }
         withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
 
         account.requestChangeAccount()
@@ -114,9 +144,15 @@ class ThinQSetupAttemptFenceTest {
         )
 
         verifyStep.release()
+        val outcome = withTimeout(SETUP_TIMEOUT_MS) { attempt.await() }
         assertIs<ThinQCredentialSetupResult.Superseded>(
-            withTimeout(SETUP_TIMEOUT_MS) { attempt.await() },
+            outcome.result,
             "the delayed verified candidate must be refused after the account changed",
+        )
+        assertEquals(
+            keyBefore,
+            outcome.contextKey,
+            "the outcome is bound to the superseded attempt's own context, never the new active one",
         )
 
         assertEquals(
@@ -148,13 +184,19 @@ class ThinQSetupAttemptFenceTest {
 
         val verifyStep = NetworkStep()
         fixture.verifier.onVerify = { verifyStep.hold() }
-        val attempt = async { fixture.coordinator.setupCredential("synthetic-removed-pat-3333", "PH") }
+        val attempt = async { fixture.coordinator.setupCredentialDetailed("synthetic-removed-pat-3333", "PH") }
         withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
 
         fixture.coordinator.removeCredential()
 
         verifyStep.release()
-        assertIs<ThinQCredentialSetupResult.Superseded>(withTimeout(SETUP_TIMEOUT_MS) { attempt.await() })
+        val outcome = withTimeout(SETUP_TIMEOUT_MS) { attempt.await() }
+        assertIs<ThinQCredentialSetupResult.Superseded>(outcome.result)
+        assertEquals(
+            keyBefore,
+            outcome.contextKey,
+            "the superseded outcome is bound to the attempt's pre-removal context",
+        )
 
         assertEquals(savesBefore, fixture.store.saveCalls, "the stale attempt must never re-save after the removal")
         assertEquals(clearsBefore + 1, fixture.store.clearCalls, "exactly the removal cleared the store")
@@ -279,6 +321,175 @@ class ThinQSetupAttemptFenceTest {
         )
     }
 
+    @Test
+    fun ignoredVerifierCancellationStillCannotPassTheCommitGate() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        val keyBefore = fixture.coordinator.contextKey.value
+        val savesBefore = fixture.store.saveCalls
+        val verifyStep = NetworkStep()
+        fixture.verifier.onVerify = {
+            // Model an uncooperative adapter that completes its verification
+            // despite cancellation of the caller's route coroutine.
+            withContext(NonCancellable) { verifyStep.hold() }
+        }
+        val attempt = async {
+            fixture.coordinator.setupCredentialDetailed("synthetic-ignored-cancel-pat-2233", "PH")
+        }
+        withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
+
+        attempt.cancel()
+        verifyStep.release()
+        attempt.cancelAndJoin()
+
+        assertEquals(savesBefore, fixture.store.saveCalls,
+            "the final commit gate checks caller cancellation before invoking the store")
+        assertEquals(keyBefore, fixture.coordinator.contextKey.value,
+            "an ignored verifier cancellation cannot advance the lifecycle generation")
+        assertEquals(SEED_TOKEN, fixture.store.readToken())
+        assertNull(fixture.coordinator.deviceProfile.value)
+    }
+
+    @Test
+    fun ignoredVerifierCancellationCannotExposeAStaleVerificationFailure() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        val savesBefore = fixture.store.saveCalls
+        fixture.verifier.result = ThinQVerificationResult.InvalidToken
+        val verifyStep = NetworkStep()
+        fixture.verifier.onVerify = {
+            withContext(NonCancellable) { verifyStep.hold() }
+        }
+        val attempt = async {
+            fixture.coordinator.setupCredentialDetailed("synthetic-cancelled-failure-pat-3344", "PH")
+        }
+        withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
+
+        attempt.cancel()
+        verifyStep.release()
+        attempt.cancelAndJoin()
+
+        assertEquals(savesBefore, fixture.store.saveCalls,
+            "an ignored verifier cancellation cannot reach the protected-store commit")
+        assertEquals(SEED_TOKEN, fixture.store.readToken())
+
+        // A later setup still works: the cancelled attempt did not leave an
+        // active fence that blocks or overwrites its successor.
+        fixture.verifier.onVerify = null
+        fixture.verifier.result = null
+        val next = fixture.coordinator.setupCredentialDetailed("synthetic-after-cancelled-failure-5566", "PH")
+        assertIs<ThinQCredentialSetupResult.Success>(next.result)
+        assertEquals(savesBefore + 1, fixture.store.saveCalls)
+    }
+
+    // --------- (c-extra) delayed verification *failures* are fence-checked too
+
+    @Test
+    fun delayedVerificationFailureAfterOwnerChangeExposesSupersededNotTheStaleFailure() = runBlocking {
+        val fixture = Fixture(ownerUid = "stale-owner-a")
+        fixture.seedCredential()
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        val attemptKey = fixture.coordinator.contextKey.value
+        val savesBefore = fixture.store.saveCalls
+        fixture.verifier.result = ThinQVerificationResult.InvalidToken
+
+        val verifyStep = NetworkStep()
+        fixture.verifier.onVerify = { verifyStep.hold() }
+        val attempt = async { fixture.coordinator.setupCredentialDetailed("synthetic-late-reject-pat-5555", "PH") }
+        withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
+
+        fixture.coordinator.onOwnerChanged("stale-owner-b", TEST_PROJECT_ID)
+
+        verifyStep.release()
+        val outcome = withTimeout(SETUP_TIMEOUT_MS) { attempt.await() }
+
+        assertIs<ThinQCredentialSetupResult.Superseded>(
+            outcome.result,
+            "a delayed verification failure must not escape the gate as a stale typed failure",
+        )
+        assertEquals(
+            attemptKey,
+            outcome.contextKey,
+            "the outcome stays bound to the superseded attempt's own context",
+        )
+        assertTrue(outcome.contextKey != fixture.coordinator.contextKey.value, "that context is no longer the active one")
+        assertEquals(savesBefore, fixture.store.saveCalls, "a stale failure never reaches the protected-store save")
+        assertEquals(SEED_TOKEN, fixture.store.readToken(), "the working token is untouched")
+
+        // Pure UI fence: the stale failure's feedback is hidden for the new context.
+        assertNull(
+            productionSetupFeedback(
+                outcome.contextKey to "LG rejected this token; the previous PAT was kept.",
+                fixture.coordinator.contextKey.value,
+            ),
+            "the old attempt's failure feedback must never render for the new context",
+        )
+    }
+
+    @Test
+    fun delayedVerificationFailureAfterANewerAttemptExposesSupersededWhileTheCurrentAttemptStaysHonest() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        val attemptKey = fixture.coordinator.contextKey.value
+        val savesBefore = fixture.store.saveCalls
+        fixture.verifier.result = ThinQVerificationResult.InvalidToken
+
+        val firstStep = NetworkStep()
+        fixture.verifier.onVerify = { firstStep.hold() }
+        val first = async { fixture.coordinator.setupCredentialDetailed("synthetic-stale-first-pat-6666", "PH") }
+        withTimeout(SETUP_TIMEOUT_MS) { firstStep.awaitEntered() }
+
+        val secondStep = NetworkStep()
+        fixture.verifier.onVerify = { secondStep.hold() }
+        val second = async { fixture.coordinator.setupCredentialDetailed("synthetic-current-second-pat-7777", "PH") }
+        withTimeout(SETUP_TIMEOUT_MS) { secondStep.awaitEntered() }
+
+        firstStep.release()
+        val staleOutcome = withTimeout(SETUP_TIMEOUT_MS) { first.await() }
+        assertIs<ThinQCredentialSetupResult.Superseded>(
+            staleOutcome.result,
+            "the older attempt's delayed failure is stale once a newer attempt began",
+        )
+        assertEquals(attemptKey, staleOutcome.contextKey)
+
+        secondStep.release()
+        val currentOutcome = withTimeout(SETUP_TIMEOUT_MS) { second.await() }
+        assertIs<ThinQCredentialSetupResult.Failure.InvalidToken>(
+            currentOutcome.result,
+            "the current attempt's own failure remains an honest typed outcome",
+        )
+        assertEquals(attemptKey, currentOutcome.contextKey, "the unchanged context is what the honest failure belongs to")
+        assertEquals(attemptKey, fixture.coordinator.contextKey.value)
+        assertEquals(savesBefore, fixture.store.saveCalls, "neither attempt saved")
+        assertEquals(SEED_TOKEN, fixture.store.readToken())
+    }
+
+    @Test
+    fun delayedSameOwnerVerificationFailureStaysAnHonestTypedFailureBoundToTheActiveContext() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        val attemptKey = fixture.coordinator.contextKey.value
+        fixture.verifier.result = ThinQVerificationResult.Network
+
+        val verifyStep = NetworkStep()
+        fixture.verifier.onVerify = { verifyStep.hold() }
+        val attempt = async { fixture.coordinator.setupCredentialDetailed("synthetic-delayed-net-pat-8888", "PH") }
+        withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
+        verifyStep.release()
+
+        val outcome = withTimeout(SETUP_TIMEOUT_MS) { attempt.await() }
+        assertIs<ThinQCredentialSetupResult.Failure.NetworkFailure>(outcome.result)
+        assertEquals(attemptKey, outcome.contextKey, "an unsuperseded failure is bound to its own still-active context")
+        assertEquals(attemptKey, fixture.coordinator.contextKey.value, "nothing was invalidated")
+        assertEquals(SEED_TOKEN, fixture.store.readToken())
+        assertEquals(
+            "LG could not be reached.",
+            productionSetupFeedback(outcome.contextKey to "LG could not be reached.", fixture.coordinator.contextKey.value),
+            "an honest same-context failure still renders for its own context",
+        )
+    }
+
     // -------------------- (d) valid current commit activates the new generation
 
     @Test
@@ -293,16 +504,22 @@ class ThinQSetupAttemptFenceTest {
 
         val verifyStep = NetworkStep()
         fixture.verifier.onVerify = { verifyStep.hold() }
-        val attempt = async { fixture.coordinator.setupCredential(committedToken, "PH") }
+        val attempt = async { fixture.coordinator.setupCredentialDetailed(committedToken, "PH") }
         withTimeout(SETUP_TIMEOUT_MS) { verifyStep.awaitEntered() }
         verifyStep.release()
 
-        val success = assertIs<ThinQCredentialSetupResult.Success>(withTimeout(SETUP_TIMEOUT_MS) { attempt.await() })
+        val outcome = withTimeout(SETUP_TIMEOUT_MS) { attempt.await() }
+        val success = assertIs<ThinQCredentialSetupResult.Success>(outcome.result)
 
         // One atomic transition: save + generation advance for the unchanged
         // owner/project/device partition.
         val newKey = fixture.coordinator.contextKey.value
         assertEquals(keyBefore.copy(credentialGeneration = keyBefore.credentialGeneration + 1L), newKey)
+        assertEquals(
+            newKey,
+            outcome.contextKey,
+            "a committed success is bound to the resulting context created by its own transition",
+        )
         assertEquals(savesBefore + 1, fixture.store.saveCalls, "the verified candidate saved exactly once")
 
         // Live/command presentation resets to unread/idle for the new context.
