@@ -45,6 +45,7 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
             liveStateController = live,
             commandController = commands,
             setupCredential = { _, _ -> ThinQCredentialSetupResult.Failure.InvalidToken(credential.value) },
+            cancelSetupAttempt = {},
             onDeviceOpened = {
                 try {
                     val device = providers.thinQ.listDevices().single()

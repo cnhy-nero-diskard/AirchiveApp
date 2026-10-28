@@ -161,6 +161,10 @@ fun OwnerSettingsCard(
                                         "ThinQ identity/profile verified and the masked credential was saved. Read access does not prove command permission."
                                     }
                                     is ThinQCredentialSetupResult.Failure -> result.failureMessage()
+                                    // Unreachable on this unfenced legacy path
+                                    // (no commit gate): a superseded attempt
+                                    // saves nothing and shows no feedback.
+                                    ThinQCredentialSetupResult.Superseded -> null
                                 }
                                 afterSettingsAction()
                             }

@@ -29,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,6 +72,8 @@ import cloud.airchive.shared.data.sync.presentHistorySync
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlin.time.Instant
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -752,10 +755,26 @@ private fun ProductionThinQCredentialCard(
     var confirmingRemoval by remember(bindings) { mutableStateOf(false) }
     var rawToken by remember(bindings) { mutableStateOf("") }
     var country by remember(bindings) { mutableStateOf("PH") }
-    var feedback by remember(bindings) { mutableStateOf<String?>(null) }
+    // Setup/removal feedback is scoped to the lifecycle context it was
+    // produced under (task 2.4): after any owner/credential transition the
+    // old attempt's message is hidden instead of being shown for the new
+    // context. A superseded attempt records no feedback at all.
+    var feedbackFor by remember(bindings) { mutableStateOf<Pair<ThinQContextKey, String>?>(null) }
+    val activeContextKey by bindings.contextKey.collectAsState()
 
     LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
         if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
+    }
+
+    // Route cancellation: when this form leaves composition, explicitly
+    // supersede any in-flight setup attempt it owns. The card's own coroutine
+    // scope is cancelled with composition (aborting the suspended LG
+    // verification); this one-shot job outlives the composition frame only
+    // long enough to close the lifecycle commit gate behind it.
+    DisposableEffect(bindings) {
+        onDispose {
+            CoroutineScope(Dispatchers.Default).launch { bindings.cancelSetupAttempt() }
+        }
     }
 
     SummaryCard("AC connection") {
@@ -770,7 +789,7 @@ private fun ProductionThinQCredentialCard(
                 }
             }
 
-            feedback?.let {
+            productionSetupFeedback(feedbackFor, activeContextKey)?.let {
                 Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
 
@@ -805,19 +824,31 @@ private fun ProductionThinQCredentialCard(
                         rawToken = ""
                         scope.launch {
                             busy = true
-                            feedback = try {
+                            feedbackFor = try {
                                 when (val result = bindings.setupCredential(submittedToken, country)) {
                                     is ThinQCredentialSetupResult.Success -> {
                                         replacing = false
-                                        "The configured AC and profile were verified; the PAT was saved in protected storage. " +
-                                            "LG may still require a control-capable PAT for commands."
+                                        bindings.contextKey.value to (
+                                            "The configured AC and profile were verified; the PAT was saved in protected storage. " +
+                                                "LG may still require a control-capable PAT for commands."
+                                            )
                                     }
-                                    is ThinQCredentialSetupResult.Failure -> result.productionFailureMessage()
+                                    is ThinQCredentialSetupResult.Failure ->
+                                        bindings.contextKey.value to result.productionFailureMessage()
+                                    ThinQCredentialSetupResult.Superseded -> {
+                                        // The attempt was superseded (owner
+                                        // change, removal, a newer attempt or
+                                        // cancellation): it saved nothing and
+                                        // must never surface stale feedback.
+                                        replacing = false
+                                        null
+                                    }
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
+                                bindings.contextKey.value to
+                                    "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
                             } finally {
                                 busy = false
                             }
@@ -828,7 +859,14 @@ private fun ProductionThinQCredentialCard(
                 }
                 TextButton(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
-                    onClick = { rawToken = ""; replacing = false },
+                    onClick = {
+                        rawToken = ""
+                        replacing = false
+                        feedbackFor = null
+                        // Explicit form cancellation: supersede the in-flight
+                        // attempt so it can never save its verified candidate.
+                        scope.launch { bindings.cancelSetupAttempt() }
+                    },
                 ) { Text("Cancel") }
             }
 
@@ -856,11 +894,13 @@ private fun ProductionThinQCredentialCard(
                                 bindings.removeCredential()
                                 rawToken = ""
                                 replacing = false
-                                feedback = "ThinQ PAT removed. Cached Airchive history was kept."
+                                feedbackFor = bindings.contextKey.value to
+                                    "ThinQ PAT removed. Cached Airchive history was kept."
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                feedback = "The ThinQ PAT could not be removed. Your current session and cached history remain."
+                                feedbackFor = bindings.contextKey.value to
+                                    "The ThinQ PAT could not be removed. Your current session and cached history remain."
                             } finally {
                                 busy = false
                                 confirmingRemoval = false
@@ -875,6 +915,18 @@ private fun ProductionThinQCredentialCard(
         )
     }
 }
+
+/**
+ * Setup-feedback fence (task 2.4): feedback recorded under one lifecycle
+ * context is only visible while that exact context is still active, so an old
+ * attempt's success/failure message can never be shown after an owner or
+ * credential transition. `null` feedback (no outcome, or a suppressed
+ * superseded attempt) renders nothing.
+ */
+internal fun productionSetupFeedback(
+    feedbackFor: Pair<ThinQContextKey, String>?,
+    activeContextKey: ThinQContextKey?,
+): String? = feedbackFor?.takeIf { it.first == activeContextKey }?.second
 
 @Composable
 private fun ProductionAccountCard(

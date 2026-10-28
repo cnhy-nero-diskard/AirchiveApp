@@ -38,6 +38,13 @@ data class ProductionThinQBindings(
     val liveStateController: ThinQLiveStateController,
     val commandController: AcCommandController,
     val setupCredential: suspend (rawToken: String, country: String) -> ThinQCredentialSetupResult,
+    /**
+     * Explicit cancel-attempt hook (task 2.4) for setup-form/route
+     * cancellation: supersedes only the in-flight setup attempt, which can
+     * then never save its candidate or advance/publish anything. No-op by
+     * default for single-context preview graphs.
+     */
+    val cancelSetupAttempt: suspend () -> Unit = {},
     val onDeviceOpened: suspend () -> ThinQEntryResult,
     val refreshLiveState: suspend () -> Unit,
     val removeCredential: suspend () -> Unit,

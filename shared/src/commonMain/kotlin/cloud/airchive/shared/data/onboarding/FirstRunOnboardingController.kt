@@ -159,6 +159,11 @@ class FirstRunOnboardingController(
                     credentialSetupFailure = result,
                 )
             }
+
+            // Unreachable for this unfenced onboarding path (no commit gate):
+            // a superseded attempt saved nothing, so the state stays exactly
+            // as it was — no credential, failure or step change.
+            is ThinQCredentialSetupResult.Superseded -> Unit
         }
     }
 

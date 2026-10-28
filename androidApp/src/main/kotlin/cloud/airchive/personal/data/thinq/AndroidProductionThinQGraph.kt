@@ -25,12 +25,14 @@ import kotlinx.coroutines.cancel
  * This graph performs reads on explicit Device entry/refresh and sends commands
  * only when the UI calls [AcCommandController.submit] after an owner action.
  *
- * ## Lifecycle (OpenSpec `deliver-shared-instrument-ui` tasks 2.1–2.3)
+ * ## Lifecycle (OpenSpec `deliver-shared-instrument-ui` tasks 2.1–2.4)
  *
  * All context-sensitive behavior lives in the shared
  * [ThinQContextCoordinator]: the owner/project/device + credential-generation
  * boundary, the snapshot → unlocked-network → conditional-publication entry
- * read, and the fenced live/command controllers. This class only wires the
+ * read, the fenced live/command controllers, and the setup-attempt fence whose
+ * protected-store commit and generation advance are one atomic boundary
+ * transition. This class only wires the
  * Android adapters (Keystore store, Ktor client) into it and observes the
  * credential store for protected-key loss on a background scope, so a
  * synchronous store emission can never re-enter an invalidation on the thread
@@ -80,6 +82,15 @@ class AndroidProductionThinQGraph(
     /** Verify-before-save setup; failed replacement leaves the previous PAT/profile intact. */
     suspend fun setupCredential(rawToken: String, country: String): ThinQCredentialSetupResult =
         coordinator.setupCredential(rawToken, country)
+
+    /**
+     * Explicit cancel-attempt hook (task 2.4) for setup-form/route
+     * cancellation: supersedes only the in-flight setup attempt, which can
+     * then never save its verified candidate or advance/publish anything.
+     */
+    suspend fun cancelSetupAttempt() {
+        coordinator.cancelSetupAttempt()
+    }
 
     /** Device-route entry; see [ThinQContextCoordinator.onDeviceOpened]. */
     suspend fun onDeviceOpened() {
