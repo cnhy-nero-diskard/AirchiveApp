@@ -128,10 +128,12 @@ class ThinQLifecycleInvalidationTest {
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val before = fixture.coordinator.contextKey.value
 
-        fixture.coordinator.removeCredential()
+        val removal = fixture.coordinator.removeCredential()
 
         val after = fixture.coordinator.contextKey.value
         assertTrue(after.credentialGeneration > before.credentialGeneration, "removal advances the generation")
+        assertEquals(after, removal.contextKey, "removal feedback is bound to its own resulting generation")
+        assertTrue(removal.removed)
         assertEquals(null, fixture.store.readToken(), "the protected store is cleared")
         assertNull(fixture.coordinator.deviceProfile.value)
         assertTrue(fixture.coordinator.liveStateController.state.value is ThinQLiveRefreshState.NotRead)

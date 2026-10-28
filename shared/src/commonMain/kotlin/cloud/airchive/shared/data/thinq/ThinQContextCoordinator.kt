@@ -51,6 +51,12 @@ data class ThinQSetupOutcome(
     val contextKey: ThinQContextKey,
 )
 
+/** Credential-removal result bound to the exact generation invalidated by the request. */
+data class ThinQCredentialRemovalOutcome(
+    val contextKey: ThinQContextKey,
+    val removed: Boolean,
+)
+
 /**
  * Lifecycle/context core for exactly one configured ThinQ device (OpenSpec
  * `deliver-shared-instrument-ui` tasks 2.1–2.3, design D2).
@@ -430,11 +436,19 @@ class ThinQContextCoordinator(
      * the protected store while the boundary is still held, so no concurrent
      * entry can capture the new key and still read the old token.
      */
-    suspend fun removeCredential() {
-        lifecycle.invalidateCredential {
+    suspend fun removeCredential(): ThinQCredentialRemovalOutcome {
+        var removed = true
+        val resultingKey = lifecycle.invalidateCredential {
             clearPresentationUnderBoundary()
-            credentialStore.clear()
+            try {
+                credentialStore.clear()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                removed = false
+            }
         }
+        return ThinQCredentialRemovalOutcome(resultingKey, removed)
     }
 
     /**

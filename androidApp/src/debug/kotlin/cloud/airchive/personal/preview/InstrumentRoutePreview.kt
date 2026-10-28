@@ -13,6 +13,7 @@ import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.thinq.ThinQEntryResult
+import cloud.airchive.shared.data.thinq.ThinQCredentialRemovalOutcome
 import cloud.airchive.shared.data.thinq.ThinQLifecycleBoundary
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
@@ -73,7 +74,10 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
                 }
             },
             refreshLiveState = { live.refresh() },
-            removeCredential = { credential.value = credential.value.copy(present = false, credential = null) },
+            removeCredential = {
+                credential.value = credential.value.copy(present = false, credential = null)
+                ThinQCredentialRemovalOutcome(previewLifecycle.current(), removed = true)
+            },
             clearCachedDeviceProfile = { deviceProfile.value = null },
             dispatchCommand = commandHost::dispatch,
         )

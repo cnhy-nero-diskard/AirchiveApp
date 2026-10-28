@@ -7,6 +7,7 @@ import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.KtorThinQClient
 import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
+import cloud.airchive.shared.data.thinq.ThinQCredentialRemovalOutcome
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
 import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import io.ktor.client.engine.cio.CIO
@@ -104,9 +105,7 @@ class AndroidProductionThinQGraph(
     }
 
     /** Explicit removal; account sign-out/change also clears this store through the account controller. */
-    suspend fun removeCredential() {
-        coordinator.removeCredential()
-    }
+    suspend fun removeCredential(): ThinQCredentialRemovalOutcome = coordinator.removeCredential()
 
     /**
      * Owner switch or confirmed sign-out: invalidates the previous
