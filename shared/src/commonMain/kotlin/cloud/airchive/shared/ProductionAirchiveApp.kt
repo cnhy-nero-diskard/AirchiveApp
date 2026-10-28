@@ -92,6 +92,11 @@ import kotlinx.coroutines.launch
  * Missing Firebase configuration is handled by the caller (MainActivity): this
  * graph is only ever built with a ready configuration, so there is no fake
  * fallback here to construct.
+ *
+ * [nowProvider] is the single clock seam for this shell: production callers
+ * leave the default system clock, while the isolated debug/test fixture injects
+ * a controlled clock so freshness/age rendering is deterministic. It never
+ * changes which ports are constructed.
  */
 @Composable
 fun ProductionAirchiveApp(
@@ -101,6 +106,7 @@ fun ProductionAirchiveApp(
     ownerAuthConfigurationMessage: String? = null,
     thinQBindings: ProductionThinQBindings? = null,
     interfacePreferences: InterfaceDetailPreferences? = null,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     val preferences = remember(interfacePreferences) { interfacePreferences ?: InMemoryInterfaceDetailPreferences() }
     InterfaceDetailProvider(preferences) {
@@ -112,6 +118,7 @@ fun ProductionAirchiveApp(
                     onManualRefresh = onManualRefresh,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     thinQBindings = thinQBindings,
+                    nowProvider = nowProvider,
                 )
             }
         }
@@ -165,6 +172,7 @@ private fun ProductionRouteHost(
     onManualRefresh: (() -> Unit)?,
     ownerAuthConfigurationMessage: String?,
     thinQBindings: ProductionThinQBindings?,
+    nowProvider: () -> Long,
 ) {
     val session by coordinator.session.collectAsState()
     val isRefreshing by coordinator.isRefreshing.collectAsState()
@@ -212,7 +220,7 @@ private fun ProductionRouteHost(
     val authorized = accessState is OwnerAccessState.Authorized
     LaunchedEffect(coordinator, partition, authorized) {
         if (authorized && partition != null) {
-            val now = Clock.System.now().toEpochMilliseconds()
+            val now = nowProvider()
             // Decide from the durable cache under the coordinator's lock, not
             // from a possibly still-empty Compose placeholder. A successful
             // access check must not bypass the ten-minute incremental gate.
@@ -221,7 +229,7 @@ private fun ProductionRouteHost(
     }
 
     var route by remember { mutableStateOf(ProductionRoute.HOME) }
-    val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
+    val nowEpochMillis = nowProvider()
     val syncPresentation = presentHistorySync(history, nowEpochMillis)
     val sampledIdentity = (accessState as? OwnerAccessState.Authorized)?.device
 
@@ -272,6 +280,7 @@ private fun ProductionRouteHost(
                     thinQBindings = thinQBindings,
                     hasSession = session != null,
                     onOpenEnergy = { route = ProductionRoute.ENERGY },
+                    nowProvider = nowProvider,
                 )
 
                 ProductionRoute.DEVICE -> if (partition != null) {
@@ -321,6 +330,7 @@ private fun ProductionRouteHost(
                     afterSettingsAction = afterSettingsAction,
                     thinQBindings = thinQBindings,
                     credentialState = credentialState,
+                    nowProvider = nowProvider,
                 )
             }
         }
@@ -362,6 +372,7 @@ private fun ProductionHome(
     thinQBindings: ProductionThinQBindings?,
     hasSession: Boolean,
     onOpenEnergy: () -> Unit,
+    nowProvider: () -> Long,
 ) {
     Column(
         modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().fillMaxHeight()
@@ -371,10 +382,11 @@ private fun ProductionHome(
         Text("Airchive", modifier = Modifier.semantics { heading() },
             style = MaterialTheme.typography.headlineLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         if (accessState !is OwnerAccessState.Authorized) {
-            ProductionAccessCard(coordinator, accessState, onAccessChanged)
+            ProductionAccessCard(coordinator, accessState, onAccessChanged, nowProvider)
         }
         key(history.partition) {
-            ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings)
+            ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings,
+                nowProvider = nowProvider)
         }
         Text(historySync.lastSuccessfulAgeMillis?.let { "History synced ${instrumentAge(it)} ago" }
             ?: "History has not synced yet", style = MaterialTheme.typography.bodySmall,
@@ -503,6 +515,7 @@ private fun ProductionAccessCard(
     coordinator: ProductionHistoryCoordinator,
     accessState: OwnerAccessState,
     onAccessChanged: (OwnerAccessState) -> Unit,
+    nowProvider: () -> Long,
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember(coordinator) { mutableStateOf(false) }
@@ -516,7 +529,7 @@ private fun ProductionAccessCard(
                 if (checked is OwnerAccessState.Authorized) {
                     // Only an explicit sign-in/access-retry action may bypass
                     // a recent failed bootstrap, never an automatic resume.
-                    coordinator.onAccessAuthorized(Clock.System.now().toEpochMilliseconds())
+                    coordinator.onAccessAuthorized(nowProvider())
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -669,11 +682,12 @@ fun ProductionSettingsRoute(
     afterSettingsAction: suspend () -> Unit,
     thinQBindings: ProductionThinQBindings?,
     credentialState: ThinQCredentialState,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     InstrumentPage("Settings", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Your account, AC connection and saved history." else null) {
         InstrumentPanel { InterfaceDetailSelector() }
         InstrumentPanel {
-            ProductionAccountCard(accountController, session, history, afterSettingsAction)
+            ProductionAccountCard(accountController, session, history, afterSettingsAction, nowProvider)
             if (thinQBindings != null) {
                 ProductionThinQCredentialCard(thinQBindings, credentialState, signedIn = session != null)
             } else SummaryCard("AC connection") {
@@ -841,6 +855,7 @@ private fun ProductionAccountCard(
     session: OwnerSession?,
     history: HistorySnapshot,
     afterSettingsAction: suspend () -> Unit,
+    nowProvider: () -> Long,
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -875,7 +890,7 @@ private fun ProductionAccountCard(
 
         history.sync?.let { sync ->
             Text(
-                sync.lastSuccessfulSyncEpochMillis?.let { "Last successful history sync: ${sinceNowLabel(it)}." }
+                sync.lastSuccessfulSyncEpochMillis?.let { "Last successful history sync: ${sinceNowLabel(it, nowProvider())}." }
                     ?: "No successful history sync yet.",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -1107,7 +1122,7 @@ private fun productionAgeLabel(ageMillis: Long): String = when {
     else -> "${ageMillis / (24 * 60 * 60_000L)} days"
 }
 
-private fun sinceNowLabel(epochMillis: Long): String {
-    val age = (Clock.System.now().toEpochMilliseconds() - epochMillis).coerceAtLeast(0L)
+private fun sinceNowLabel(epochMillis: Long, nowEpochMillis: Long): String {
+    val age = (nowEpochMillis - epochMillis).coerceAtLeast(0L)
     return "${productionAgeLabel(age)} ago"
 }

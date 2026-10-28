@@ -25,11 +25,25 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
     var submittedCommands = 0
         private set
 
+    /** Non-null only for the `shell` intent extra: production shell over fake ports. */
+    var shellFixture: SharedInstrumentShellFixture? = null
+        private set
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val bars = if (intent.getBooleanExtra("dark", false)) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
             else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
         enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+        if (intent.getBooleanExtra("shell", false)) {
+            // OpenSpec task 1.3: compose the actual ProductionAirchiveApp shell
+            // over fake owner/history/credential/verifier/ThinQ ports with a
+            // controlled clock. This branch constructs no production Firebase,
+            // Android Keystore credential or Ktor/CIO graph.
+            val fixture = SharedInstrumentShellFixture(applicationContext)
+            shellFixture = fixture
+            setContent { fixture.Shell() }
+            return
+        }
         val interfacePreferences = AndroidInterfaceDetailPreferences(applicationContext, "airchive_preview_interface")
         if (savedInstanceState == null && intent.hasExtra("detail")) {
             interfacePreferences.select(InterfaceDetail.fromStoredValue(intent.getStringExtra("detail")))
@@ -77,6 +91,12 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
             }
             }
         }
+    }
+
+    override fun onDestroy() {
+        shellFixture?.close()
+        shellFixture = null
+        super.onDestroy()
     }
 }
 

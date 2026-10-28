@@ -45,6 +45,7 @@ internal fun ProductionHomeInstrument(
     onEnergy: () -> Unit,
     onSettings: () -> Unit,
     comfortOnly: Boolean = false,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     val scope = rememberCoroutineScope()
     val profile = bindings?.profile?.collectAsState()?.value
@@ -54,8 +55,8 @@ internal fun ProductionHomeInstrument(
     var entryReadComplete by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
     var entryReadFailed by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
     var reading by remember(bindings, history.partition, credential, hasSession) { mutableStateOf(false) }
-    val now by produceState(Clock.System.now().toEpochMilliseconds()) {
-        while (true) { value = Clock.System.now().toEpochMilliseconds(); delay(30_000) }
+    val now by produceState(nowProvider()) {
+        while (true) { value = nowProvider(); delay(30_000) }
     }
     suspend fun refresh() {
         if (reading) return

@@ -2,8 +2,8 @@
 
 - [x] 1.1 Recheck the working branch against the pinned handoff and current `main`, preserving the reference branch and unrelated local files; verify and record the exact starting commit and scoped application/docs differences before editing implementation.
 - [x] 1.2 Sync the completed `add-personal-airchive-mobile-app` change's four capabilities through the repository sync workflow without archiving it or rewriting its acceptance history; verify all original requirements/scenarios and Purpose sections survive in main specs and strict validation passes before application implementation begins.
-- [ ] 1.3 Extend the isolated debug/test fixture to compose the production shell with fake owner/history/credential/ThinQ ports, a controlled clock, operation counters and deferred responses; verify it constructs no production Firebase, protected credential or HTTP graph and uses a separate preference file.
-- [ ] 1.4 Add reproducing tests for retained state after credential replacement/removal, a failed new-context read, owner switches and delayed old-context completions; verify the tests demonstrate the relevant starting failures or document when an investigated path is already safe instead of applying speculative fixes.
+- [x] 1.3 Extend the isolated debug/test fixture to compose the production shell with fake owner/history/credential/ThinQ ports, a controlled clock, operation counters and deferred responses; verify it constructs no production Firebase, protected credential or HTTP graph and uses a separate preference file.
+- [x] 1.4 Add reproducing tests for retained state after credential replacement/removal, a failed new-context read, owner switches and delayed old-context completions; verify the tests demonstrate the relevant starting failures or document when an investigated path is already safe instead of applying speculative fixes.
 
 ## 2. Isolate authority, asynchronous work and sensitive state
 
