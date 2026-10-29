@@ -594,6 +594,157 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun productionDisclosureDefaultsRespectModeRecoveryAndVisibleContent() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            // A recovery-required disclosure outranks Simple's normal collapse
+            // default, even before an owner has signed in.
+            clickText("Settings")
+            assertDisclosureState("History access", "Expanded")
+            assertTextPresent("Status: signed out of Google.")
+            assertDisclosureState("History and storage", "Collapsed")
+            assertTextAbsent("Local diagnostics · nonsecret")
+
+            clickText("Home")
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitTrue("the fake history access check completes") {
+                var reads = 0
+                scene.onActivity { reads = it.shellFixture!!.counters.deviceIdentityReads.get() }
+                reads > 0
+            }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+
+            // Simple keeps all optional information and action sections closed.
+            clickText("Device")
+            assertDisclosureState("Device details", "Collapsed")
+            assertTextAbsent("Device ID:")
+
+            clickText("Energy")
+            assertDisclosureState("Coverage and measurement details", "Collapsed")
+            assertDisclosureState("Daily record", "Collapsed")
+            assertDisclosureState("Units and conversions", "Collapsed")
+            assertTextAbsent("Period summary")
+            assertTextAbsent("Elapsed five-minute slots:")
+            assertTextAbsent("Interval values retain their recorded units.")
+            // A manual override is permitted, and exposes the daily children.
+            clickText("Daily record")
+            assertDisclosureState("Daily record", "Expanded")
+            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+
+            clickText("History")
+            assertDisclosureState("Sync and collector health", "Collapsed")
+            assertDisclosureState("Sample status guide", "Collapsed")
+            assertTextAbsent("What each sample status means")
+
+            clickText("Settings")
+            clickText("Detailed")
+            awaitNode { it.text?.toString()?.startsWith("Status: history access is authorized") == true }
+            clickText("Simple")
+            assertDisclosureState("History access", "Collapsed")
+            assertTextAbsent("Status: history access is authorized for this account and device.")
+            assertDisclosureState("History and storage", "Collapsed")
+            assertDisclosureState("Connection details", "Collapsed")
+            assertDisclosureState("Account actions", "Collapsed")
+            assertTextAbsent("LG client ID:")
+            assertTextAbsent("Switch Google account")
+
+            // Manual expansion is visible until a mode change; changing modes
+            // resets informational sections to their defaults.
+            clickText("History and storage")
+            assertDisclosureState("History and storage", "Expanded")
+            awaitNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+            scrollToTop()
+            clickText("Detailed")
+            assertDisclosureState("History access", "Expanded")
+            assertDisclosureState("History and storage", "Expanded")
+            assertDisclosureState("Connection details", "Expanded")
+            assertDisclosureState("Account actions", "Collapsed")
+            awaitNode { it.text?.toString()?.startsWith("LG client ID:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Status: history access is authorized") == true }
+            assertTextPresent("Local diagnostics · nonsecret")
+            assertTextAbsent("Switch Google account")
+
+            clickText("History and storage")
+            assertDisclosureState("History and storage", "Collapsed")
+            assertTextAbsent("Local diagnostics · nonsecret")
+            scrollToTop()
+            clickText("Simple")
+            assertDisclosureState("History access", "Collapsed")
+            assertDisclosureState("History and storage", "Collapsed")
+            scrollToTop()
+            clickText("Detailed")
+            assertDisclosureState("History and storage", "Expanded")
+            assertDisclosureState("Account actions", "Collapsed")
+
+            // The action section never follows Detailed's informational-open rule.
+            clickText("Account actions")
+            assertDisclosureState("Account actions", "Expanded")
+            assertTextPresent("Switch Google account")
+            scrollToTop()
+            clickText("Simple")
+            assertDisclosureState("Account actions", "Collapsed")
+            assertTextAbsent("Switch Google account")
+            scrollToTop()
+            clickText("Detailed")
+            assertDisclosureState("Account actions", "Collapsed")
+
+            // Settings/cache confirmation is outside the resetting disclosure.
+            clickText("Account actions")
+            clickText("Clear local history cache")
+            awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
+            scene.onActivity {
+                it.shellFixture!!.interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            }
+            awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
+            clickText("Cancel")
+
+            // Detailed informational sections expand across the other routes;
+            // returning to Simple restores the collapsed defaults.
+            scrollToTop()
+            clickText("Detailed")
+            clickText("Device")
+            assertDisclosureState("Device details", "Expanded")
+            assertTextPresent("Device ID:")
+
+            clickText("Energy")
+            assertDisclosureState("Coverage and measurement details", "Expanded")
+            assertDisclosureState("Daily record", "Expanded")
+            assertDisclosureState("Units and conversions", "Expanded")
+            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            scrollToTop()
+            clickText("Week")
+            assertDisclosureState("Daily records", "Expanded")
+            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            scrollToTop()
+            clickText("Month")
+            assertDisclosureState("Daily records", "Expanded")
+
+            clickText("History")
+            assertDisclosureState("Sync and collector health", "Expanded")
+            assertDisclosureState("Sample status guide", "Expanded")
+            assertTextPresent("What each sample status means")
+            awaitNode { it.text?.toString()?.contains("A null or missing energy value is a gap") == true }
+
+            clickText("Settings")
+            scrollToTop()
+            clickText("Simple")
+            clickText("Device")
+            assertDisclosureState("Device details", "Collapsed")
+            clickText("Energy")
+            assertDisclosureState("Daily record", "Collapsed")
+            clickText("History")
+            assertDisclosureState("Sample status guide", "Collapsed")
+            assertTextAbsent("What each sample status means")
+            // Home intentionally has no secondary disclosures.
+            clickText("Home")
+            assertTextAbsent("Device details")
+            assertTextAbsent("Daily record")
+            assertTextAbsent("Sample status guide")
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureRemainingRoutes() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode
@@ -727,6 +878,21 @@ class SharedInstrumentUiTest {
         )
     }
 
+    private fun assertDisclosureState(title: String, expected: String) {
+        var node = awaitNode { it.text?.toString() == title }
+        while (node.stateDescription == null && node.parent != null) node = node.parent
+        assertEquals("$title disclosure state", expected, node.stateDescription?.toString())
+    }
+
+    private fun assertTextPresent(text: String) {
+        awaitNode { it.text?.toString()?.contains(text) == true }
+    }
+
+    private fun assertTextAbsent(text: String) {
+        assertNull("$text should not be visible while its disclosure is collapsed",
+            find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString()?.contains(text) == true })
+    }
+
     private fun accessibilitySnapshot(node: AccessibilityNodeInfo?): String {
         if (node == null) return ""
         return buildString {
@@ -743,6 +909,14 @@ class SharedInstrumentUiTest {
         find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
             ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
         instrumentation.waitForIdleSync()
+    }
+
+    private fun scrollToTop() {
+        repeat(8) {
+            find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
+                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+            instrumentation.waitForIdleSync()
+        }
     }
 
     private fun awaitNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
