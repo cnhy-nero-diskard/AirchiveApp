@@ -541,6 +541,65 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun installationInterfaceChoiceSurvivesCredentialCacheAndSignOutClearing() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+
+            clickText("Settings")
+            clickText("Detailed")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+
+            clickText("Remove ThinQ PAT")
+            awaitNode { it.text?.toString() == "Remove ThinQ PAT?" }
+            clickText("Remove")
+            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+            scene.onActivity {
+                assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+                assertEquals("detailed", instrumentation.targetContext.getSharedPreferences(
+                    SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
+                    android.content.Context.MODE_PRIVATE,
+                ).getString("interface_detail", null))
+            }
+
+            clickText("Account actions")
+            clickText("Clear local history cache")
+            awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
+            clickText("Confirm")
+            awaitNode { it.text?.toString() == "This account's local history cache was cleared. Google sign-in is unchanged." }
+            scene.onActivity {
+                assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+            }
+
+            clickText("Sign out of Google")
+            awaitNode { it.text?.toString() == "Sign out of Google?" }
+            clickText("Confirm")
+            awaitNode { it.text?.toString() == "Google account: signed out" }
+            scene.onActivity {
+                assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+            }
+
+            clickText("Home")
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            clickText("Settings")
+            scene.onActivity {
+                assertEquals("a new signed-in session reuses the installation choice",
+                    cloud.airchive.shared.InterfaceDetail.DETAILED,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+            }
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureLightDarkAndLargeText() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode
