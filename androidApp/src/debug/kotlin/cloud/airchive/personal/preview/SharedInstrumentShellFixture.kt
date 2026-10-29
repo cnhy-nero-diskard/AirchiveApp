@@ -94,6 +94,9 @@ class SharedInstrumentShellFixture(context: Context) {
     /** Deferred-response gate for every fake ThinQ operation. */
     val thinQGate = DeferredResponseGate()
 
+    /** Deferred-response gate for fake history reads, used to observe loading UI. */
+    val telemetryReadGate = DeferredResponseGate()
+
     /** Deferred-response gate for the fake PAT verification round trip. */
     val credentialVerificationGate = DeferredResponseGate()
 
@@ -108,7 +111,9 @@ class SharedInstrumentShellFixture(context: Context) {
 
     private val ownerIdentity =
         CountingOwnerIdentity(MutableFixtureOwnerIdentity(), counters, ownerSignInGate)
-    private val telemetry = CountingTelemetry(FakeAirchiveTelemetry(FIXTURE_NOW_EPOCH_MILLIS), counters)
+    private val telemetry = CountingTelemetry(
+        FakeAirchiveTelemetry(FIXTURE_NOW_EPOCH_MILLIS), counters, telemetryReadGate,
+    )
     private val localHistory = CountingLocalHistory(FakeLocalHistory(), counters)
     private val credentialStore = CountingCredentialStore(FakeThinQCredentialStore(), counters)
     private val verifier = CountingCredentialVerifier(
@@ -240,6 +245,16 @@ class SharedInstrumentShellFixture(context: Context) {
     /** Advances the fake client's next live-read timestamp, never a real device. */
     fun setThinQLiveReadTimestamp(epochMillis: Long) {
         thinQ.setLiveReadTimestamp(epochMillis)
+    }
+
+    /** Injects a synthetic LG read failure without constructing production HTTP. */
+    fun setThinQReadFailure(failure: Throwable?) {
+        thinQ.setReadFailure(failure)
+    }
+
+    /** Injects a synthetic history adapter failure; callers use typed safe failures. */
+    fun setTelemetryFailure(failure: Throwable?) {
+        telemetry.setFailure(failure)
     }
 
     /** Releases the coordinator's session-observation scope; call from onDestroy. */
@@ -437,8 +452,15 @@ private class MutableFixtureOwnerIdentity : OwnerIdentityPort {
 private class CountingTelemetry(
     private val delegate: AirchiveTelemetryPort,
     private val counters: FixtureOperationCounters,
+    private val gate: DeferredResponseGate,
 ) : AirchiveTelemetryPort {
     val delegateTypeName: String get() = delegate.javaClass.simpleName
+
+    fun setFailure(failure: Throwable?) {
+        val fake = delegate as? FakeAirchiveTelemetry
+            ?: error("The fixture telemetry port is not the expected fake")
+        fake.failWith = failure
+    }
 
     override suspend fun latestObservations(
         sinceEpochMillis: Long,
@@ -446,6 +468,7 @@ private class CountingTelemetry(
         cursor: String?,
     ): TelemetryPage<Observation> {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.latestObservations(sinceEpochMillis, pageSize, cursor)
     }
 
@@ -456,6 +479,7 @@ private class CountingTelemetry(
         cursor: String?,
     ): TelemetryPage<Observation> {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.observations(fromEpochMillis, toEpochMillis, pageSize, cursor)
     }
 
@@ -465,6 +489,7 @@ private class CountingTelemetry(
         cursor: String?,
     ): TelemetryPage<Observation> {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.changedSincePersistedAt(sinceEpochMillis, pageSize, cursor)
     }
 
@@ -474,22 +499,26 @@ private class CountingTelemetry(
         cursor: String?,
     ): TelemetryPage<Observation> {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.changedSinceReconciledAt(sinceEpochMillis, pageSize, cursor)
     }
 
     override suspend fun latestFinalizedTotals(limit: Int): List<DailyTotal> {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.latestFinalizedTotals(limit)
     }
 
     override suspend fun collectorHealth(): CollectorHealth {
         counters.telemetryReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.collectorHealth()
     }
 
     override suspend fun deviceIdentity(): DeviceIdentity {
         counters.telemetryReads.incrementAndGet()
         counters.deviceIdentityReads.incrementAndGet()
+        gate.awaitTurn()
         return delegate.deviceIdentity()
     }
 }
@@ -559,6 +588,12 @@ private class CountingThinQClient(
     fun setLiveReadTimestamp(epochMillis: Long) {
         (delegate as? FakeThinQClient)?.setLiveReadTimestamp(epochMillis)
             ?: error("The fixture ThinQ client is not the expected fake")
+    }
+
+    fun setReadFailure(failure: Throwable?) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.failReadsWith = failure
     }
 
     override suspend fun listDevices(): List<ThinQDevice> {

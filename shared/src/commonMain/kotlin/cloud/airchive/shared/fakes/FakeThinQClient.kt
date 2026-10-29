@@ -34,6 +34,9 @@ class FakeThinQClient(
     /** When set, [setState] returns [CommandStatus.FAILED] with this reason. */
     var failWith: CommandFailure? = null
 
+    /** Synthetic read-failure injection for isolated production-shell tests. */
+    var failReadsWith: Throwable? = null
+
     /** When `false`, markup the accepted command as pending without confirming. */
     var verifyAfterAccept: Boolean = true
 
@@ -81,21 +84,24 @@ class FakeThinQClient(
 
     private var commandCounter = 0
 
-    override suspend fun listDevices(): List<ThinQDevice> = listOf(
-        ThinQDevice(
+    override suspend fun listDevices(): List<ThinQDevice> {
+        failReadsWith?.let { throw it }
+        return listOf(ThinQDevice(
             deviceId = deviceId,
             alias = "Demo Room AC",
             modelName = profile.modelName,
             online = true,
-        ),
-    )
+        ))
+    }
 
     override suspend fun profile(deviceId: String): ThinQDeviceProfile {
+        failReadsWith?.let { throw it }
         requireDevice(deviceId)
         return profile
     }
 
     override suspend fun liveState(deviceId: String): ThinQLiveState {
+        failReadsWith?.let { throw it }
         requireDevice(deviceId)
         return live.copy(observedAtEpochMillis = liveReadTimestampEpochMillis)
     }

@@ -967,6 +967,220 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
+    @Test fun productionRoutesPreserveInstrumentHierarchyAndConfiguredTruth() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            clickText("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
+
+            listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
+            assertTextPresent("Set temperature")
+            assertTextPresent("Sampled today")
+            assertTextPresent("Temperature")
+            assertTextPresent("Apply")
+            assertTextPresent("Mode")
+            assertTextPresent("Fan speed")
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            fixture.get().setThinQReadFailure(IllegalStateException("synthetic fake read failure"))
+            clickText("Device")
+            awaitNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
+            assertTextAbsent("Sampled today")
+            assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
+
+            fixture.get().setThinQReadFailure(null)
+            clickText("Refresh device state")
+            assertTextAbsent("The device read failed. Check the connection and retry.")
+            awaitTrue("a successful synthetic re-read restores supported controls") {
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.contentDescription?.toString() == "Increase target temperature"
+                }?.isEnabled == true
+            }
+            assertTextPresent("Set temperature")
+            assertTextPresent("Apply")
+            assertTextPresent("Mode")
+            assertTextPresent("Fan speed")
+
+            clickText("Energy")
+            awaitNode { it.text?.toString() == "Sampled energy" }
+            awaitNode { it.text?.toString() == "Load sampled intervals" }
+            assertTextPresent("Coverage and measurement details")
+            val energyTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+            assertTrue(energyTree.indexOf("Sampled energy") < energyTree.indexOf("Download this period"))
+
+            clickText("History")
+            awaitNode { it.text?.toString() == "Cached observations (newest first)" }
+            val firstSample = awaitNode { it.contentDescription?.toString()?.startsWith("Sample at ") == true }
+            clickNode(firstSample)
+            awaitNode { it.text?.toString() == "Sample detail" }
+            clickText("Close")
+
+            clickText("Settings")
+            awaitNode { it.text?.toString() == "Interface detail" }
+            assertTextPresent("AC connection")
+            assertTextPresent("Connection details")
+            assertTextPresent("History access")
+            assertTextPresent("History and storage")
+            assertTextPresent("Account actions")
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun historyEmptyNoUsableOfflineDeniedLoadingAndErrorStatesStayTruthful() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val owner = fixture.get().coordinator.session.value
+                ?: throw AssertionError("the synthetic owner sign-in must complete")
+            val partition = fixture.get().coordinator.partitionFor(owner)
+            val now = fixture.get().clock.now()
+
+            runBlocking { fixture.get().coordinator.local.clear(partition) }
+            clickText("History")
+            awaitNode { it.text?.toString() == "No cached observations yet" }
+            assertTextAbsent("Cached, but no usable measurements yet")
+
+            val invalidSamples = listOf(
+                cloud.airchive.shared.contract.telemetry.Observation(
+                    sampleId = "4-4-anomalous", intervalStartEpochMillis = now - 600_000L,
+                    intervalEndEpochMillis = now - 300_000L, energyValue = 45.0,
+                    recordedUnit = cloud.airchive.shared.contract.telemetry.EnergyUnit.WH,
+                    quality = cloud.airchive.shared.contract.telemetry.ObservationQuality.ANOMALOUS,
+                ),
+                cloud.airchive.shared.contract.telemetry.Observation(
+                    sampleId = "4-4-unknown", intervalStartEpochMillis = now - 300_000L,
+                    intervalEndEpochMillis = now, energyValue = 25.0, recordedUnit = null,
+                ),
+            )
+            runBlocking { fixture.get().coordinator.local.upsertObservations(partition, invalidSamples) }
+            awaitNode { it.text?.toString() == "Cached, but no usable measurements yet" }
+            awaitNode { it.text?.toString()?.contains("never counted as measured zero") == true }
+
+            val retainedSample = cloud.airchive.shared.contract.telemetry.Observation(
+                sampleId = "4-4-retained", intervalStartEpochMillis = now - 600_000L,
+                intervalEndEpochMillis = now - 300_000L, energyValue = 21.0,
+                recordedUnit = cloud.airchive.shared.contract.telemetry.EnergyUnit.WH,
+            )
+            runBlocking {
+                fixture.get().coordinator.local.clear(partition)
+                fixture.get().coordinator.local.upsertObservations(partition, listOf(retainedSample))
+            }
+            clickText("Home")
+
+            fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.Offline())
+            clickText("Refresh history")
+            awaitNode { it.text?.toString()?.contains("could not be reached. Showing cached history") == true }
+            clickText("History")
+            awaitNode { it.contentDescription?.toString()?.contains("21 Wh") == true }
+
+            clickText("Home")
+            fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.AccessDenied())
+            clickText("Refresh history")
+            awaitNode { it.text?.toString()?.contains("access is pending or denied. Showing cached history") == true }
+
+            fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.RemoteFailure())
+            clickText("Refresh history")
+            awaitNode { it.text?.toString()?.contains("last Airchive refresh failed. Showing cached history") == true }
+
+            fixture.get().setTelemetryFailure(null)
+            fixture.get().telemetryReadGate.hold()
+            val readsBeforeLoading = AtomicInteger()
+            scene.onActivity { readsBeforeLoading.set(fixture.get().counters.telemetryReads.get()) }
+            clickText("Refresh history")
+            awaitNode { it.text?.toString() == "Refreshing history…" }
+            awaitTrue("the synthetic history operation is suspended in its loading gate") {
+                fixture.get().counters.telemetryReads.get() > readsBeforeLoading.get()
+            }
+            fixture.get().telemetryReadGate.release()
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun historyThousandsRowLedgerScrollsAndSelectsNewestRowsLazily() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val owner = fixture.get().coordinator.session.value
+                ?: throw AssertionError("the synthetic owner sign-in must complete")
+            val partition = fixture.get().coordinator.partitionFor(owner)
+            val end = (fixture.get().clock.now() / 300_000L) * 300_000L
+            val observations = (0 until 3_000).map { index ->
+                val start = end - (3_000L - index) * 300_000L
+                cloud.airchive.shared.contract.telemetry.Observation(
+                    sampleId = "ledger-4-4-$index",
+                    intervalStartEpochMillis = start,
+                    intervalEndEpochMillis = start + 300_000L,
+                    energyValue = 100_000.0 + index,
+                    recordedUnit = cloud.airchive.shared.contract.telemetry.EnergyUnit.WH,
+                )
+            }
+            runBlocking {
+                fixture.get().coordinator.local.clear(partition)
+                fixture.get().coordinator.local.upsertObservations(partition, observations)
+            }
+            val telemetryReadsBefore = AtomicInteger()
+            val writesBefore = AtomicInteger()
+            scene.onActivity {
+                telemetryReadsBefore.set(fixture.get().counters.telemetryReads.get())
+                writesBefore.set(fixture.get().counters.localHistoryWrites.get())
+            }
+
+            clickText("History")
+            awaitNode { it.text?.toString() == "3000 saved observations" }
+            val firstRow = awaitNode {
+                it.contentDescription?.toString()?.startsWith("Sample at ") == true &&
+                    it.contentDescription?.toString()?.contains("102999") == true
+            }
+            assertNull("the oldest row is not eagerly composed in the first viewport",
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.contentDescription?.toString()?.contains("100000") == true
+                })
+            assertEquals(1, countNodes(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable })
+
+            clickNode(firstRow)
+            awaitNode { it.text?.toString() == "ledger-4-4-2999" }
+            clickText("Close")
+            scene.onActivity {
+                assertEquals(telemetryReadsBefore.get(), fixture.get().counters.telemetryReads.get())
+                assertEquals(writesBefore.get(), fixture.get().counters.localHistoryWrites.get())
+            }
+
+            scrollForward()
+            val scrolledRow = awaitNode {
+                it.contentDescription?.toString()?.startsWith("Sample at ") == true &&
+                    it.contentDescription?.toString()?.contains("102999") != true
+            }
+            clickNode(scrolledRow)
+            val selectedLedgerId = awaitNode { it.text?.toString()?.startsWith("ledger-4-4-") == true }.text.toString()
+            assertTrue(selectedLedgerId.substringAfterLast('-').toInt() < 2999)
+            clickText("Close")
+            scene.onActivity {
+                assertEquals("scroll/detail remain local", telemetryReadsBefore.get(), fixture.get().counters.telemetryReads.get())
+                assertEquals(writesBefore.get(), fixture.get().counters.localHistoryWrites.get())
+            }
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureRemainingRoutes() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode
@@ -1179,5 +1393,11 @@ class SharedInstrumentUiTest {
         if (predicate(node)) return node
         for (i in 0 until node.childCount) find(node.getChild(i), predicate)?.let { return it }
         return null
+    }
+
+    private fun countNodes(node: AccessibilityNodeInfo?, predicate: (AccessibilityNodeInfo) -> Boolean): Int {
+        if (node == null) return 0
+        return (if (predicate(node)) 1 else 0) +
+            (0 until node.childCount).sumOf { countNodes(node.getChild(it), predicate) }
     }
 }
