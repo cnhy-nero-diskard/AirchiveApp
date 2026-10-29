@@ -904,6 +904,69 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
+    @Test fun energyPeriodBrowsingIsCachedUntilExplicitLoadAndCoveredRevisitsAreLocal() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            clickText("Energy")
+            awaitNode { it.text?.toString() == "Load sampled intervals" }
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            val readsBeforeBrowsing = AtomicInteger()
+            scene.onActivity {
+                fixture.set(it.shellFixture!!)
+                readsBeforeBrowsing.set(fixture.get().counters.telemetryReads.get())
+            }
+            clickText("Week")
+            clickText("Month")
+            clickText("Previous")
+            clickText("Next")
+            clickText("Day")
+            scene.onActivity {
+                assertEquals("period and date selection only changes cached presentation",
+                    readsBeforeBrowsing.get(), fixture.get().counters.telemetryReads.get())
+            }
+
+            // The current month extends well beyond the synthetic bootstrap
+            // cache, so only this explicit action may request the missing range.
+            clickText("Month")
+            val readsBeforeLoad = AtomicInteger()
+            val writesBeforeLoad = AtomicInteger()
+            scene.onActivity {
+                readsBeforeLoad.set(fixture.get().counters.telemetryReads.get())
+                writesBeforeLoad.set(fixture.get().counters.localHistoryWrites.get())
+            }
+            clickText("Load sampled intervals")
+            awaitNode { it.text?.toString()?.contains("remote page(s) fetched") == true }
+            scene.onActivity {
+                assertTrue(fixture.get().counters.telemetryReads.get() > readsBeforeLoad.get())
+                assertTrue(fixture.get().counters.localHistoryWrites.get() > writesBeforeLoad.get())
+            }
+
+            val readsAfterLoad = AtomicInteger()
+            scene.onActivity { readsAfterLoad.set(fixture.get().counters.telemetryReads.get()) }
+            clickText("Load sampled intervals")
+            awaitNode { it.text?.toString()?.contains("already cached; no remote reads were needed") == true }
+            scene.onActivity {
+                assertEquals("a covered revisit performs no telemetry reads",
+                    readsAfterLoad.get(), fixture.get().counters.telemetryReads.get())
+            }
+
+            val readsBeforeFuture = AtomicInteger()
+            scene.onActivity { readsBeforeFuture.set(fixture.get().counters.telemetryReads.get()) }
+            clickText("Next")
+            clickText("Load sampled intervals")
+            awaitNode { it.text?.toString()?.contains("still in the future") == true }
+            scene.onActivity {
+                assertEquals("an entirely future period is skipped locally",
+                    readsBeforeFuture.get(), fixture.get().counters.telemetryReads.get())
+            }
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureRemainingRoutes() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode
