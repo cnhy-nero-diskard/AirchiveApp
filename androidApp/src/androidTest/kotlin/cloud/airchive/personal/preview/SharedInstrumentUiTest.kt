@@ -804,6 +804,39 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
+    @Test fun energyMeasurementsAndCoverageAreIdenticalInSimpleAndDetailed() {
+        clearFixturePreferences()
+        launchShell().use {
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+
+            clickText("Settings")
+            clickText("Detailed")
+            clickText("Energy")
+            assertDisclosureState("Coverage and measurement details", "Expanded")
+            assertDisclosureState("Daily record", "Expanded")
+            awaitNode { it.text?.toString()?.startsWith("Sampled interval sum:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Queried into the local cache:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Usable five-minute slots:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            val detailedTruth = energyTruthSnapshot()
+
+            clickText("Settings")
+            clickText("Simple")
+            clickText("Energy")
+            assertDisclosureState("Coverage and measurement details", "Collapsed")
+            clickText("Coverage and measurement details")
+            clickText("Daily record")
+            awaitNode { it.text?.toString()?.startsWith("Sampled interval sum:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Queried into the local cache:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Usable five-minute slots:") == true }
+            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            assertEquals(detailedTruth, energyTruthSnapshot())
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureRemainingRoutes() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode
@@ -963,6 +996,15 @@ class SharedInstrumentUiTest {
             }
         }
     }
+
+    private fun energyTruthSnapshot(): List<String> = accessibilitySnapshot(
+        instrumentation.uiAutomation.rootInActiveWindow,
+    ).lineSequence().filter { line ->
+        line.startsWith("Sampled interval sum:") ||
+            line.startsWith("Queried into the local cache:") ||
+            line.startsWith("Usable five-minute slots:") ||
+            line.startsWith("Elapsed five-minute slots:")
+    }.toList()
 
     private fun scrollForward() {
         find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }

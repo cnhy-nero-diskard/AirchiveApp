@@ -303,6 +303,39 @@ class EnergyHistoryPresentationTest {
         assertEquals(0.0, summary.coverageFraction!!, 1e-9)
     }
 
+    @Test
+    fun measuredZeroRemainsUsableAndNonFiniteValuesRemainGaps() {
+        val day = "2026-01-10"
+        val base = dayStartIso(day)
+        val now = base + 288 * FALLBACK_INTERVAL_MILLIS
+        val observations = listOf(
+            sample("zero", start = base, value = 0.0, unit = EnergyUnit.WH, unitText = "Wh"),
+            sample("nan", start = base + FALLBACK_INTERVAL_MILLIS, value = Double.NaN,
+                unit = EnergyUnit.WH, unitText = "Wh"),
+            sample("positive-infinity", start = base + 2 * FALLBACK_INTERVAL_MILLIS, value = Double.POSITIVE_INFINITY,
+                unit = EnergyUnit.WH, unitText = "Wh"),
+            sample("negative-infinity", start = base + 3 * FALLBACK_INTERVAL_MILLIS, value = Double.NEGATIVE_INFINITY,
+                unit = EnergyUnit.WH, unitText = "Wh"),
+            sample("unavailable-value", start = base + 4 * FALLBACK_INTERVAL_MILLIS, value = 99.0,
+                unit = EnergyUnit.WH, unitText = "Wh", quality = ObservationQuality.UNAVAILABLE),
+        )
+
+        val summary = presentEnergyHistory(
+            observations, emptyList(), emptyList(), EnergyPeriodType.DAY, LocalDate.parse(day), now,
+        ).days.single()
+
+        assertEquals(1, summary.usableSlotCount)
+        assertEquals(0.0, summary.usableEnergyValueWh!!, 1e-9)
+        assertEquals(1.0 / 288.0, summary.coverageFraction!!, 1e-9)
+        assertEquals(287, summary.missingSlotCount)
+        assertTrue(summary.points.single { it.sampleId == "zero" }.usable)
+        listOf("nan", "positive-infinity", "negative-infinity", "unavailable-value").forEach { id ->
+            val point = summary.points.single { it.sampleId == id }
+            assertFalse(point.usable, id)
+            assertNull(point.energyValueWh, id)
+        }
+    }
+
     // ------------------------------------------- out-of-order / duplicates
 
     @Test
@@ -424,6 +457,35 @@ class EnergyHistoryPresentationTest {
     }
 
     @Test
+    fun typedLiveStateFailureAloneDoesNotInvalidateSuccessfulEnergyRead() {
+        val day = "2026-01-10"
+        val base = dayStartIso(day)
+        val measured = sample(
+            id = "energy-ok-live-state-failed",
+            start = base,
+            value = 125.0,
+            unit = EnergyUnit.WH,
+        ).copy(
+            stateSourceFailure = SourceReadFailure(ok = false, failureClass = "TRANSIENT"),
+        )
+
+        val summary = presentEnergyHistory(
+            listOf(measured),
+            emptyList(),
+            emptyList(),
+            EnergyPeriodType.DAY,
+            LocalDate.parse(day),
+            base + 288 * FALLBACK_INTERVAL_MILLIS,
+        ).days.single()
+
+        assertEquals(1, summary.usableSlotCount)
+        assertEquals(125.0, summary.usableEnergyValueWh!!, 1e-9)
+        assertEquals(287, summary.missingSlotCount)
+        assertEquals(false, measured.stateSourceFailure?.ok)
+        assertNull(summary.points.single().sourceFailure)
+    }
+
+    @Test
     fun legacyEnergyFailureMarksTheIntervalAsGapWithoutCoercingItsValueToZero() {
         val day = "2026-01-10"
         val base = dayStartIso(day)
@@ -532,6 +594,41 @@ class EnergyHistoryPresentationTest {
             setOf(DailyTotalSource.LG_FINALIZED, DailyTotalSource.LOCAL_INTERVAL_SUM))
     }
 
+    @Test
+    fun finalizedLocalAndSampledTotalsCanAllDifferWithoutMerging() {
+        val day = "2026-01-15"
+        val base = dayStartIso(day)
+        val observations = (0 until 3).map { i ->
+            sample("three-way-$i", start = base + i * FALLBACK_INTERVAL_MILLIS,
+                value = 600.0, unit = EnergyUnit.WH, unitText = "Wh")
+        }
+        val totals = listOf(
+            total("lg:$day", day, value = 2.5, unit = EnergyUnit.KWH,
+                source = DailyTotalSource.LG_FINALIZED, finalized = true),
+            total("local:$day", day, value = 2.1, unit = EnergyUnit.KWH,
+                source = DailyTotalSource.LOCAL_INTERVAL_SUM, finalized = false),
+        )
+
+        val summary = presentEnergyHistory(
+            observations,
+            totals,
+            emptyList(),
+            EnergyPeriodType.DAY,
+            LocalDate.parse(day),
+            base + 3 * FALLBACK_INTERVAL_MILLIS,
+        ).days.single()
+
+        assertEquals(1800.0, summary.usableEnergyValueWh!!, 1e-9)
+        assertEquals(2, summary.measures.size)
+        assertEquals(2500.0, summary.measures.single {
+            it.original.source == DailyTotalSource.LG_FINALIZED
+        }.energyValueWh!!, 1e-9)
+        assertEquals(2100.0, summary.measures.single {
+            it.original.source == DailyTotalSource.LOCAL_INTERVAL_SUM
+        }.energyValueWh!!, 1e-9)
+        assertEquals(3, summary.usableSlotCount)
+    }
+
     // ---------------------------------- query-cache coverage vs measured coverage
 
     @Test
@@ -570,6 +667,36 @@ class EnergyHistoryPresentationTest {
         )
         assertFalse(partial.queryCoverage.fullyQueried)
         assertEquals(1.0 / 7.0, partial.queryCoverage.queriedFraction, 1e-9)
+    }
+
+    @Test
+    fun overlappingCoveredRangesAreUnionedOnceAndManilaExplicitMatchesDefault() {
+        val day = "2026-01-15"
+        val period = energyPeriodRange(EnergyPeriodType.DAY, LocalDate.parse(day))
+        val observations = listOf(
+            sample("manila", start = slotStartIso(day, 0), value = 0.0, unit = EnergyUnit.WH, unitText = "Wh"),
+        )
+        val ranges = listOf(
+            CoveredRange(period.startEpochMillis, period.startEpochMillis + 2 * FALLBACK_INTERVAL_MILLIS),
+            CoveredRange(period.startEpochMillis + FALLBACK_INTERVAL_MILLIS, period.startEpochMillis + 4 * FALLBACK_INTERVAL_MILLIS),
+            CoveredRange(period.startEpochMillis + 4 * FALLBACK_INTERVAL_MILLIS, period.endExclusiveEpochMillis),
+        )
+        val now = period.endExclusiveEpochMillis
+
+        val defaultZone = presentEnergyHistory(
+            observations, emptyList(), ranges, EnergyPeriodType.DAY, LocalDate.parse(day), now,
+        )
+        val explicitManila = presentEnergyHistory(
+            observations, emptyList(), ranges, EnergyPeriodType.DAY, LocalDate.parse(day), now,
+            timeZoneId = "Asia/Manila",
+        )
+
+        assertTrue(defaultZone.queryCoverage.fullyQueried)
+        assertEquals(1.0, defaultZone.queryCoverage.queriedFraction, 1e-9)
+        assertEquals(defaultZone.period, explicitManila.period)
+        assertEquals(defaultZone.days, explicitManila.days)
+        assertEquals(defaultZone.queryCoverage, explicitManila.queryCoverage)
+        assertEquals(0.0, defaultZone.days.single().usableEnergyValueWh!!, 1e-9)
     }
 
     // ------------------------------------------- unknown daily-total units

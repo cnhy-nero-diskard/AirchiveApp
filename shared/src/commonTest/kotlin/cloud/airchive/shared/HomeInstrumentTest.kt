@@ -123,4 +123,69 @@ class HomeInstrumentTest {
         assertEquals(0, groups[3].expected)
         assertEquals(start + 2 * 300_000L, latestUsableEnergyPoint(day)?.intervalEndEpochMillis)
     }
+
+    @Test fun homeChartBuildsEightThreeHourGroupsFromTheFullManilaDay() {
+        val date = LocalDate.parse("2026-10-24")
+        val period = energyPeriodRange(EnergyPeriodType.DAY, date)
+        val observations = (0 until 288).map { slot ->
+            Observation(
+                sampleId = "home-full-day-$slot",
+                intervalStartEpochMillis = period.startEpochMillis + slot * 300_000L,
+                intervalEndEpochMillis = period.startEpochMillis + (slot + 1) * 300_000L,
+                energyValue = (slot % 36).toDouble(),
+                recordedUnit = EnergyUnit.WH,
+            )
+        }
+        val day = presentEnergyHistory(
+            observations, emptyList(), emptyList(), EnergyPeriodType.DAY, date, period.endExclusiveEpochMillis,
+        ).days.single()
+
+        val groups = instrumentEnergyGroups(day)
+        assertEquals(8, groups.size)
+        assertEquals((0..7).map { it * 3 }, groups.map { it.hour })
+        assertTrue(groups.all { it.expected == 36 && it.usable == 36 })
+        assertEquals(day.usableEnergyValueWh, groups.sumOf { it.energyWh ?: 0.0 })
+    }
+
+    @Test fun homeGroupsDistinguishMeasuredZeroPartialSamplesAndFutureIntervals() {
+        val date = LocalDate.parse("2026-10-24")
+        val period = energyPeriodRange(EnergyPeriodType.DAY, date)
+        fun sample(slot: Int, value: Double?, unit: EnergyUnit? = if (value == null) null else EnergyUnit.WH,
+                   quality: ObservationQuality = if (value == null) ObservationQuality.MISSING_INTERVAL else ObservationQuality.NORMAL) =
+            Observation(
+                sampleId = "home-edge-$slot",
+                intervalStartEpochMillis = period.startEpochMillis + slot * 300_000L,
+                intervalEndEpochMillis = period.startEpochMillis + (slot + 1) * 300_000L,
+                energyValue = value,
+                recordedUnit = unit,
+                quality = quality,
+            )
+        val observations = (0 until 36).map { sample(it, 0.0) } + listOf(
+            sample(36, 7.0),
+            sample(37, null),
+            sample(38, 100.0, quality = ObservationQuality.ANOMALOUS),
+            sample(39, 55.0, unit = null),
+        )
+        val day = presentEnergyHistory(
+            observations,
+            emptyList(),
+            emptyList(),
+            EnergyPeriodType.DAY,
+            date,
+            period.startEpochMillis + 40 * 300_000L,
+        ).days.single()
+
+        val groups = instrumentEnergyGroups(day)
+        assertEquals(8, groups.size)
+        assertEquals(0.0, groups[0].energyWh)
+        assertEquals(36, groups[0].expected)
+        assertEquals(36, groups[0].usable)
+        assertEquals(7.0, groups[1].energyWh)
+        assertEquals(4, groups[1].expected)
+        assertEquals(1, groups[1].usable)
+        assertEquals(0, groups[2].expected)
+        assertEquals(0, groups[2].usable)
+        assertNull(groups[2].energyWh)
+        assertEquals(7.0, day.usableEnergyValueWh)
+    }
 }
