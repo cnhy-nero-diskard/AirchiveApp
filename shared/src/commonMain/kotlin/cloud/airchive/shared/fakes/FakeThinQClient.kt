@@ -45,6 +45,12 @@ class FakeThinQClient(
         mode = AcOperatingMode.COOL,
         fanSpeed = FanSpeed.LOW,
     )
+    private var liveReadTimestampEpochMillis = nowEpochMillis
+
+    /** Test-only clock seam for proving device-read freshness independently. */
+    fun setLiveReadTimestamp(epochMillis: Long) {
+        liveReadTimestampEpochMillis = epochMillis
+    }
 
     private val profile = ThinQDeviceProfile(
         deviceId = deviceId,
@@ -91,7 +97,7 @@ class FakeThinQClient(
 
     override suspend fun liveState(deviceId: String): ThinQLiveState {
         requireDevice(deviceId)
-        return live.copy(observedAtEpochMillis = nowEpochMillis)
+        return live.copy(observedAtEpochMillis = liveReadTimestampEpochMillis)
     }
 
     override suspend fun setState(command: AcCommand): CommandOutcome {

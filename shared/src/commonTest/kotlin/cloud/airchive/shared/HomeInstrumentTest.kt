@@ -3,6 +3,7 @@ package cloud.airchive.shared
 import cloud.airchive.shared.contract.thinq.*
 import cloud.airchive.shared.data.thinq.*
 import cloud.airchive.shared.data.energy.*
+import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.contract.history.*
 import cloud.airchive.shared.contract.telemetry.*
 import kotlin.time.Instant
@@ -187,5 +188,48 @@ class HomeInstrumentTest {
         assertEquals(0, groups[2].usable)
         assertNull(groups[2].energyWh)
         assertEquals(7.0, day.usableEnergyValueWh)
+    }
+
+    @Test fun independentFreshnessSourcesAdvanceWithControlledTimeWithoutUsingUnusableSamples() {
+        val date = LocalDate.parse("2026-10-24")
+        val period = energyPeriodRange(EnergyPeriodType.DAY, date)
+        val observations = listOf(
+            Observation("fresh-usable", period.startEpochMillis, period.startEpochMillis + 300_000L,
+                10.0, EnergyUnit.WH),
+            Observation("newer-anomalous", period.startEpochMillis + 300_000L,
+                period.startEpochMillis + 600_000L, 100.0, EnergyUnit.WH,
+                quality = ObservationQuality.ANOMALOUS),
+            Observation("newer-unknown-unit", period.startEpochMillis + 600_000L,
+                period.startEpochMillis + 900_000L, 25.0, null),
+            Observation("newer-failed-energy", period.startEpochMillis + 900_000L,
+                period.startEpochMillis + 1_200_000L, 30.0, EnergyUnit.WH,
+                energySourceFailure = cloud.airchive.shared.contract.telemetry.SourceReadFailure(
+                    ok = false, failureClass = "TRANSIENT",
+                )),
+        )
+        var controlledNow = period.startEpochMillis + 4 * 300_000L
+        val day = presentEnergyHistory(
+            observations, emptyList(), emptyList(), EnergyPeriodType.DAY, date, controlledNow,
+        ).days.single()
+        val latestUsable = latestUsableEnergyPoint(day)!!
+        val deviceReadAt = controlledNow - 30 * 60_000L
+        val syncAt = controlledNow - 5 * 60_000L
+        val history = HistorySnapshot(
+            partition = HistoryPartition("synthetic-project", "synthetic-owner", "synthetic-ac"),
+            observations = observations,
+            dailyTotals = emptyList(),
+            coveredRanges = emptyList(),
+            sync = SyncMetadata(lastSuccessfulSyncEpochMillis = syncAt),
+        )
+
+        assertEquals("fresh-usable", latestUsable.sampleId)
+        assertEquals("30 min", instrumentAge(controlledNow - deviceReadAt))
+        assertEquals("15 min", instrumentAge(controlledNow - latestUsable.intervalEndEpochMillis))
+        assertEquals(5 * 60_000L, presentHistorySync(history, controlledNow).lastSuccessfulAgeMillis)
+
+        controlledNow += 2 * 60_000L
+        assertEquals("32 min", instrumentAge(controlledNow - deviceReadAt))
+        assertEquals("17 min", instrumentAge(controlledNow - latestUsable.intervalEndEpochMillis))
+        assertEquals(7 * 60_000L, presentHistorySync(history, controlledNow).lastSuccessfulAgeMillis)
     }
 }

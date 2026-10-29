@@ -600,6 +600,73 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
+    @Test fun productionFreshnessUsesIndependentControlledDeviceSampleAndSyncTimes() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            clickText("Set up ThinQ PAT")
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            clickText("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
+            awaitNode { it.text?.toString() == "Latest usable sample 1 min ago" }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+
+            // Advance only the controlled clock. The rendered ages retain
+            // their separate device, usable-sample and history-sync origins.
+            scene.onActivity { fixture.get().clock.advanceBy(5 * 60_000L) }
+            clickText("Settings")
+            clickText("Home")
+            awaitNode { it.text?.toString() == "Device read 5 min ago" }
+            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
+            awaitNode { it.text?.toString() == "History synced 5 min ago" }
+
+            val telemetryBeforeRefresh = AtomicInteger()
+            scene.onActivity { telemetryBeforeRefresh.set(fixture.get().counters.telemetryReads.get()) }
+            clickText("Refresh history")
+            awaitTrue("manual history refresh reaches the isolated telemetry fake") {
+                fixture.get().counters.telemetryReads.get() > telemetryBeforeRefresh.get()
+            }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitNode { it.text?.toString() == "Device read 5 min ago" }
+            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
+
+            // Now only the fake device-read timestamp moves to the controlled
+            // clock; sampled-data and sync freshness remain independent.
+            val liveReadsBeforeDeviceEntry = AtomicInteger()
+            scene.onActivity {
+                liveReadsBeforeDeviceEntry.set(fixture.get().counters.thinQLiveStateReads.get())
+                fixture.get().setThinQLiveReadTimestamp(fixture.get().clock.now())
+            }
+            clickText("Device")
+            awaitTrue("Device route entry performs its own live read") {
+                fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeDeviceEntry.get()
+            }
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
+            clickText("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
+            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
+            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+
+            scene.onActivity { fixture.get().clock.advanceBy(2 * 60_000L) }
+            clickText("Settings")
+            clickText("Home")
+            awaitNode { it.text?.toString() == "Device read 2 min ago" }
+            awaitNode { it.text?.toString() == "Latest usable sample 8 min ago" }
+            awaitNode { it.text?.toString() == "History synced 2 min ago" }
+            assertEquals("freshness checks never submit device commands", 0,
+                fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun captureLightDarkAndLargeText() {
         val scale = InstrumentationRegistry.getArguments().getString("fontScale", "1.0")
         val previousMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java).nightMode

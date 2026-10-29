@@ -230,10 +230,16 @@ class SharedInstrumentShellFixture(context: Context) {
         ProductionAirchiveApp(
             coordinator = coordinator,
             accountController = accountController,
+            onManualRefresh = { scope.launch { coordinator.onManualRefresh(clock.now()) } },
             thinQBindings = bindings,
             interfacePreferences = interfacePreferences,
             nowProvider = clock::now,
         )
+    }
+
+    /** Advances the fake client's next live-read timestamp, never a real device. */
+    fun setThinQLiveReadTimestamp(epochMillis: Long) {
+        thinQ.setLiveReadTimestamp(epochMillis)
     }
 
     /** Releases the coordinator's session-observation scope; call from onDestroy. */
@@ -549,6 +555,11 @@ private class CountingThinQClient(
     private val gate: DeferredResponseGate,
 ) : ThinQPort {
     val delegateTypeName: String get() = delegate.javaClass.simpleName
+
+    fun setLiveReadTimestamp(epochMillis: Long) {
+        (delegate as? FakeThinQClient)?.setLiveReadTimestamp(epochMillis)
+            ?: error("The fixture ThinQ client is not the expected fake")
+    }
 
     override suspend fun listDevices(): List<ThinQDevice> {
         counters.thinQDeviceListReads.incrementAndGet()
