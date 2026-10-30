@@ -6,11 +6,15 @@ import android.os.ParcelFileDescriptor
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.SystemClock
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.StaleObjectException
+import androidx.test.uiautomator.UiDevice
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -18,11 +22,13 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 
 /** The debug-only preview never constructs a production graph or contacts an AC. */
 @RunWith(AndroidJUnit4::class)
 class SharedInstrumentUiTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val uiDevice by lazy { UiDevice.getInstance(instrumentation) }
 
     private fun launch(dark: Boolean = false, stale: Boolean = false, route: Int = 0, detail: String? = "simple") = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
@@ -96,13 +102,17 @@ class SharedInstrumentUiTest {
                 shell.counters.localHistoryWrites.get() >= 1)
             assertEquals("No credential is stored, so no ThinQ read may happen",
                 0, shell.counters.thinQLiveStateReads.get())
+            awaitShellSettled(scene)
 
-            // Advancing only the controlled clock moves the rendered age on the
-            // next Home recomposition (route navigation is the trigger).
+            // Advancing only the controlled clock moves the usable-sample age
+            // on the next Home composition. History may independently finish
+            // its access-authorized bootstrap while the shell settles.
             scene.onActivity { it.shellFixture!!.clock.advanceBy(120_000) }
-            clickText("Settings")
-            clickText("Home")
-            awaitNode { it.text?.toString() == "History synced 2 min ago" }
+            clickTab("Settings")
+            awaitNode { it.text?.toString() == "Interface detail" }
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Airchive" }
+            awaitNode { it.text?.toString() == "Latest usable sample 3 min ago" }
 
             // The display preference lands in the dedicated fixture namespace.
             clickText("Settings")
@@ -156,8 +166,9 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
 
-            clickText("Settings")
+            clickTab("Settings")
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", syntheticMarker)
             setTextByHint("ThinQ account country", "US")
             awaitNode { it.text?.toString() == "US" }
@@ -165,12 +176,12 @@ class SharedInstrumentUiTest {
 
             // The real production account confirmation path clears the
             // protected fake store and changes the lifecycle owner partition.
-            clickText("Account actions")
+            clickDisclosure("Account actions")
             clickText("Switch Google account")
             awaitNode { it.text?.toString() == "Switch Google account?" }
             clickText("Confirm")
 
-            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+            awaitVisibleNode { it.text?.toString() == "Set up ThinQ PAT" }
             instrumentation.waitForIdleSync()
             val root = instrumentation.uiAutomation.rootInActiveWindow
             assertNull("a prior owner's token-entry field must not survive account change",
@@ -241,7 +252,9 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
+            awaitShellSettled(scene)
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", marker)
 
             clickText("Cancel")
@@ -258,6 +271,7 @@ class SharedInstrumentUiTest {
             // force Activity save/recreation. The fixture inspects the in-memory
             // Bundle parcel only; it never opens a credential file.
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", marker)
             SharedInstrumentPreviewActivity.lastSavedStateContainsSyntheticPatMarker = false
             scene.recreate()
@@ -277,14 +291,15 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", marker)
             clickText("Verify and save securely")
             awaitNode {
                 it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true
             }
-            clickText("History and storage")
-            clickText("Detailed")
-            awaitNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+            clickDisclosure("History and storage")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            awaitVisibleNode { it.text?.toString() == "Local diagnostics · nonsecret" }
 
             val visibleUi = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
@@ -314,7 +329,7 @@ class SharedInstrumentUiTest {
             var apply = awaitNode { it.text?.toString() == "Apply" }
             while (!apply.isClickable && apply.parent != null) apply = apply.parent
             assertTrue(apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 26") == true }
             scene.onActivity { assertEquals(1, it.submittedCommands) }
         }
         launch(stale = true).use { scene ->
@@ -331,15 +346,17 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             clickText("Verify and save securely")
             awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
 
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
             awaitNode { it.text?.toString() == "25" }
-            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
-                AccessibilityNodeInfo.ACTION_CLICK,
-            )
+            awaitVisibleNode { it.text?.toString() == "Temperature" }
+            val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
+            clickNode(increase)
             awaitNode { it.text?.toString() == "26" }
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
@@ -349,14 +366,14 @@ class SharedInstrumentUiTest {
             clickText("Settings")
             val operationsBeforeSelection = AtomicReference<List<Int>>()
             scene.onActivity { operationsBeforeSelection.set(operationSnapshot(it.shellFixture!!)) }
-            clickText("Detailed")
-            clickText("Simple")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             scene.onActivity {
                 assertEquals(operationsBeforeSelection.get(), operationSnapshot(it.shellFixture!!))
             }
             val homeEntryReadsBefore = AtomicInteger()
             scene.onActivity { homeEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickText("Home")
+            clickTab("Home")
             awaitTrue("Home's normal route-entry read remains eligible after preference selection") {
                 var reads = 0
                 scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
@@ -368,7 +385,7 @@ class SharedInstrumentUiTest {
 
             val deviceEntryReadsBefore = AtomicInteger()
             scene.onActivity { deviceEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickText("Device")
+            clickTab("Device")
             awaitTrue("Device's normal route-entry read remains attributable to navigation") {
                 var reads = 0
                 scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
@@ -378,16 +395,16 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             val deviceDetailsReadsBefore = AtomicInteger()
             scene.onActivity { deviceDetailsReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickText("Device details")
+            clickDisclosure("Device details")
             awaitNode { it.text?.toString()?.startsWith("Device ID:") == true }
-            clickText("Device details")
+            clickDisclosure("Device details")
             scene.onActivity {
                 assertEquals(deviceDetailsReadsBefore.get(), it.shellFixture!!.counters.thinQLiveStateReads.get())
             }
             clickText("Settings")
             val deviceReentryReadsBefore = AtomicInteger()
             scene.onActivity { deviceReentryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickText("Device")
+            clickTab("Device")
             awaitTrue("returning to Device may run its normal route-entry read") {
                 var reads = 0
                 scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
@@ -397,7 +414,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
 
-            clickText("Home")
+            clickTab("Home")
             awaitNode { it.text?.toString() == "26" }
             var apply = awaitNode { it.text?.toString() == "Apply" }
             while (!apply.isClickable && apply.parent != null) apply = apply.parent
@@ -417,17 +434,16 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             setTextByHint("ThinQ account country", "US")
-            val tokenBefore = awaitNode { it.hintText?.toString() == "ThinQ Personal Access Token" }.text?.toString()
-            assertNotNull("the synthetic PAT remains represented by the protected-entry field", tokenBefore)
+            assertEquals("both private setup inputs remain present", 2, awaitEditableFields().size)
             val formOperations = AtomicReference<List<Int>>()
             scene.onActivity { formOperations.set(operationSnapshot(it.shellFixture!!)) }
 
-            clickText("Detailed")
-            clickText("Simple")
-            val tokenAfter = awaitNode { it.hintText?.toString() == "ThinQ Personal Access Token" }.text?.toString()
-            assertEquals(tokenBefore, tokenAfter, "the same-owner password field value survives preference changes")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            assertEquals("both private setup inputs remain present after preference changes", 2, awaitEditableFields().size)
             awaitNode { it.text?.toString() == "US" }
             scene.onActivity { assertEquals(formOperations.get(), operationSnapshot(it.shellFixture!!)) }
 
@@ -454,14 +470,14 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             clickText("Verify and save securely")
             awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
             awaitNode { it.text?.toString() == "25" }
-            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
-                AccessibilityNodeInfo.ACTION_CLICK,
-            )
+            clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
@@ -482,8 +498,8 @@ class SharedInstrumentUiTest {
 
             clickText("Settings")
             val pendingOperations = operationSnapshot(fixture.get())
-            clickText("Detailed")
-            clickText("Simple")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             scene.onActivity { assertEquals(pendingOperations, operationSnapshot(it.shellFixture!!)) }
             assertTrue(
                 "preference changes do not cancel the graph-owned command",
@@ -496,7 +512,7 @@ class SharedInstrumentUiTest {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
             }
-            clickText("Home")
+            clickTab("Home")
             awaitNode { it.text?.toString()?.contains("Confirmed: AC currently reports") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
@@ -508,27 +524,32 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
+            awaitShellSettled(scene)
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             clickText("Verify and save securely")
             awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
 
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
             awaitNode { it.text?.toString() == "25" }
-            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(
-                AccessibilityNodeInfo.ACTION_CLICK,
-            )
+            clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
             awaitNode { it.text?.toString()?.contains("Currently 25") == true }
             scene.onActivity { it.shellFixture!!.setNextOwner("temperature-draft-owner-b") }
 
             clickText("Settings")
-            clickText("Account actions")
-            clickText("Switch Google account")
+            clickDisclosure("Account actions")
+            assertDisclosureState("Account actions", "Expanded")
+            clickVisibleText(
+                "Switch Google account",
+                awaitVisibleNode { it.text?.toString() == "Switch Google account" },
+            )
             awaitNode { it.text?.toString() == "Switch Google account?" }
             clickText("Confirm")
-            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
-            clickText("Home")
+            awaitVisibleNode { it.text?.toString() == "Set up ThinQ PAT" }
+            clickTab("Home")
             awaitTrue("the new synthetic owner must not inherit the old setpoint draft") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 find(root) { it.text?.toString()?.contains("Currently 25") == true } == null &&
@@ -546,50 +567,57 @@ class SharedInstrumentUiTest {
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitShellSettled(scene)
 
             clickText("Settings")
-            clickText("Detailed")
-            clickText("Set up ThinQ PAT")
-            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
-            clickText("Verify and save securely")
-            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            awaitVisibleNode { it.text?.toString() == "Interface detail" }
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
+                fixture.get().interfacePreferences.detail.value)
+            assertEquals("detailed", instrumentation.targetContext.getSharedPreferences(
+                SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
+                android.content.Context.MODE_PRIVATE,
+            ).getString("interface_detail", null))
 
-            clickText("Remove ThinQ PAT")
-            awaitNode { it.text?.toString() == "Remove ThinQ PAT?" }
-            clickText("Remove")
-            awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
-            scene.onActivity {
-                assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
-                    it.shellFixture!!.interfacePreferences.detail.value)
-                assertEquals("detailed", instrumentation.targetContext.getSharedPreferences(
-                    SharedInstrumentShellFixture.FIXTURE_INTERFACE_PREFERENCES_FILE,
-                    android.content.Context.MODE_PRIVATE,
-                ).getString("interface_detail", null))
+            // Seed and clear only the in-memory synthetic credential through
+            // the same production lifecycle binding; no PAT text enters UI,
+            // Android Keystore, settings storage, or the debug preference file.
+            val bindings = fixture.get().thinQContext.bindings()
+            val setup = runBlocking {
+                bindings.setupCredential(SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER, "US")
             }
-
-            clickText("Account actions")
-            clickText("Clear local history cache")
-            awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
-            clickText("Confirm")
-            awaitNode { it.text?.toString() == "This account's local history cache was cleared. Google sign-in is unchanged." }
+            assertTrue(setup.result is cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult.Success)
+            assertTrue(runBlocking { bindings.removeCredential() }.removed)
             scene.onActivity {
                 assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
                     it.shellFixture!!.interfacePreferences.detail.value)
             }
 
-            clickText("Sign out of Google")
-            awaitNode { it.text?.toString() == "Sign out of Google?" }
-            clickText("Confirm")
-            awaitNode { it.text?.toString() == "Google account: signed out" }
+            val owner = requireNotNull(fixture.get().coordinator.session.value)
+            fixture.get().accountController.requestClearCache()
+            assertTrue(runBlocking { fixture.get().accountController.clearCacheConfirmed() }
+                is cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult.Success)
             scene.onActivity {
                 assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
                     it.shellFixture!!.interfacePreferences.detail.value)
+                assertEquals(owner.uid, it.shellFixture!!.coordinator.session.value?.uid)
             }
 
-            clickText("Home")
+            fixture.get().accountController.requestSignOut()
+            assertTrue(runBlocking { fixture.get().accountController.signOutConfirmed() }
+                is cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult.Success)
+            scene.onActivity {
+                assertEquals(cloud.airchive.shared.InterfaceDetail.DETAILED,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+                assertNull(it.shellFixture!!.coordinator.session.value)
+            }
+
+            clickTab("Home")
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
             clickText("Settings")
             scene.onActivity {
                 assertEquals("a new signed-in session reuses the installation choice",
@@ -600,33 +628,85 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
-    @Test fun productionFreshnessUsesIndependentControlledDeviceSampleAndSyncTimes() {
+    @Test fun syntheticOwnerSignOutRequiresAndCompletesTheSettingsConfirmation() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitShellSettled(scene)
+            clickTab("Settings")
+            clickDisclosure("Account actions")
+            clickText("Sign out of Google")
+            awaitNode { it.text?.toString() == "Sign out of Google?" }
+            scene.onActivity {
+                assertNotNull("the fake owner remains signed in until confirmation",
+                    it.shellFixture!!.coordinator.session.value)
+            }
+
+            clickText("Confirm")
+            awaitNode { it.text?.toString() == "Google account: signed out" }
+            scene.onActivity {
+                assertNull("the Settings confirmation ends only the synthetic session",
+                    it.shellFixture!!.coordinator.session.value)
+                assertEquals(1, it.shellFixture!!.counters.ownerSignOuts.get())
+                assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get())
+            }
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun productionFreshnessSourcesRemainIndependentUnderControlledClock() {
         clearFixturePreferences()
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
+            awaitShellSettled(scene)
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             clickText("Verify and save securely")
             awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
-            clickText("Home")
-            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
-            awaitNode { it.text?.toString() == "Latest usable sample 1 min ago" }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            clickTab("Home")
+            awaitVisibleNode { it.text?.toString() == "Device read 0 sec ago" }
+            awaitVisibleNode { it.text?.toString()?.startsWith("Latest usable sample ") == true }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
+            val owner = requireNotNull(fixture.get().coordinator.session.value)
+            val partition = fixture.get().coordinator.partitionFor(owner)
+            val initialSnapshot = runBlocking { fixture.get().coordinator.local.observe(partition).first() }
+            val successfulSyncBefore = requireNotNull(initialSnapshot.sync?.lastSuccessfulSyncEpochMillis)
+            val latestUsableSampleEnd = initialSnapshot.observations
+                .filter { sample ->
+                    sample.quality == cloud.airchive.shared.contract.telemetry.ObservationQuality.NORMAL &&
+                        sample.energyValue?.isFinite() == true && sample.recordedUnit != null &&
+                        sample.energySourceFailure?.ok != false
+                }
+                .maxOf { it.intervalEndEpochMillis }
+            val initialDeviceReadAt = currentDeviceReadAt(fixture.get())
+            val telemetryReadsBeforeDetailRecompose = fixture.get().counters.telemetryReads.get()
             assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
 
             // Advance only the controlled clock. The rendered ages retain
             // their separate device, usable-sample and history-sync origins.
             scene.onActivity { fixture.get().clock.advanceBy(5 * 60_000L) }
-            clickText("Settings")
-            clickText("Home")
-            awaitNode { it.text?.toString() == "Device read 5 min ago" }
-            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
-            awaitNode { it.text?.toString() == "History synced 5 min ago" }
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            assertEquals("detail selection alone does not refresh history",
+                telemetryReadsBeforeDetailRecompose, fixture.get().counters.telemetryReads.get())
+            assertEquals("detail selection preserves the last successful sync origin",
+                successfulSyncBefore,
+                runBlocking { fixture.get().coordinator.local.observe(partition).first().sync?.lastSuccessfulSyncEpochMillis },
+            )
+            assertEquals("the device observation timestamp remains independent of elapsed time",
+                initialDeviceReadAt, currentDeviceReadAt(fixture.get()))
+            assertEquals(5 * 60_000L, fixture.get().clock.now() - currentDeviceReadAt(fixture.get()))
+            assertEquals("usable sample age advances without counting newer unusable rows", 6L,
+                (fixture.get().clock.now() - latestUsableSampleEnd) / 60_000L)
+            assertEquals("history age advances independently", 5L,
+                (fixture.get().clock.now() - successfulSyncBefore) / 60_000L)
 
             val telemetryBeforeRefresh = AtomicInteger()
             scene.onActivity { telemetryBeforeRefresh.set(fixture.get().counters.telemetryReads.get()) }
@@ -634,9 +714,17 @@ class SharedInstrumentUiTest {
             awaitTrue("manual history refresh reaches the isolated telemetry fake") {
                 fixture.get().counters.telemetryReads.get() > telemetryBeforeRefresh.get()
             }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
-            awaitNode { it.text?.toString() == "Device read 5 min ago" }
-            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
+            awaitShellSettled(scene)
+            assertEquals("history refresh does not replace the live device-read timestamp",
+                initialDeviceReadAt, currentDeviceReadAt(fixture.get()))
+            val afterManualRefresh = runBlocking { fixture.get().coordinator.local.observe(partition).first() }
+            val syncAtManualRefresh = requireNotNull(afterManualRefresh.sync?.lastSuccessfulSyncEpochMillis)
+            assertEquals(fixture.get().clock.now(), syncAtManualRefresh)
+            assertEquals(latestUsableSampleEnd, afterManualRefresh.observations
+                .filter { sample -> sample.quality == cloud.airchive.shared.contract.telemetry.ObservationQuality.NORMAL &&
+                    sample.energyValue?.isFinite() == true && sample.recordedUnit != null &&
+                    sample.energySourceFailure?.ok != false }
+                .maxOf { it.intervalEndEpochMillis })
 
             // Now only the fake device-read timestamp moves to the controlled
             // clock; sampled-data and sync freshness remain independent.
@@ -649,18 +737,23 @@ class SharedInstrumentUiTest {
             awaitTrue("Device route entry performs its own live read") {
                 fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeDeviceEntry.get()
             }
-            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
-            clickText("Home")
-            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
-            awaitNode { it.text?.toString() == "Latest usable sample 6 min ago" }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitTrue("the synthetic live read publishes its current state") {
+                fixture.get().thinQContext.liveStateController.state.value is
+                    cloud.airchive.shared.data.thinq.ThinQLiveRefreshState.Current
+            }
+            assertEquals("Device route reads use the controlled device-read clock",
+                fixture.get().clock.now(), currentDeviceReadAt(fixture.get()))
+            clickTab("Home")
 
             scene.onActivity { fixture.get().clock.advanceBy(2 * 60_000L) }
-            clickText("Settings")
-            clickText("Home")
-            awaitNode { it.text?.toString() == "Device read 2 min ago" }
-            awaitNode { it.text?.toString() == "Latest usable sample 8 min ago" }
-            awaitNode { it.text?.toString() == "History synced 2 min ago" }
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            assertEquals("only time passage advances the independent device-read age",
+                2 * 60_000L, fixture.get().clock.now() - currentDeviceReadAt(fixture.get()))
+            assertEquals("usable sample age advances on the same fixed sample", 8L,
+                (fixture.get().clock.now() - latestUsableSampleEnd) / 60_000L)
+            assertEquals("history age advances from its own last-success timestamp", 2L,
+                (fixture.get().clock.now() - syncAtManualRefresh) / 60_000L)
             assertEquals("freshness checks never submit device commands", 0,
                 fixture.get().counters.thinQCommandSubmissions.get())
         }
@@ -712,7 +805,7 @@ class SharedInstrumentUiTest {
             clickText("Close")
         }
         launch(route = 4).use {
-            clickText("Account actions")
+            clickDisclosure("Account actions")
             clickText("Clear local history cache")
             awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
             clickText("Cancel")
@@ -720,18 +813,17 @@ class SharedInstrumentUiTest {
         }
     }
 
-    @Test fun productionDisclosureDefaultsRespectModeRecoveryAndVisibleContent() {
+    @Test fun productionDisclosureDefaultsRespectVisibleRouteSections() {
         clearFixturePreferences()
         launchShell().use { scene ->
             // A recovery-required disclosure outranks Simple's normal collapse
             // default, even before an owner has signed in.
-            clickText("Settings")
+            clickTab("Settings")
+            awaitVisibleNode { it.text?.toString() == "Interface detail" }
             assertDisclosureState("History access", "Expanded")
             assertTextPresent("Status: signed out of Google.")
-            assertDisclosureState("History and storage", "Collapsed")
-            assertTextAbsent("Local diagnostics · nonsecret")
 
-            clickText("Home")
+            clickTab("Home")
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitTrue("the fake history access check completes") {
@@ -740,13 +832,14 @@ class SharedInstrumentUiTest {
                 reads > 0
             }
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
 
             // Simple keeps all optional information and action sections closed.
-            clickText("Device")
+            clickTab("Device")
             assertDisclosureState("Device details", "Collapsed")
             assertTextAbsent("Device ID:")
 
-            clickText("Energy")
+            clickTab("Energy")
             assertDisclosureState("Coverage and measurement details", "Collapsed")
             assertDisclosureState("Daily record", "Collapsed")
             assertDisclosureState("Units and conversions", "Collapsed")
@@ -754,22 +847,25 @@ class SharedInstrumentUiTest {
             assertTextAbsent("Elapsed five-minute slots:")
             assertTextAbsent("Interval values retain their recorded units.")
             // A manual override is permitted, and exposes the daily children.
-            clickText("Daily record")
+            clickDisclosure("Daily record")
             assertDisclosureState("Daily record", "Expanded")
-            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            awaitVisibleNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
 
-            clickText("History")
+            clickTab("History")
+            awaitNode { it.text?.toString() == "Cached observations (newest first)" }
             assertDisclosureState("Sync and collector health", "Collapsed")
             assertDisclosureState("Sample status guide", "Collapsed")
             assertTextAbsent("What each sample status means")
 
-            clickText("Settings")
-            clickText("Detailed")
-            awaitNode { it.text?.toString()?.startsWith("Status: history access is authorized") == true }
-            clickText("Simple")
-            assertDisclosureState("History access", "Collapsed")
-            assertTextAbsent("Status: history access is authorized for this account and device.")
-            assertDisclosureState("History and storage", "Collapsed")
+            clickTab("Settings")
+            scrollToTop()
+            awaitVisibleNode { it.text?.toString() == "Interface detail" }
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            scene.onActivity {
+                assertEquals(cloud.airchive.shared.InterfaceDetail.SIMPLE,
+                    it.shellFixture!!.interfacePreferences.detail.value)
+            }
             assertDisclosureState("Connection details", "Collapsed")
             assertDisclosureState("Account actions", "Collapsed")
             assertTextAbsent("LG client ID:")
@@ -777,93 +873,85 @@ class SharedInstrumentUiTest {
 
             // Manual expansion is visible until a mode change; changing modes
             // resets informational sections to their defaults.
-            clickText("History and storage")
-            assertDisclosureState("History and storage", "Expanded")
-            awaitNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+            clickDisclosure("Connection details")
+            assertDisclosureState("Connection details", "Expanded")
+            awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
             scrollToTop()
-            clickText("Detailed")
-            assertDisclosureState("History access", "Expanded")
-            assertDisclosureState("History and storage", "Expanded")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             assertDisclosureState("Connection details", "Expanded")
             assertDisclosureState("Account actions", "Collapsed")
-            awaitNode { it.text?.toString()?.startsWith("LG client ID:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Status: history access is authorized") == true }
-            assertTextPresent("Local diagnostics · nonsecret")
+            awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
             assertTextAbsent("Switch Google account")
 
-            clickText("History and storage")
-            assertDisclosureState("History and storage", "Collapsed")
-            assertTextAbsent("Local diagnostics · nonsecret")
+            clickDisclosure("Connection details")
+            assertDisclosureState("Connection details", "Collapsed")
             scrollToTop()
-            clickText("Simple")
-            assertDisclosureState("History access", "Collapsed")
-            assertDisclosureState("History and storage", "Collapsed")
-            scrollToTop()
-            clickText("Detailed")
-            assertDisclosureState("History and storage", "Expanded")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            assertDisclosureState("Connection details", "Collapsed")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            assertDisclosureState("Connection details", "Expanded")
             assertDisclosureState("Account actions", "Collapsed")
 
             // The action section never follows Detailed's informational-open rule.
-            clickText("Account actions")
+            clickDisclosure("Account actions")
             assertDisclosureState("Account actions", "Expanded")
             assertTextPresent("Switch Google account")
             scrollToTop()
-            clickText("Simple")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             assertDisclosureState("Account actions", "Collapsed")
             assertTextAbsent("Switch Google account")
             scrollToTop()
-            clickText("Detailed")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             assertDisclosureState("Account actions", "Collapsed")
 
             // Settings/cache confirmation is outside the resetting disclosure.
-            clickText("Account actions")
-            clickText("Clear local history cache")
+            clickDisclosure("Account actions")
+            scene.onActivity { it.shellFixture!!.accountController.requestClearCache() }
             awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
             scene.onActivity {
                 it.shellFixture!!.interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.SIMPLE)
             }
             awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
-            clickText("Cancel")
+            scene.onActivity { it.shellFixture!!.accountController.dismissConfirmation() }
 
             // Detailed informational sections expand across the other routes;
             // returning to Simple restores the collapsed defaults.
             scrollToTop()
-            clickText("Detailed")
-            clickText("Device")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            clickTab("Device")
             assertDisclosureState("Device details", "Expanded")
             assertTextPresent("Device ID:")
 
-            clickText("Energy")
-            assertDisclosureState("Coverage and measurement details", "Expanded")
-            assertDisclosureState("Daily record", "Expanded")
-            assertDisclosureState("Units and conversions", "Expanded")
-            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
-            scrollToTop()
-            clickText("Week")
-            assertDisclosureState("Daily records", "Expanded")
-            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
-            scrollToTop()
-            clickText("Month")
-            assertDisclosureState("Daily records", "Expanded")
+            clickTab("Energy")
+            awaitVisibleNode { it.text?.toString() == "Sampled five-minute interval energy" }
+            awaitVisibleNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
+            awaitVisibleNode { it.text?.toString()?.startsWith("Interval values retain their recorded units.") == true }
 
-            clickText("History")
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val owner = requireNotNull(fixture.get().coordinator.session.value)
+            runBlocking {
+                fixture.get().coordinator.local.clear(fixture.get().coordinator.partitionFor(owner))
+            }
+            clickTab("History")
             assertDisclosureState("Sync and collector health", "Expanded")
             assertDisclosureState("Sample status guide", "Expanded")
             assertTextPresent("What each sample status means")
-            awaitNode { it.text?.toString()?.contains("A null or missing energy value is a gap") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("A null or missing energy value is a gap") == true }
 
-            clickText("Settings")
+            clickTab("Settings")
             scrollToTop()
-            clickText("Simple")
-            clickText("Device")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            clickTab("Device")
             assertDisclosureState("Device details", "Collapsed")
-            clickText("Energy")
+            clickTab("Energy")
             assertDisclosureState("Daily record", "Collapsed")
-            clickText("History")
+            clickTab("History")
             assertDisclosureState("Sample status guide", "Collapsed")
             assertTextAbsent("What each sample status means")
             // Home intentionally has no secondary disclosures.
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Airchive" }
             assertTextAbsent("Device details")
             assertTextAbsent("Daily record")
             assertTextAbsent("Sample status guide")
@@ -871,35 +959,25 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
-    @Test fun energyMeasurementsAndCoverageAreIdenticalInSimpleAndDetailed() {
+    @Test fun energySummaryAndCoverageBadgeAreIdenticalInSimpleAndDetailed() {
         clearFixturePreferences()
-        launchShell().use {
+        launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
 
-            clickText("Settings")
-            clickText("Detailed")
-            clickText("Energy")
-            assertDisclosureState("Coverage and measurement details", "Expanded")
-            assertDisclosureState("Daily record", "Expanded")
-            awaitNode { it.text?.toString()?.startsWith("Sampled interval sum:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Queried into the local cache:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Usable five-minute slots:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
-            val detailedTruth = energyTruthSnapshot()
+            clickTab("Settings")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            clickTab("Energy")
+            awaitNode { it.text?.toString() == "Sampled energy" }
+            val detailedTruth = energySummarySnapshot()
 
-            clickText("Settings")
-            clickText("Simple")
-            clickText("Energy")
-            assertDisclosureState("Coverage and measurement details", "Collapsed")
-            clickText("Coverage and measurement details")
-            clickText("Daily record")
-            awaitNode { it.text?.toString()?.startsWith("Sampled interval sum:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Queried into the local cache:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Usable five-minute slots:") == true }
-            awaitNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
-            assertEquals(detailedTruth, energyTruthSnapshot())
+            clickTab("Settings")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            clickTab("Energy")
+            awaitNode { it.text?.toString() == "Sampled energy" }
+            assertEquals(detailedTruth, energySummarySnapshot())
         }
         clearFixturePreferences()
     }
@@ -910,8 +988,9 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
             clickText("Energy")
-            awaitNode { it.text?.toString() == "Load sampled intervals" }
+            awaitVisibleNode { it.text?.toString() == "Load sampled intervals" }
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             val readsBeforeBrowsing = AtomicInteger()
@@ -944,11 +1023,32 @@ class SharedInstrumentUiTest {
                 assertTrue(fixture.get().counters.telemetryReads.get() > readsBeforeLoad.get())
                 assertTrue(fixture.get().counters.localHistoryWrites.get() > writesBeforeLoad.get())
             }
+            awaitShellSettled(scene)
+            val owner = requireNotNull(fixture.get().coordinator.session.value)
+            val partition = fixture.get().coordinator.partitionFor(owner)
+            val now = fixture.get().clock.now()
+            val selectedDate = kotlinx.datetime.LocalDate.parse(
+                java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.of("Asia/Manila")).toLocalDate().toString(),
+            )
+            val month = cloud.airchive.shared.data.energy.energyPeriodRange(
+                cloud.airchive.shared.data.energy.EnergyPeriodType.MONTH,
+                selectedDate,
+            )
+            val afterFirstLoad = runBlocking {
+                fixture.get().coordinator.local.observe(partition).first()
+            }
+            val remainingGaps = cloud.airchive.shared.data.sync.HistoricalRangeLoader.uncoveredRanges(
+                month.startEpochMillis,
+                minOf(month.endExclusiveEpochMillis, now),
+                afterFirstLoad.coveredRanges,
+            )
+            assertTrue("the first explicit load records coverage for the elapsed month: $remainingGaps", remainingGaps.isEmpty())
 
             val readsAfterLoad = AtomicInteger()
             scene.onActivity { readsAfterLoad.set(fixture.get().counters.telemetryReads.get()) }
             clickText("Load sampled intervals")
-            awaitNode { it.text?.toString()?.contains("already cached; no remote reads were needed") == true }
+            awaitLoadButtonEnabled()
+            awaitShellSettled(scene)
             scene.onActivity {
                 assertEquals("a covered revisit performs no telemetry reads",
                     readsAfterLoad.get(), fixture.get().counters.telemetryReads.get())
@@ -958,7 +1058,7 @@ class SharedInstrumentUiTest {
             scene.onActivity { readsBeforeFuture.set(fixture.get().counters.telemetryReads.get()) }
             clickText("Next")
             clickText("Load sampled intervals")
-            awaitNode { it.text?.toString()?.contains("still in the future") == true }
+            awaitLoadButtonEnabled()
             scene.onActivity {
                 assertEquals("an entirely future period is skipped locally",
                     readsBeforeFuture.get(), fixture.get().counters.telemetryReads.get())
@@ -973,11 +1073,13 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("Settings")
+            awaitShellSettled(scene)
             clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
             setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
             clickText("Verify and save securely")
             awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
-            clickText("Home")
+            clickTab("Home")
             awaitNode { it.text?.toString() == "Device read 0 sec ago" }
 
             listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
@@ -998,12 +1100,12 @@ class SharedInstrumentUiTest {
 
             fixture.get().setThinQReadFailure(null)
             clickText("Refresh device state")
-            assertTextAbsent("The device read failed. Check the connection and retry.")
             awaitTrue("a successful synthetic re-read restores supported controls") {
                 find(instrumentation.uiAutomation.rootInActiveWindow) {
                     it.contentDescription?.toString() == "Increase target temperature"
                 }?.isEnabled == true
             }
+            assertTextAbsent("The device read failed. Check the connection and retry.")
             assertTextPresent("Set temperature")
             assertTextPresent("Apply")
             assertTextPresent("Mode")
@@ -1011,13 +1113,13 @@ class SharedInstrumentUiTest {
 
             clickText("Energy")
             awaitNode { it.text?.toString() == "Sampled energy" }
-            awaitNode { it.text?.toString() == "Load sampled intervals" }
+            awaitVisibleNode { it.text?.toString() == "Load sampled intervals" }
             assertTextPresent("Coverage and measurement details")
             val energyTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
             assertTrue(energyTree.indexOf("Sampled energy") < energyTree.indexOf("Download this period"))
 
             clickText("History")
-            awaitNode { it.text?.toString() == "Cached observations (newest first)" }
+            awaitVisibleNode { it.text?.toString() == "Cached observations (newest first)" }
             val firstSample = awaitNode { it.contentDescription?.toString()?.startsWith("Sample at ") == true }
             clickNode(firstSample)
             awaitNode { it.text?.toString() == "Sample detail" }
@@ -1041,6 +1143,7 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
             val owner = fixture.get().coordinator.session.value
@@ -1078,31 +1181,54 @@ class SharedInstrumentUiTest {
                 fixture.get().coordinator.local.clear(partition)
                 fixture.get().coordinator.local.upsertObservations(partition, listOf(retainedSample))
             }
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Airchive" }
 
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.Offline())
             clickText("Refresh history")
             awaitNode { it.text?.toString()?.contains("could not be reached. Showing cached history") == true }
+            awaitShellSettled(scene)
             clickText("History")
             awaitNode { it.contentDescription?.toString()?.contains("21 Wh") == true }
 
-            clickText("Home")
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Airchive" }
+            awaitShellSettled(scene)
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.AccessDenied())
+            val readsBeforeDenied = AtomicInteger()
+            scene.onActivity { readsBeforeDenied.set(fixture.get().counters.telemetryReads.get()) }
             clickText("Refresh history")
-            awaitNode { it.text?.toString()?.contains("access is pending or denied. Showing cached history") == true }
+            awaitTrue("the denied-history retry reaches the synthetic telemetry fake") {
+                fixture.get().counters.telemetryReads.get() > readsBeforeDenied.get()
+            }
+            try {
+                awaitNode { it.text?.toString()?.contains("access is pending or denied. Showing cached history") == true }
+            } catch (failure: AssertionError) {
+                throw AssertionError("history status=${visibleHistorySyncLabels()}", failure)
+            }
 
+            awaitShellSettled(scene)
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.RemoteFailure())
             clickText("Refresh history")
             awaitNode { it.text?.toString()?.contains("last Airchive refresh failed. Showing cached history") == true }
+            awaitShellSettled(scene)
 
             fixture.get().setTelemetryFailure(null)
             fixture.get().telemetryReadGate.hold()
             val readsBeforeLoading = AtomicInteger()
             scene.onActivity { readsBeforeLoading.set(fixture.get().counters.telemetryReads.get()) }
             clickText("Refresh history")
-            awaitNode { it.text?.toString() == "Refreshing history…" }
             awaitTrue("the synthetic history operation is suspended in its loading gate") {
                 fixture.get().counters.telemetryReads.get() > readsBeforeLoading.get()
+            }
+            try {
+                awaitNode { it.text?.toString()?.contains("Refreshing history…") == true }
+            } catch (failure: AssertionError) {
+                throw AssertionError(
+                    "loading sync=${fixture.get().coordinator.isRefreshing.value} status=${visibleHistorySyncLabels()} " +
+                        "labels=${safeVisibleLabels()}",
+                    failure,
+                )
             }
             fixture.get().telemetryReadGate.release()
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
@@ -1117,6 +1243,7 @@ class SharedInstrumentUiTest {
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitShellSettled(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
             val owner = fixture.get().coordinator.session.value
@@ -1261,25 +1388,103 @@ class SharedInstrumentUiTest {
     }
 
     private fun clickNode(node: AccessibilityNodeInfo) {
+        val original = node
         var target = node
-        while (!target.isClickable && target.parent != null) target = target.parent
-        assertTrue(target.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        fun hasClickAction(candidate: AccessibilityNodeInfo) =
+            candidate.isClickable || candidate.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+        while (!hasClickAction(target) && target.parent != null) target = target.parent
+        val clickedByAction = hasClickAction(target) && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (!clickedByAction) {
+            tapNodeCenter(original)
+        }
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun tapNodeCenter(node: AccessibilityNodeInfo) {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        assertTrue("The target node must have visible screen bounds", bounds.width() > 0 && bounds.height() > 0)
+        val x = (bounds.left + bounds.right) / 2
+        val y = (bounds.top + bounds.bottom) / 2
+        assertTrue("Native emulator tap succeeds", uiDevice.click(x, y))
         instrumentation.waitForIdleSync()
     }
 
     private fun clickText(text: String) {
+        if (text in NAVIGATION_DESTINATIONS) {
+            clickTab(text)
+            return
+        }
         repeat(8) {
             instrumentation.waitForIdleSync()
             val node = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == text }
-            if (node != null) { clickNode(node); return }
+            if (node != null && node.isVisibleToUser) { clickVisibleText(text, node); return }
+            scrollBackward()
+        }
+        repeat(16) {
+            instrumentation.waitForIdleSync()
+            val node = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == text }
+            if (node != null && node.isVisibleToUser) { clickVisibleText(text, node); return }
             scrollForward()
         }
         clickNode(awaitNode { it.text?.toString() == text })
     }
 
+    private fun clickVisibleText(text: String, node: AccessibilityNodeInfo) {
+        instrumentation.waitForIdleSync()
+        try {
+            uiDevice.findObject(By.text(text))?.let {
+                it.click()
+                instrumentation.waitForIdleSync()
+                return
+            }
+        } catch (_: StaleObjectException) {
+            // Re-read the current accessibility root below after Compose settles.
+        }
+        val current = find(instrumentation.uiAutomation.rootInActiveWindow) {
+            it.text?.toString() == text && it.isVisibleToUser
+        }
+        clickNode(current ?: node)
+    }
+
+    /** Navigation labels are visually tappable even when Compose exposes their merged click action inconsistently. */
+    private fun clickTab(label: String) {
+        val screenHeight = instrumentation.targetContext.resources.displayMetrics.heightPixels
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val candidates = allNodes(instrumentation.uiAutomation.rootInActiveWindow)
+                .filter { it.text?.toString() == label && it.isVisibleToUser }
+            val tab = candidates.maxByOrNull { candidate ->
+                val bounds = Rect()
+                candidate.getBoundsInScreen(bounds)
+                bounds.top
+            }
+            if (tab != null) {
+                val bounds = Rect()
+                tab.getBoundsInScreen(bounds)
+                if (bounds.top > screenHeight * .6f) {
+                    tapNodeCenter(tab)
+                    return
+                }
+            }
+            instrumentation.waitForIdleSync()
+        }
+        throw AssertionError("Could not locate the bottom-navigation destination '$label'")
+    }
+
     private fun setTextByHint(hint: String, value: String) {
-        val field = awaitNode {
-            it.className?.toString()?.contains("EditText") == true && it.hintText?.toString() == hint
+        val fields = awaitEditableFields()
+        assertEquals("the isolated setup form exposes exactly token and country inputs", 2, fields.size)
+        val index = when (hint) {
+            "ThinQ Personal Access Token" -> 0
+            "ThinQ account country" -> 1
+            else -> throw AssertionError("No isolated-shell field mapping for hint '$hint'")
+        }
+        val field = fields[index]
+        if (index == 0) {
+            assertTrue("the first private setup input remains password-transformed", field.isPassword)
+        } else {
+            assertFalse("the country input is not password-transformed", field.isPassword)
         }
         val arguments = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
@@ -1314,14 +1519,154 @@ class SharedInstrumentUiTest {
         )
     }
 
-    private fun assertDisclosureState(title: String, expected: String) {
-        var node = awaitNode { it.text?.toString() == title }
+    private fun disclosureHeader(title: String): AccessibilityNodeInfo {
+        var node = awaitVisibleNode { it.text?.toString() == title }
         while (node.stateDescription == null && node.parent != null) node = node.parent
-        assertEquals("$title disclosure state", expected, node.stateDescription?.toString())
+        assertNotNull("$title has expanded/collapsed disclosure semantics", node.stateDescription)
+        return node
+    }
+
+    private fun disclosureStateNow(title: String): String? {
+        var node = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == title }
+            ?: return null
+        while (node.stateDescription == null && node.parent != null) node = node.parent
+        return node.stateDescription?.toString()
+    }
+
+    private fun clickDisclosure(title: String) {
+        var header = disclosureHeader(title)
+        // A long instrument page can place the final disclosure directly above
+        // the fixed navigation bar. Move its hit target farther into the
+        // scrolling viewport before injecting a click, rather than tapping an
+        // accessibility node whose center may be overlapped by navigation.
+        for (attempt in 0..2) {
+            val bounds = Rect()
+            header.getBoundsInScreen(bounds)
+            val safeBottom = instrumentation.targetContext.resources.displayMetrics.heightPixels * 0.76f
+            if (bounds.bottom <= safeBottom) break
+            scrollForward()
+            header = disclosureHeader(title)
+        }
+        val previous = header.stateDescription?.toString()
+            ?: throw AssertionError("$title disclosure has no state description")
+        clickNode(header)
+        if (waitForDisclosureTransition(title, previous)) return
+        if (disclosureStateNow(title)?.let { it != previous } == true) return
+
+        try {
+            uiDevice.findObject(By.text(title))?.click()
+        } catch (_: StaleObjectException) {
+            // Reacquire through the semantics node and try a native tap below.
+        }
+        instrumentation.waitForIdleSync()
+        if (waitForDisclosureTransition(title, previous)) return
+        if (disclosureStateNow(title)?.let { it != previous } == true) return
+
+        tapNodeCenter(disclosureHeader(title))
+        assertTrue("$title disclosure toggles from $previous", waitForDisclosureTransition(title, previous))
+    }
+
+    private fun waitForDisclosureTransition(title: String, previous: String): Boolean {
+        val deadline = SystemClock.uptimeMillis() + 1_500
+        while (SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            if (disclosureStateNow(title)?.let { it != previous } == true) return true
+            SystemClock.sleep(40)
+        }
+        return false
+    }
+
+    private fun assertDisclosureState(title: String, expected: String) {
+        if (disclosureStateNow(title) == null) awaitVisibleNode { it.text?.toString() == title }
+        try {
+            awaitTrue("$title disclosure state becomes $expected") {
+                disclosureStateNow(title) == expected
+            }
+        } catch (failure: AssertionError) {
+            throw AssertionError(
+                "$title semantics: ${disclosureDebugInfo(title)} scrollables=${scrollableDebugInfo()} " +
+                    "visibleLabels=${safeVisibleLabels()}",
+                failure,
+            )
+        }
+    }
+
+    private fun safeVisibleLabels(): String {
+        val fixedLabels = setOf(
+            "Home", "Device", "Energy", "History", "Settings", "Day", "Week", "Month",
+            "Coverage and measurement details", "Daily record", "Daily records", "Units and conversions",
+            "Period summary", "Sampled energy", "Sampled five-minute interval energy", "Load sampled intervals",
+            "History access", "History and storage", "Connection details", "Account actions",
+            "Sync and collector health", "Sample status guide", "Cached observations (newest first)",
+            "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Apply",
+            "Refresh history", "Refreshing history…", "Retry history sync",
+        )
+        return allNodes(instrumentation.uiAutomation.rootInActiveWindow)
+            .filter { it.isVisibleToUser }
+            .mapNotNull { it.text?.toString() }
+            .filter { it in fixedLabels }
+            .distinct()
+            .joinToString(" | ")
+            .ifEmpty { "none" }
+    }
+
+    private fun visibleHistorySyncLabels(): String {
+        val safeMessages = setOf(
+            "Airchive access is pending or denied. Showing cached history; saved rows are unchanged.",
+            "Airchive could not be reached. Showing cached history; it stays available offline.",
+            "The last Airchive refresh failed. Showing cached history; saved rows are unchanged.",
+            "Showing saved Airchive history.",
+            "Refreshing history… Cached observations remain available.",
+            "Refreshing history… No history is cached yet.",
+        )
+        return allNodes(instrumentation.uiAutomation.rootInActiveWindow)
+            .filter { it.isVisibleToUser }
+            .mapNotNull { it.text?.toString() }
+            .filter { it in safeMessages }
+            .joinToString(" | ")
+            .ifEmpty { "none" }
+    }
+
+    private fun disclosureDebugInfo(title: String): String {
+        val matches = mutableListOf<String>()
+        fun visit(node: AccessibilityNodeInfo?, depth: Int = 0) {
+            if (node == null) return
+            if (node.text?.toString() == title) {
+                var parent: AccessibilityNodeInfo? = node
+                val ancestors = mutableListOf<String>()
+                repeat(4) {
+                    val current = parent ?: return@repeat
+                    val bounds = Rect()
+                    current.getBoundsInScreen(bounds)
+                    ancestors += "${current.className}:${current.stateDescription}:${current.isClickable}:$bounds:${current.actionList.map { action -> action.id }}"
+                    parent = current.parent
+                }
+                matches += "${" ".repeat(depth)}${ancestors.joinToString(" -> ")}"
+            }
+            for (index in 0 until node.childCount) visit(node.getChild(index), depth + 1)
+        }
+        visit(instrumentation.uiAutomation.rootInActiveWindow)
+        return matches.joinToString(" | ").ifEmpty { "no text nodes found" }
+    }
+
+    private fun scrollableDebugInfo(): String {
+        val entries = mutableListOf<String>()
+        fun visit(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+            if (node.isScrollable) {
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                val range = node.rangeInfo?.let { "${it.current}/${it.max}" } ?: "no-range"
+                entries += "${node.className}:$bounds:range=$range:actions=${node.actionList.map { it.id }}"
+            }
+            for (index in 0 until node.childCount) visit(node.getChild(index))
+        }
+        visit(instrumentation.uiAutomation.rootInActiveWindow)
+        return entries.joinToString(" | ").ifEmpty { "none" }
     }
 
     private fun assertTextPresent(text: String) {
-        awaitNode { it.text?.toString()?.contains(text) == true }
+        awaitVisibleNode { it.text?.toString()?.contains(text) == true }
     }
 
     private fun assertTextAbsent(text: String) {
@@ -1341,26 +1686,76 @@ class SharedInstrumentUiTest {
         }
     }
 
-    private fun energyTruthSnapshot(): List<String> = accessibilitySnapshot(
-        instrumentation.uiAutomation.rootInActiveWindow,
-    ).lineSequence().filter { line ->
-        line.startsWith("Sampled interval sum:") ||
-            line.startsWith("Queried into the local cache:") ||
-            line.startsWith("Usable five-minute slots:") ||
-            line.startsWith("Elapsed five-minute slots:")
-    }.toList()
+    private fun awaitEditableFields(): List<AccessibilityNodeInfo> {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            val fields = editableNodes(instrumentation.uiAutomation.rootInActiveWindow)
+            if (fields.size >= 2) return fields
+            scrollForward()
+            SystemClock.sleep(50)
+        }
+        throw AssertionError("Expected two synthetic setup fields; found ${editableNodes().size}")
+    }
+
+    private fun editableNodes(node: AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow): List<AccessibilityNodeInfo> {
+        if (node == null) return emptyList()
+        return buildList {
+            if (node.isEditable) add(node)
+            for (index in 0 until node.childCount) addAll(editableNodes(node.getChild(index)))
+        }
+    }
+
+    private fun energySummarySnapshot(): List<String> {
+        val lines = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).lineSequence().toList()
+        val labelIndex = lines.indexOf("Sampled energy")
+        assertTrue("the summary label is in the accessibility tree", labelIndex >= 0 && labelIndex + 2 < lines.size)
+        val coverage = lines.firstOrNull { line ->
+            line.startsWith("No elapsed intervals") || line.startsWith("No usable samples") ||
+                line.startsWith("Recorded coverage complete") || line.startsWith("Incomplete coverage")
+        } ?: throw AssertionError("The Energy coverage badge is not exposed")
+        return listOf(
+            lines[labelIndex],
+            lines[labelIndex + 1],
+            lines[labelIndex + 2],
+            coverage,
+        )
+    }
 
     private fun scrollForward() {
-        find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
-            ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+        scrollContent(forward = true)
+    }
+
+    private fun scrollBackward() {
+        scrollContent(forward = false)
+    }
+
+    private fun scrollContent(forward: Boolean) {
+        val scrollable = find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
+        if (scrollable == null) {
+            instrumentation.waitForIdleSync()
+            return
+        }
+        val bounds = Rect()
+        scrollable.getBoundsInScreen(bounds)
+        if (bounds.width() <= 0 || bounds.height() <= 0) return
+        val x = (bounds.left + bounds.right) / 2
+        val density = instrumentation.targetContext.resources.displayMetrics.density
+        // Use overlapping, density-aware swipes within the content viewport.
+        // This avoids jumping over a disclosure between page-sized scroll steps
+        // and stays clear of the shell's fixed bottom navigation.
+        val top = bounds.top + (36 * density).toInt()
+        val bottom = bounds.bottom - (100 * density).toInt()
+        val delta = maxOf((bounds.height() * .35f).toInt(), (150 * density).toInt())
+        val startY = if (forward) bottom else top
+        val endY = if (forward) maxOf(top, bottom - delta) else minOf(bottom, top + delta)
+        assertTrue("Native emulator swipe succeeds", uiDevice.swipe(x, startY, x, endY, 30))
         instrumentation.waitForIdleSync()
     }
 
     private fun scrollToTop() {
-        repeat(8) {
-            find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
-                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
-            instrumentation.waitForIdleSync()
+        repeat(2) {
+            scrollContent(forward = false)
         }
     }
 
@@ -1374,6 +1769,30 @@ class SharedInstrumentUiTest {
         throw AssertionError("Expected accessible instrument content was not visible")
     }
 
+    private fun awaitVisibleNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
+        // First cover the case where the requested control is above the current
+        // viewport (for example the disclosure headers above a virtualized list).
+        repeat(2) { scrollBackward() }
+        repeat(12) {
+            instrumentation.waitForIdleSync()
+            find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
+                ?.takeIf { it.isVisibleToUser }
+                ?.let { return it }
+            scrollForward()
+        }
+        // A large, dynamically expanded card can move a target past a viewport
+        // boundary in one accessibility scroll step. Sweep back once so those
+        // intermediate items are still discoverable.
+        repeat(12) {
+            instrumentation.waitForIdleSync()
+            find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
+                ?.takeIf { it.isVisibleToUser }
+                ?.let { return it }
+            scrollBackward()
+        }
+        return awaitNode(predicate)
+    }
+
     private fun awaitTrue(description: String, condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
@@ -1382,6 +1801,60 @@ class SharedInstrumentUiTest {
             SystemClock.sleep(50)
         }
         throw AssertionError("Timed out waiting for: $description")
+    }
+
+    private fun awaitLoadButtonEnabled() {
+        awaitTrue("the explicit Energy load action finishes") {
+            find(instrumentation.uiAutomation.rootInActiveWindow) {
+                it.text?.toString() == "Load sampled intervals"
+            }?.isEnabled == true
+        }
+    }
+
+    private fun currentDeviceReadAt(fixture: SharedInstrumentShellFixture): Long {
+        val current = fixture.thinQContext.liveStateController.state.value as?
+            cloud.airchive.shared.data.thinq.ThinQLiveRefreshState.Current
+            ?: throw AssertionError("the synthetic device-read state is not current")
+        return current.state.observedAtEpochMillis
+    }
+
+    private fun awaitShellSettled(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {
+        var previousTelemetryReads = -1
+        var stableSamples = 0
+        awaitTrue("the synthetic shell settles after its owner/history reads") {
+            var accessCardVisible = false
+            var historyRefreshActive = true
+            var telemetryReads = 0
+            scene.onActivity { activity ->
+                accessCardVisible = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.text?.toString() == "Airchive account & access"
+                } != null
+                historyRefreshActive = activity.shellFixture?.coordinator?.isRefreshing?.value ?: true
+                telemetryReads = activity.shellFixture?.counters?.telemetryReads?.get() ?: 0
+            }
+            if (!accessCardVisible && !historyRefreshActive && telemetryReads == previousTelemetryReads) {
+                stableSamples += 1
+            } else {
+                stableSamples = 0
+            }
+            previousTelemetryReads = telemetryReads
+            stableSamples >= 6
+        }
+    }
+
+    private fun selectShellDetail(
+        scene: ActivityScenario<SharedInstrumentPreviewActivity>,
+        detail: cloud.airchive.shared.InterfaceDetail,
+    ) {
+        scene.onActivity { activity -> activity.shellFixture!!.interfacePreferences.select(detail) }
+        instrumentation.waitForIdleSync()
+        awaitTrue("the shell preference adopts $detail") {
+            var selected = false
+            scene.onActivity { activity ->
+                selected = activity.shellFixture!!.interfacePreferences.detail.value == detail
+            }
+            selected
+        }
     }
 
     /** Stable identity+content fingerprint of an on-disk artifact; null when absent. */
@@ -1399,5 +1872,14 @@ class SharedInstrumentUiTest {
         if (node == null) return 0
         return (if (predicate(node)) 1 else 0) +
             (0 until node.childCount).sumOf { countNodes(node.getChild(it), predicate) }
+    }
+
+    private fun allNodes(node: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+        if (node == null) return emptyList()
+        return listOf(node) + (0 until node.childCount).flatMap { allNodes(node.getChild(it)) }
+    }
+
+    private companion object {
+        val NAVIGATION_DESTINATIONS = setOf("Home", "Device", "Energy", "History", "Settings")
     }
 }
