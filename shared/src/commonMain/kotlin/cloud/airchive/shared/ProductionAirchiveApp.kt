@@ -319,6 +319,7 @@ private fun ProductionRouteHost(
                         partition = partition,
                         remoteLoadEnabled = authorized,
                         loadRange = { from, to -> coordinator.loadHistoricalRange(partition, from, to) },
+                        nowProvider = nowProvider,
                     ) }
                 } else {
                     ProductionSignedOutRoute(title = "Energy")
@@ -409,7 +410,14 @@ private fun ProductionHome(
             ?: "History has not synced yet", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (isHistorySyncing || history.sync?.lastError != null || !historySync.hasCachedHistory) {
-            Text(historySync.message, style = MaterialTheme.typography.bodySmall,
+            Text(
+                if (isHistorySyncing && historySync.hasCachedHistory) {
+                    "Refreshing history… Cached observations remain available."
+                } else if (isHistorySyncing) {
+                    "Refreshing history… No history is cached yet."
+                }
+                else historySync.message,
+                style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
         onManualRefresh?.let { refresh ->

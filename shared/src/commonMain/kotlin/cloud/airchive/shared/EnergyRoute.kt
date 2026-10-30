@@ -71,6 +71,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
@@ -116,6 +117,7 @@ fun EnergyRoute(
     timeZoneId: String = DEFAULT_DAY_TIME_ZONE,
     remoteLoadEnabled: Boolean = true,
     loadRange: (suspend (Long, Long) -> HistoricalRangeResult)? = null,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     // A malformed/unknown zone id must never crash the route; fall back to the
     // documented default day boundary.
@@ -125,7 +127,7 @@ fun EnergyRoute(
     val scope = rememberCoroutineScope()
 
     var periodType by remember { mutableStateOf(EnergyPeriodType.DAY) }
-    var anchorDate by remember(zoneId) { mutableStateOf(todayIn(zoneId)) }
+    var anchorDate by remember(zoneId) { mutableStateOf(todayIn(zoneId, nowProvider())) }
     var loadState by remember(periodType, anchorDate, zoneId) {
         mutableStateOf<EnergyLoadUiState>(EnergyLoadUiState.Idle)
     }
@@ -142,7 +144,7 @@ fun EnergyRoute(
             snapshot = snapshot,
             periodType = period.periodType,
             selectedDate = period.selectedDate,
-            nowEpochMillis = Clock.System.now().toEpochMilliseconds(),
+            nowEpochMillis = nowProvider(),
             timeZoneId = zoneId,
         )
     }
@@ -154,7 +156,7 @@ fun EnergyRoute(
         val requestedAnchor = anchorDate
         scope.launch {
             loadState = EnergyLoadUiState.Loading
-            val now = Clock.System.now().toEpochMilliseconds()
+            val now = nowProvider()
             val requestedPeriod = energyPeriodRange(requestedType, requestedAnchor, zoneId)
             val end = minOf(requestedPeriod.endExclusiveEpochMillis, now)
             if (end <= requestedPeriod.startEpochMillis) {
@@ -889,8 +891,8 @@ private fun Double.toTrimmedString(): String {
     return if (negative && (intPart > 0 || frac != 0)) "-$text" else text
 }
 
-private fun todayIn(timeZoneId: String): LocalDate =
-    Clock.System.now().toLocalDateTime(TimeZone.of(timeZoneId)).date
+private fun todayIn(timeZoneId: String, nowEpochMillis: Long): LocalDate =
+    Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(TimeZone.of(timeZoneId)).date
 
 private fun LocalDate.dayOfMonthLabel(): String {
     val first = LocalDate(year, month, 1)
