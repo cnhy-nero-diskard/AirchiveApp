@@ -170,7 +170,23 @@ class ThinQContextCoordinator(
      * explicitly-labeled old state with commands disabled; a superseded read
      * returns [ThinQEntryResult.Superseded] and publishes nothing.
      */
-    suspend fun onDeviceOpened(): ThinQEntryResult {
+    suspend fun onDeviceOpened(): ThinQEntryResult = performDeviceEntry(forceProfileRefresh = false)
+
+    /**
+     * Explicit user "Refresh device state" action (task 3.2): the forced
+     * same-context form of [onDeviceOpened]. It refetches the device list and
+     * profile **even when a valid same-context publication exists** (so changed
+     * LG units/bounds/steps become visible without waiting for a context
+     * change), then performs the same captured-context live read and applies
+     * the identical fences, conditional publication and lock order.
+     *
+     * This runs only on explicit user action — never from route entry, a
+     * timer, or any automatic/polling path. A credential-generation change is
+     * untouched; a superseded context still publishes nothing.
+     */
+    suspend fun refreshDeviceProfile(): ThinQEntryResult = performDeviceEntry(forceProfileRefresh = true)
+
+    private suspend fun performDeviceEntry(forceProfileRefresh: Boolean): ThinQEntryResult {
         val snapshot = lifecycle.withBoundary {
             val contextKey = lifecycle.current()
             EntrySnapshot(
@@ -218,7 +234,11 @@ class ThinQContextCoordinator(
         if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
 
         val publication = mutableDeviceProfile.value
-        val needsDeviceProfileFetch = publication == null ||
+        // Same-context profile capability refresh only happens when the
+        // caller explicitly forces it (task 3.2, user "Refresh device
+        // state"); route entry reuses the valid same-context publication.
+        val needsDeviceProfileFetch = forceProfileRefresh ||
+            publication == null ||
             publication.contextKey != captured ||
             publication.device.deviceId != configuredDeviceId ||
             publication.profile?.deviceId != configuredDeviceId
@@ -544,6 +564,7 @@ class ThinQContextCoordinator(
         setupCredential = ::setupCredentialDetailed,
         cancelSetupAttempt = ::cancelSetupAttempt,
         onDeviceOpened = ::onDeviceOpened,
+        refreshDeviceProfile = ::refreshDeviceProfile,
         refreshLiveState = ::refreshLiveState,
         removeCredential = ::removeCredential,
         clearCachedDeviceProfile = ::clearCachedDeviceProfile,

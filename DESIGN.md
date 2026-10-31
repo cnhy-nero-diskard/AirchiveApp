@@ -48,7 +48,7 @@ spacing:
   related: "12dp"
   screen-inline: "16dp"
   panel-inline: "20dp"
-  secondary-screen-inline: "24dp"
+  secondary-screen-inline: "24dp (legacy demo only; production routes use screen-inline 16dp)"
 components:
   shared-panel:
     backgroundColor: "{colors.porcelain-panel}"
@@ -91,7 +91,7 @@ components:
 
 Airchive is a precise personal instrument for one AC. Porcelain surfaces, slate text and restrained cobalt make live comfort controls and recorded energy equally legible. The owner selected the Shared Instrument Home layout: paired readings live within one quiet panel, with familiar native controls and clear measurement labels.
 
-This document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Secondary production routes inherit the shared theme but retain their existing layouts.
+This document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps all five production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Production Home, Device, Energy, History, and Settings use the shared instrument page/panel/disclosure composition.
 
 **Key Characteristics:**
 
@@ -100,7 +100,7 @@ This document records the implemented Android Compose system, not a web translat
 - Cobalt actions, slate context and explicit coverage status.
 - Native controls, scalable text and honest data states.
 
-Evidence: `AirchiveTheme.kt`, `HomeInstrument.kt`, `ProductionAirchiveApp.kt`, `AirchiveApp.kt`, and the real emulator captures in `.impeccable/review/`. Those captures are evidence only; no concept image or screenshot ships as UI. The verification record reports 313 shared tests, Android debug and instrumentation builds, debug lint, explicit-Apply/stale-gating tests, and light/dark screenshot runs including 1.3 text scale. The independent reviewer resolved all six application findings and observed no defect requiring another batch within the scored scope. The automated pixel gate remains failed/open at approximately 75% with hard region/missing classifications; this system is not certified pixel-perfect. Physical-phone signed-in acceptance, tablets, landscape and maximum system text scale remain outside that verification.
+Evidence: `AirchiveTheme.kt`, `HomeInstrument.kt`, `ProductionAirchiveApp.kt`, `AirchiveApp.kt`, and the historical emulator captures in `.impeccable/review/`. Those captures are evidence only; no concept image or screenshot ships as UI. `.impeccable/review/final-verification.md` records the historical Home-scored revision (313 shared tests, scoped builds/lint, and six findings resolved within that scored scope); it is not current lifecycle acceptance. The current delivery evidence is revision-linked in `docs/verification/shared-instrument/verification.md`. The historical automated pixel gate remains failed/open at exactly 74.69% with hard region/missing classifications; this system is not certified pixel-perfect. Physical-phone signed-in acceptance, landscape, and maximum system text scale remain outside the current native scope unless separately recorded there.
 
 ## Colors
 
@@ -154,9 +154,9 @@ Production Home is a vertically scrollable column, centered with a maximum width
 
 The panel uses 20dp horizontal and 16dp vertical padding with 8dp vertical spacing. Its 3dp cobalt index band follows the clipped panel edge. The device header and power sit above the paired readings. Readings use equal weights with 12dp separation and a 132dp vertical divider. Temperature steps and Apply follow, then separate mode/fan rows, recorded-energy chart, coverage/freshness and, when present, yesterday's finalized LG total.
 
-**The Stack Before Shrink Rule.** Within the panel, available width below 300dp **or** font scale above 1.2 stacks both readouts and the coverage/freshness row. The readout divider becomes horizontal. At captured 1.3 text scale, lower energy content requires scrolling; native navigation remains accessible.
+**The Stack Before Shrink Rule.** Within the panel, available width below 360dp **or** font scale above 1.2 stacks both readouts and the coverage/freshness row. The 360dp production threshold keeps a normal five-character 76sp energy value such as `15.11` on one line in the paired Home layout; it is intentionally wider than the required <300dp narrow-width floor. The readout divider becomes horizontal. At captured 1.3 text scale, lower energy content requires scrolling; native navigation remains accessible.
 
-Secondary production screens commonly retain their existing 640dp maximum, 24dp horizontal/20dp vertical padding and 16dp rhythm. These are observed route patterns, not a claim that every secondary layout was rebuilt. No new tablet or landscape composition is documented.
+Production secondary routes use the shared `InstrumentPage` maximum of 640dp, 16dp horizontal/12dp vertical page padding and 12dp major-child rhythm. History uses the same 16dp horizontal gutter with a virtualized `LazyColumn`; instrument panels retain their 20dp horizontal inset and 16dp vertical padding. The 24dp/20dp/16dp secondary-screen token is legacy-demo-only, not the production route layout. No new tablet composition is documented.
 
 ## Elevation & Depth
 
@@ -194,9 +194,15 @@ The native chart groups five-minute source intervals into eight three-hour colum
 
 Native Material NavigationBar presents Home, Device, Energy, History and Settings with visible text and Canvas destination glyphs. Selected state uses Material roles/indicator. The bar sits outside Home's scroll container and respects Scaffold/system insets; it is not an image overlay.
 
+### Interface detail and disclosures
+
+Settings exposes Simple and Detailed through 48dp-minimum native FilterChips. Simple is the default for absent or unrecognized stored values; the Android choice is an installation-wide nonsecret preference, independent of account/history/credential state. Selection changes presentation immediately and does not trigger reads or commands.
+
+Informational disclosures are collapsed in Simple and expanded in Detailed; action sections, including Account actions, stay collapsed in both modes. Mode changes reset manual overrides to those defaults. State-required recovery sections such as unverified History access override the normal default and stay expanded across mode changes while remaining manually controllable. Disclosure rows have a 56dp minimum height. Keep their expanded/collapsed semantics aligned with actual visible descendants, and keep PAT forms/confirmation dialogs independently placed so a disclosure reset does not discard active input or dialog state.
+
 ### Existing cards and fields
 
-Secondary and access/setup surfaces retain native Material cards, buttons, outlined text fields and dialogs with the shared production theme. `SummaryCard` retains 20dp internal padding and 8dp child spacing. Existing credential fields remain labeled, single-line native fields with password transformation where appropriate; focus, error and disabled treatments are library-owned. This documentation does not assert a custom field radius or new secondary-screen composition that the code does not implement.
+Secondary and access/setup surfaces use native Material cards, buttons, outlined text fields and dialogs within the shared production route composition. `SummaryCard` retains 20dp internal padding and 8dp child spacing. Existing credential fields remain labeled, single-line native fields with password transformation where appropriate; focus, error and disabled treatments are library-owned. No custom field radius is introduced.
 
 ## Do's and Don'ts
 
@@ -208,6 +214,7 @@ Secondary and access/setup surfaces retain native Material cards, buttons, outli
 - **Do** show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.
 - **Do** preserve local temperature drafts, explicit Apply and supported/current-state command gating.
 - **Do** reuse production Material roles in both implemented themes and keep native control states visible.
+- **Do** preserve Simple/Detailed essential-content parity, presentation-only selection, and the informational/action/recovery disclosure rules.
 
 ### Don't:
 
@@ -215,5 +222,5 @@ Secondary and access/setup surfaces retain native Material cards, buttons, outli
 - **Don't** infer room temperature, humidity, cost, savings, automation or unsupported writable capabilities.
 - **Don't** turn unavailable measurements into zero or sampled energy into instantaneous power.
 - **Don't** disguise disabled controls or uncertain command outcomes to match a generated comp.
-- **Don't** treat inherited secondary layouts or the legacy demo as a completed Home-style recomposition.
-- **Don't** describe the open failed pixel gate as passed or the implementation as pixel-perfect.
+- **Don't** treat the legacy demo as the production route shell or add automatic reads merely because presentation detail changed.
+- **Don't** describe the open failed pixel gate as passed or the implementation as pixel-perfect; retain its exact historical 74.69% attribution.

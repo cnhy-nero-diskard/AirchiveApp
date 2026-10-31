@@ -32,7 +32,8 @@ A personal companion combining LG ThinQ live state and supported controls with A
 ## Capabilities and Constraints
 
 - Keep the first experience focused on the configured AC; multi-device discovery and multi-household product design are outside the current identity scope.
-- Shared UI provides Home, Device, Energy, History/Health, and Settings destinations. Navigation changes must preserve these capabilities and update the existing specification when required.
+- The production shell provides Home, Device, Energy, History, and Settings destinations; History presents the History/Health capability. Navigation changes must preserve these capabilities and update the existing specification when required.
+- Settings offers Simple (the fallback for absent or unrecognized values) and Detailed presentation. The choice applies immediately, persists installation-wide, and changes explanations/disclosure defaults only; readings, units, warnings, authority gates, and recovery actions remain available in both modes.
 - Render cached history promptly. Refresh on app lifecycle or explicit request; do not add continuous polling as a visual effect.
 - Five-minute sampled energy is not instantaneous power. Interval-average power must be labeled accordingly.
 - Missing measurements are gaps, never measured zero. Finalized LG daily totals and local interval sums remain separate.
@@ -51,7 +52,7 @@ Home Instrument: porcelain surfaces, slate text, restrained cobalt accents, and 
 - shared/src/commonMain/kotlin/cloud/airchive/shared/ProductionAirchiveApp.kt implements the production route shell and Home.
 - DeviceControlsCard.kt, EnergyRoute.kt, and HistoryHealthRoute.kt contain current interaction and measurement semantics.
 - docs/thinq-control.md records direct observations separately from owner-reported real-device acceptance.
-- The current implementation uses default Material light/dark schemes. PRODUCT.md and the identity exploration were created during this review; DESIGN.md and current screenshot fixtures were absent at the start. Concept images are generated previews rather than emulator captures.
+- `AirchiveTheme.kt` implements light/dark Material role schemes for the five-route production shell and configuration-blocked states. The legacy `AirchiveApp` demo still uses default Material schemes. Production routes share the instrument page/panel/disclosure system; `DESIGN.md` and `.impeccable/design.json` describe current composition. Dated handoffs remain historical. Concept images are generated previews rather than emulator captures.
 
 ## Product Principles
 

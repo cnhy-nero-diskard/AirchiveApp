@@ -97,7 +97,7 @@ class SharedInstrumentUiTest {
             }
             // Controlled clock: the bootstrap ran against the frozen fixture clock,
             // so the shell renders a deterministic zero-age sync label.
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             assertTrue("the fake-port bootstrap must persist local history",
                 shell.counters.localHistoryWrites.get() >= 1)
             assertEquals("No credential is stored, so no ThinQ read may happen",
@@ -282,6 +282,57 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun delayedCredentialVerificationCannotSaveAfterSyntheticOwnerSwitch() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitShellSettled(scene)
+            clickTab("Settings")
+            clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity {
+                fixture.set(it.shellFixture!!)
+                fixture.get().credentialVerificationGate.hold()
+                fixture.get().setNextOwner("delayed-verification-owner-b")
+            }
+            clickText("Verify and save securely")
+            awaitTrue("the fake verifier is suspended before its protected-store commit") {
+                fixture.get().counters.credentialVerifications.get() == 1
+            }
+            assertEquals(0, fixture.get().counters.credentialSaves.get())
+
+            clickDisclosure("Account actions")
+            clickText("Switch Google account")
+            awaitNode { it.text?.toString() == "Switch Google account?" }
+            clickText("Confirm")
+            awaitTrue("the synthetic owner transition completes while verification is held") {
+                fixture.get().coordinator.session.value?.uid == "delayed-verification-owner-b"
+            }
+            fixture.get().credentialVerificationGate.release()
+            awaitTrue("the superseded verifier publishes a redacted completion record") {
+                runBlocking {
+                    fixture.get().captureSafeDiagnosticOutputs().any { it.startsWith("credential-setup=") }
+                }
+            }
+
+            assertEquals("the late old-owner result cannot add a credential", 0,
+                fixture.get().counters.credentialSaves.get())
+            assertFalse("old setup feedback never appears for the replacement owner",
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true
+                } != null)
+            assertFalse("the synthetic PAT marker never reappears in the new owner UI",
+                accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+                    .contains(SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER))
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun syntheticPatIsAbsentFromPreferencesHistoryDiagnosticsAndCapturedSafeRecords() = runBlocking {
         val marker = SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER
         val context = instrumentation.targetContext
@@ -427,6 +478,115 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun sameContextProfileRefreshKeepsSupportedDraftAndDisablesUnsupportedValues() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            clickText("Settings")
+            awaitShellSettled(scene)
+            clickText("Set up ThinQ PAT")
+            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+            clickText("Verify and save securely")
+            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "25" }
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitNode { it.text?.toString() == "26" }
+            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val startingKey = fixture.get().thinQContext.contextKey.value
+            val baseProfile = requireNotNull(fixture.get().thinQContext.deviceProfile.value?.profile)
+            val baseCapability = requireNotNull(baseProfile.controls.targetTemperature)
+            val profileReadsBeforeRouteEntry = fixture.get().counters.thinQProfileReads.get()
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+
+            // Simulate a new same-owner observation after the AC temperature
+            // changes independently; the unsent 26 °C draft must remain distinct.
+            fixture.get().setThinQTargetTemperatureForTest(27.0)
+            clickTab("Device")
+            awaitNode { it.text?.toString()?.contains("Currently 27") == true }
+            awaitNode { it.text?.toString() == "26" }
+            assertTrue(buttonNode("Apply").isEnabled)
+            assertEquals("same-context route entry remains profile-cache-only",
+                profileReadsBeforeRouteEntry, fixture.get().counters.thinQProfileReads.get())
+            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
+
+            // A half-degree same-context profile refresh retains the supported
+            // dirty draft and publishes the changed observation without a command.
+            val halfStepProfile = baseProfile.copy(
+                controls = baseProfile.controls.copy(targetTemperature = baseCapability.copy(step = 0.5)),
+            )
+            fixture.get().setThinQProfileForTest(halfStepProfile)
+            val profileReadsBeforeHalfStepRefresh = fixture.get().counters.thinQProfileReads.get()
+            clickText("Refresh device state")
+            awaitTrue("explicit device refresh fetches the updated same-context profile") {
+                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeHalfStepRefresh &&
+                    fixture.get().thinQContext.deviceProfile.value?.profile == halfStepProfile
+            }
+            awaitNode { it.text?.toString()?.contains("Currently 27") == true }
+            awaitNode { it.text?.toString() == "26" }
+            assertTrue("a still-supported draft remains applicable", buttonNode("Apply").isEnabled)
+            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
+
+            // Narrowing bounds invalidates the draft visibly instead of
+            // clamping/submitting it; an explicit supported edit can recover.
+            val narrowProfile = baseProfile.copy(
+                controls = baseProfile.controls.copy(
+                    targetTemperature = baseCapability.copy(max = 25.0, step = 1.0),
+                ),
+            )
+            fixture.get().setThinQProfileForTest(narrowProfile)
+            fixture.get().setThinQTargetTemperatureForTest(24.0)
+            val profileReadsBeforeNarrowRefresh = fixture.get().counters.thinQProfileReads.get()
+            clickText("Refresh device state")
+            awaitTrue("explicit refresh publishes narrower same-context bounds") {
+                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeNarrowRefresh &&
+                    fixture.get().thinQContext.deviceProfile.value?.profile == narrowProfile
+            }
+            awaitNode { it.text?.toString()?.contains("26 °C is no longer supported") == true }
+            assertFalse("an out-of-bounds draft cannot be applied", buttonNode("Apply").isEnabled)
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
+
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitNode { it.text?.toString() == "25" }
+            assertTrue("a deliberate valid adjustment restores Apply", buttonNode("Apply").isEnabled)
+
+            // A unit change also invalidates a draft in its old unit; the new
+            // observation and unit remain identifiable and no conversion is
+            // silently submitted on the owner's behalf.
+            val fahrenheitProfile = baseProfile.copy(
+                controls = baseProfile.controls.copy(
+                    targetTemperature = cloud.airchive.shared.contract.thinq.TemperatureCapability(
+                        min = 60.0,
+                        max = 86.0,
+                        step = 1.0,
+                        unit = cloud.airchive.shared.contract.thinq.TemperatureUnit.FAHRENHEIT,
+                    ),
+                    temperatureUnit = cloud.airchive.shared.contract.thinq.TemperatureUnit.FAHRENHEIT,
+                ),
+            )
+            fixture.get().setThinQProfileForTest(fahrenheitProfile)
+            fixture.get().setThinQTargetTemperatureForTest(77.0)
+            val profileReadsBeforeUnitRefresh = fixture.get().counters.thinQProfileReads.get()
+            clickText("Refresh device state")
+            awaitTrue("explicit refresh publishes the changed same-context unit") {
+                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeUnitRefresh &&
+                    fixture.get().thinQContext.deviceProfile.value?.profile == fahrenheitProfile
+            }
+            awaitNode { it.text?.toString()?.contains("Currently 77") == true }
+            awaitNode { it.text?.toString()?.contains("25 °C is no longer supported") == true }
+            assertFalse("a draft in the previous unit cannot be applied", buttonNode("Apply").isEnabled)
+            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
+            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
     @Test fun interfaceDetailSelectionPreservesSetupFormAndConfirmationDialogWithoutPortCalls() {
         clearFixturePreferences()
         launchShell().use { scene ->
@@ -516,6 +676,79 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString()?.contains("Confirmed: AC currently reports") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
+    }
+
+    @Test fun acceptedCommandRemainsUnconfirmedWithoutAutomaticRetry() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShellWithTemperatureDraft(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            fixture.get().setThinQAcceptedWithoutConfirmationForTest()
+            clickNode(buttonNode("Apply"))
+            awaitTrue("the synthetic port reports accepted without confirming") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Accepted
+            }
+            awaitNode { it.text?.toString()?.contains("current state is not confirmed") == true }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
+            SystemClock.sleep(300)
+            assertEquals("accepted status does not trigger an automatic retry", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun failedCommandShowsStableFeedbackWithoutRetry() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShellWithTemperatureDraft(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            fixture.get().setThinQCommandFailureForTest(
+                cloud.airchive.shared.contract.thinq.CommandFailure.RATE_LIMITED,
+            )
+            clickNode(buttonNode("Apply"))
+            awaitTrue("the synthetic port reports a definite command failure") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Failed
+            }
+            awaitNode { it.text?.toString()?.contains("LG is rate-limiting commands") == true }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
+            SystemClock.sleep(300)
+            assertEquals("failed command feedback does not trigger a retry", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun unconfirmedCommandOffersRefreshAndNeverResends() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShellWithTemperatureDraft(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            fixture.get().setThinQUnconfirmedForTest()
+            clickNode(buttonNode("Apply"))
+            awaitTrue("the synthetic port reports an ambiguous command result") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Unconfirmed
+            }
+            awaitNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
+
+            clickTab("Device")
+            awaitVisibleNode { it.text?.toString() == "Refresh device state" }
+            val liveReadsBeforeRefresh = fixture.get().counters.thinQLiveStateReads.get()
+            clickText("Refresh device state")
+            awaitTrue("the owner can explicitly refresh after an unconfirmed command") {
+                fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeRefresh
+            }
+            awaitNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            assertEquals("the explicit recovery action reads state but never resubmits", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
     }
 
     @Test fun ownerSwitchDiscardsTheShellHeldTemperatureDraft() {
@@ -822,6 +1055,17 @@ class SharedInstrumentUiTest {
             awaitVisibleNode { it.text?.toString() == "Interface detail" }
             assertDisclosureState("History access", "Expanded")
             assertTextPresent("Status: signed out of Google.")
+            clickDisclosure("History access")
+            assertDisclosureState("History access", "Collapsed")
+            assertTextAbsent("Status: signed out of Google.")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            assertDisclosureState("History access", "Expanded")
+            assertTextPresent("Status: signed out of Google.")
+            clickDisclosure("History access")
+            assertDisclosureState("History access", "Collapsed")
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
+            assertDisclosureState("History access", "Expanded")
+            assertTextPresent("Status: signed out of Google.")
 
             clickTab("Home")
             clickText("Continue with Google")
@@ -831,7 +1075,7 @@ class SharedInstrumentUiTest {
                 scene.onActivity { reads = it.shellFixture!!.counters.deviceIdentityReads.get() }
                 reads > 0
             }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             awaitShellSettled(scene)
 
             // Simple keeps all optional information and action sections closed.
@@ -861,11 +1105,16 @@ class SharedInstrumentUiTest {
             scrollToTop()
             awaitVisibleNode { it.text?.toString() == "Interface detail" }
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            assertDisclosureState("History and storage", "Expanded")
+            awaitVisibleNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+            assertDisclosureState("Account actions", "Collapsed")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             scene.onActivity {
                 assertEquals(cloud.airchive.shared.InterfaceDetail.SIMPLE,
                     it.shellFixture!!.interfacePreferences.detail.value)
             }
+            assertDisclosureState("History and storage", "Collapsed")
+            assertTextAbsent("Local diagnostics · nonsecret")
             assertDisclosureState("Connection details", "Collapsed")
             assertDisclosureState("Account actions", "Collapsed")
             assertTextAbsent("LG client ID:")
@@ -1379,6 +1628,66 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun captureSyntheticProductionShellSimpleRoutesAtDefaultTextScale() {
+        val scale = instrumentation.targetContext.resources.configuration.fontScale
+        assertEquals("this evidence batch is explicitly the default text scale", 1.0f, scale, 0.01f)
+        val uiMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java)
+        val previousNightMode = uiMode.nightMode
+        fun setSystemTheme(mode: String) {
+            ParcelFileDescriptor.AutoCloseInputStream(
+                instrumentation.uiAutomation.executeShellCommand("cmd uimode night $mode"),
+            ).bufferedReader().use { it.readText() }
+        }
+        clearFixturePreferences()
+        setSystemTheme("no")
+        try {
+            launchShell().use { scene ->
+                clickText("Continue with Google")
+                awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+                awaitShellSettled(scene)
+                clickTab("Settings")
+                clickText("Set up ThinQ PAT")
+                awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+                setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+                clickText("Verify and save securely")
+                awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+                clickTab("Home")
+                awaitNode { it.text?.toString() == "Device read 0 sec ago" }
+
+                for ((route, label) in listOf(
+                    "Home" to "Airchive",
+                    "Device" to "Device details",
+                    "Energy" to "Sampled energy",
+                    "History" to "Cached observations (newest first)",
+                )) {
+                    clickTab(route)
+                    awaitVisibleNode { it.text?.toString() == label }
+                    instrumentation.waitForIdleSync()
+                    instrumentation.uiAutomation.waitForIdle(200, 5_000)
+                    saveCapture("synthetic-shell-simple-$route-light-scale-1.0")
+                }
+
+                // Keep the Settings capture free of even a masked synthetic
+                // credential suffix while documenting its disconnected
+                // recovery state in the production shell.
+                val fixture = AtomicReference<SharedInstrumentShellFixture>()
+                scene.onActivity { fixture.set(it.shellFixture!!) }
+                runBlocking { fixture.get().thinQContext.bindings().removeCredential() }
+                clickTab("Settings")
+                awaitVisibleNode { it.text?.toString() == "Interface detail" }
+                saveCapture("synthetic-shell-simple-Settings-light-scale-1.0")
+
+            }
+        } finally {
+            clearFixturePreferences()
+            setSystemTheme(when (previousNightMode) {
+                UiModeManager.MODE_NIGHT_YES -> "yes"
+                UiModeManager.MODE_NIGHT_NO -> "no"
+                else -> "auto"
+            })
+        }
+    }
+
     private fun saveCapture(name: String) {
         val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: throw AssertionError("Native capture failed")
         File(instrumentation.targetContext.getExternalFilesDir(null), "$name.png").outputStream().use {
@@ -1445,6 +1754,12 @@ class SharedInstrumentUiTest {
             it.text?.toString() == text && it.isVisibleToUser
         }
         clickNode(current ?: node)
+    }
+
+    private fun buttonNode(label: String): AccessibilityNodeInfo {
+        var node = awaitVisibleNode { it.text?.toString() == label }
+        while (!node.isClickable && node.parent != null) node = node.parent
+        return node
     }
 
     /** Navigation labels are visually tappable even when Compose exposes their merged click action inconsistently. */
@@ -1577,7 +1892,7 @@ class SharedInstrumentUiTest {
     }
 
     private fun assertDisclosureState(title: String, expected: String) {
-        if (disclosureStateNow(title) == null) awaitVisibleNode { it.text?.toString() == title }
+        awaitVisibleNode { it.text?.toString() == title }
         try {
             awaitTrue("$title disclosure state becomes $expected") {
                 disclosureStateNow(title) == expected
@@ -1818,6 +2133,26 @@ class SharedInstrumentUiTest {
         return current.state.observedAtEpochMillis
     }
 
+    private fun prepareConfiguredShellWithTemperatureDraft(
+        scene: ActivityScenario<SharedInstrumentPreviewActivity>,
+    ) {
+        clickText("Continue with Google")
+        awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+        awaitShellSettled(scene)
+        clickTab("Settings")
+        clickText("Set up ThinQ PAT")
+        awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+        setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+        clickText("Verify and save securely")
+        awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+        clickTab("Home")
+        awaitNode { it.text?.toString() == "25" }
+        clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+        awaitNode { it.text?.toString() == "26" }
+        awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+        scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+    }
+
     private fun awaitShellSettled(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {
         var previousTelemetryReads = -1
         var stableSamples = 0
@@ -1855,6 +2190,10 @@ class SharedInstrumentUiTest {
             }
             selected
         }
+        // Selector copy exists only on Settings; settle recomposition without
+        // requiring a route-specific label from Home, Device, Energy or History.
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.waitForIdle(100, 2_000)
     }
 
     /** Stable identity+content fingerprint of an on-disk artifact; null when absent. */

@@ -304,6 +304,7 @@ private fun ProductionRouteHost(
                         credentialState = credentialState,
                         onBackToHome = { route = ProductionRoute.HOME },
                         onOpenSettings = { route = ProductionRoute.SETTINGS },
+                        nowProvider = nowProvider,
                         temperatureDraft = temperatureDraft,
                         onTemperatureDraftChange = { temperatureDraft = it },
                     )
@@ -671,6 +672,7 @@ fun ProductionDeviceRoute(
     credentialState: ThinQCredentialState,
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     temperatureDraft: TemperatureDraft? = null,
     onTemperatureDraftChange: (TemperatureDraft?) -> Unit = {},
 ) {
@@ -682,6 +684,7 @@ fun ProductionDeviceRoute(
     InstrumentPage("Device", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Live state and supported controls for your air conditioner." else null) {
         ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession = true,
             onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true,
+            nowProvider = nowProvider,
             temperatureDraft = temperatureDraft, onTemperatureDraftChange = onTemperatureDraftChange)
         InstrumentPanel {
             InstrumentDisclosure("Device details", "Identity, profile and last confirmed state", informational = true) {

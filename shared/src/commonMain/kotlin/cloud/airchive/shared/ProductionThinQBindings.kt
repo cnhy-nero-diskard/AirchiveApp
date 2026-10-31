@@ -56,6 +56,17 @@ data class ProductionThinQBindings(
      */
     val cancelSetupAttempt: suspend () -> Unit = {},
     val onDeviceOpened: suspend () -> ThinQEntryResult,
+    /**
+     * Explicit user "Refresh device state" action (task 3.2): forced
+     * same-context profile-capability refresh — refetches the device
+     * list/profile and re-reads live state under the captured active context,
+     * even when a valid same-context publication already exists, so changed
+     * LG units/bounds/steps become visible without a context change. Runs
+     * only on explicit user action (never from route entry, a timer, or any
+     * polling path) and never changes the credential generation. Defaults to
+     * the [onDeviceOpened] entry path for preview/manual callers.
+     */
+    val refreshDeviceProfile: suspend () -> ThinQEntryResult = { onDeviceOpened() },
     val refreshLiveState: suspend () -> Unit,
     val removeCredential: suspend () -> ThinQCredentialRemovalOutcome,
     val clearCachedDeviceProfile: suspend () -> Unit,

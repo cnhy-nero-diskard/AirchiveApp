@@ -252,6 +252,31 @@ class SharedInstrumentShellFixture(context: Context) {
         thinQ.setReadFailure(failure)
     }
 
+    /** Replaces only the synthetic client's verified profile for task-3.2 journeys. */
+    fun setThinQProfileForTest(profile: ThinQDeviceProfile) {
+        thinQ.setProfile(profile)
+    }
+
+    /** Changes only the synthetic live observation; this submits no command. */
+    fun setThinQTargetTemperatureForTest(value: Double?) {
+        thinQ.setTargetTemperature(value)
+    }
+
+    /** Selects only a synthetic fake command response for native outcome tests. */
+    fun setThinQCommandFailureForTest(failure: cloud.airchive.shared.contract.thinq.CommandFailure?) {
+        thinQ.setCommandFailure(failure)
+    }
+
+    fun setThinQAcceptedWithoutConfirmationForTest() {
+        thinQ.setVerifyAfterAccept(false)
+        thinQ.setForceUnconfirmed(false)
+    }
+
+    fun setThinQUnconfirmedForTest() {
+        thinQ.setVerifyAfterAccept(true)
+        thinQ.setForceUnconfirmed(true)
+    }
+
     /** Injects a synthetic history adapter failure; callers use typed safe failures. */
     fun setTelemetryFailure(failure: Throwable?) {
         telemetry.setFailure(failure)
@@ -594,6 +619,36 @@ private class CountingThinQClient(
         val fake = delegate as? FakeThinQClient
             ?: error("The fixture ThinQ client is not the expected fake")
         fake.failReadsWith = failure
+    }
+
+    fun setProfile(profile: ThinQDeviceProfile) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.setProfile(profile)
+    }
+
+    fun setTargetTemperature(value: Double?) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.setTargetTemperature(value)
+    }
+
+    fun setCommandFailure(failure: cloud.airchive.shared.contract.thinq.CommandFailure?) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.failWith = failure
+    }
+
+    fun setVerifyAfterAccept(verify: Boolean) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.verifyAfterAccept = verify
+    }
+
+    fun setForceUnconfirmed(force: Boolean) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.forceUnconfirmed = force
     }
 
     override suspend fun listDevices(): List<ThinQDevice> {

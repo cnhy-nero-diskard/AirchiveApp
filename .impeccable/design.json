@@ -58,12 +58,14 @@
     "shadows": [],
     "motion": [],
     "breakpoints": [
-      { "name": "panel-stack-width", "value": "available width < 300dp", "purpose": "Stack paired readings and coverage/freshness; horizontal divider replaces vertical readout rule." },
+      { "name": "panel-stack-width", "value": "available width < 360dp", "purpose": "Stack paired readings and coverage/freshness before a normal five-character 76sp value wraps; this also satisfies the required <300dp narrow-width floor." },
       { "name": "panel-stack-type", "value": "fontScale > 1.2", "purpose": "The same stacking behavior, independently of available width." },
       { "name": "production-content-limit", "value": "640dp maximum", "purpose": "Centered production route content." }
     ],
     "nativeComponents": [
       { "name": "shared-panel", "source": "SharedInstrumentPanel", "details": "Surface roles; large shape; 3dp primary index band; no explicit shadow/elevation." },
+      { "name": "interface-detail-selector", "source": "InterfaceDetailSelector", "details": "Native Simple/Detailed FilterChips; Simple is the absent/unrecognized fallback and selection changes presentation only." },
+      { "name": "instrument-disclosure", "source": "InstrumentDisclosure", "details": "56dp-minimum native disclosure; informational sections collapse in Simple/open in Detailed, actions remain collapsed, and state-required recovery expansion takes precedence." },
       { "name": "apply", "source": "Button in SharedInstrumentPanel", "details": "Native filled Material button. Disabled until a changed local draft and a current verified profile/state permit submission." },
       { "name": "temperature-step", "source": "StepControl", "details": "FilledTonalIconButton with 20dp Canvas stroke icon, native states and explicit accessible labels; changes local draft." },
       { "name": "choice-row", "source": "InstrumentChoice", "details": "TextButton, quiet top divider, right chevron and native DropdownMenu. Current option marked and disabled; supported options only." },
@@ -75,14 +77,14 @@
     ],
     "implementationScope": {
       "global": "AirchiveTheme wraps production routes and production configuration-blocked UI.",
-      "composition": "Shared Instrument is implemented on production Home; secondary route layouts were not recomposed.",
+      "composition": "All five production routes use the shared instrument page/panel/disclosure composition with a 640dp maximum and 16dp/12dp page spacing; the legacy AirchiveApp demo remains separate.",
       "legacyDemo": "AirchiveApp still constructs default Material light/dark schemes.",
-      "dataPrinciples": ["Separate live/sample/sync freshness", "Gaps are not zero", "Sampled energy is not instantaneous power", "LG finalized totals are distinct from local interval sums", "Asia/Manila energy-day boundaries", "No invented device measurements or capabilities", "Explicit Apply and no automatic resend of ambiguous commands"],
-      "verificationRecord": ".impeccable/review/final-verification.md",
-      "verified": ["313 shared tests; zero failures", "Android debug and instrumentation APK builds", "Android debug lint", "Native explicit Apply/local draft and stale-state gating", "Phone light/dark and 1.3 text-scale screenshot runs"],
-      "reviewDisposition": "Six application findings resolved; no observed native UI defect warrants another batch within the scored scope.",
-      "pixelGate": "Failed/open, approximately 75% aggregate with hard region/missing classifications; not pixel-perfect and not waived.",
-      "limits": ["Labeled synthetic offline preview", "Signed-in physical-phone acceptance outstanding", "No additional real-device command acceptance", "Tablets, landscape and maximum system text scale not newly validated"]
+      "dataPrinciples": ["Simple/Detailed selection is presentation-only and installation-wide", "Informational/action/recovery disclosure defaults are distinct", "Separate live/sample/sync freshness", "Gaps are not zero", "Sampled energy is not instantaneous power", "LG finalized totals are distinct from local interval sums", "Asia/Manila energy-day boundaries", "No invented device measurements or capabilities", "Explicit Apply and no automatic resend of ambiguous commands"],
+      "verificationRecord": "docs/verification/shared-instrument/verification.md",
+      "verified": ["Historical Home score and six resolved findings are recorded in .impeccable/review/final-verification.md", "Current revision-linked host/native/build/lint matrix is recorded in docs/verification/shared-instrument/verification.md"],
+      "reviewDisposition": "Historical Home-scope review is not a substitute for current bounded delivery review; see the revision-linked verification record.",
+      "pixelGate": "Failed/open at exactly 74.69% aggregate with hard region/missing classifications; not pixel-perfect and not waived.",
+      "limits": ["Synthetic fake ports only for new native acceptance", "No production Firebase account or household-device commands", "Physical-phone signed-in acceptance outstanding", "Tablets, landscape, maximum system text scale, and full TalkBack certification remain separately scoped"]
     }
   },
   "components": [
@@ -97,7 +99,7 @@
   ],
   "narrative": {
     "northStar": "Home Instrument",
-    "overview": "Airchive is a precise personal instrument for one AC. Porcelain surfaces, slate text and restrained cobalt make live comfort controls and recorded energy equally legible. The owner selected the Shared Instrument Home layout: paired readings live within one quiet panel, with familiar native controls and clear measurement labels.\n\nThis document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Secondary production routes inherit the shared theme but retain their existing layouts.",
+    "overview": "Airchive is a precise personal instrument for one AC. Porcelain surfaces, slate text and restrained cobalt make live comfort controls and recorded energy equally legible. The owner selected the Shared Instrument Home layout: paired readings live within one quiet panel, with familiar native controls and clear measurement labels.\n\nThis document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps all five production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Production Home, Device, Energy, History, and Settings use the shared instrument page/panel/disclosure composition.",
     "keyCharacteristics": ["Equal comfort and energy readings.", "Flat native surfaces and quiet structural rules.", "Cobalt actions, slate context and explicit coverage status.", "Native controls, scalable text and honest data states."],
     "rules": [
       { "name": "The Semantic Color Rule", "body": "Resolve colors through Material roles so the same hierarchy survives light, dark, disabled and selected states; never use color as the only indication of status.", "section": "colors" },
@@ -106,6 +108,6 @@
       { "name": "The Flat Panel Rule", "body": "Keep Home's grouped instrument structure legible through surface roles and dividers; do not add a bespoke shadow to recreate preview pixels.", "section": "elevation" }
     ],
     "dos": ["Do keep comfort and energy readings equally prominent and apply the native stacking rule.", "Do preserve scalable text, readable status text, native semantics and at least 48dp interactive targets.", "Do distinguish live device age, latest usable sample age and history-sync age wherever they affect a decision.", "Do show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.", "Do preserve local temperature drafts, explicit Apply and supported/current-state command gating.", "Do reuse production Material roles in both implemented themes and keep native control states visible."],
-    "donts": ["Don't ship preview rasters as controls, charts, backgrounds or production data.", "Don't infer room temperature, humidity, cost, savings, automation or unsupported writable capabilities.", "Don't turn unavailable measurements into zero or sampled energy into instantaneous power.", "Don't disguise disabled controls or uncertain command outcomes to match a generated comp.", "Don't treat inherited secondary layouts or the legacy demo as a completed Home-style recomposition.", "Don't describe the open failed pixel gate as passed or the implementation as pixel-perfect."]
+    "donts": ["Don't ship preview rasters as controls, charts, backgrounds or production data.", "Don't infer room temperature, humidity, cost, savings, automation or unsupported writable capabilities.", "Don't turn unavailable measurements into zero or sampled energy into instantaneous power.", "Don't disguise disabled controls or uncertain command outcomes to match a generated comp.", "Don't treat the legacy demo as the production route shell or add automatic reads merely because presentation detail changed.", "Don't describe the open failed pixel gate as passed or the implementation as pixel-perfect."]
   }
 }

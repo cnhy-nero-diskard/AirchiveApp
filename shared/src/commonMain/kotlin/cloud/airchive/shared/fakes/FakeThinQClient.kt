@@ -40,6 +40,9 @@ class FakeThinQClient(
     /** When `false`, markup the accepted command as pending without confirming. */
     var verifyAfterAccept: Boolean = true
 
+    /** Test-only ambiguous outcome that leaves the prior synthetic live state intact. */
+    var forceUnconfirmed: Boolean = false
+
     private var live = ThinQLiveState(
         deviceId = deviceId,
         observedAtEpochMillis = nowEpochMillis,
@@ -55,7 +58,25 @@ class FakeThinQClient(
         liveReadTimestampEpochMillis = epochMillis
     }
 
-    private val profile = ThinQDeviceProfile(
+    /**
+     * Test-only mutation seam: replaces the fake capability profile returned
+     * by [profile] (e.g. changed temperature units/bounds/steps) for
+     * synthetic refresh journeys. Fake in-memory data only.
+     */
+    fun setProfile(newProfile: ThinQDeviceProfile) {
+        profile = newProfile
+    }
+
+    /**
+     * Test-only mutation seam: changes the fake live target temperature
+     * directly, without a command, to simulate the AC moving on its own.
+     * Fake in-memory data only.
+     */
+    fun setTargetTemperature(value: Double?) {
+        live = live.copy(targetTemperature = value)
+    }
+
+    private var profile = ThinQDeviceProfile(
         deviceId = deviceId,
         modelName = "Fake AC-27TK",
         controls = AcControls(
@@ -119,6 +140,17 @@ class FakeThinQClient(
                 status = CommandStatus.FAILED,
                 failure = CommandFailure.INVALID_REQUEST,
                 message = "Profile does not permit this value.",
+            )
+        }
+
+        if (forceUnconfirmed) {
+            val observed = live.copy(observedAtEpochMillis = nowEpochMillis)
+            return outcome.copy(
+                status = CommandStatus.UNCONFIRMED,
+                failure = CommandFailure.UNKNOWN,
+                observedAtEpochMillis = nowEpochMillis,
+                observedState = observed,
+                message = "Synthetic command outcome is deliberately unconfirmed.",
             )
         }
 

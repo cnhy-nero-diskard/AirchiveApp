@@ -78,7 +78,7 @@ internal fun ProductionHomeInstrument(
     val now by produceState(nowProvider()) {
         while (true) { value = nowProvider(); delay(30_000) }
     }
-    suspend fun refresh() {
+    suspend fun refresh(forceProfileRefresh: Boolean = false) {
         if (reading) return
         reading = true
         entrySettled = false
@@ -87,7 +87,15 @@ internal fun ProductionHomeInstrument(
         val capturedKey = contextKey
         try {
             val entryBindings = bindings ?: return
-            val result = entryBindings.onDeviceOpened()
+            // Route entry reuses a valid same-context publication; only the
+            // explicit "Refresh device state" action forces the same-context
+            // profile-capability refetch (task 3.2). No automatic/polling
+            // path ever forces it.
+            val result = if (forceProfileRefresh) {
+                entryBindings.refreshDeviceProfile()
+            } else {
+                entryBindings.onDeviceOpened()
+            }
             entryReadComplete = homeEntryReady(
                 result = result,
                 capturedKey = capturedKey,
@@ -127,7 +135,7 @@ internal fun ProductionHomeInstrument(
             // publication; navigation/detail recomposition never resends it.
             bindings.dispatchCommand(request, contextKey)
         } else null,
-        onRefresh = { scope.launch { refresh() } }, onEnergy = onEnergy,
+        onRefresh = { scope.launch { refresh(forceProfileRefresh = true) } }, onEnergy = onEnergy,
         onSetup = if (!canRead) onSettings else null,
         refreshing = reading,
         commandSlotOccupied = commandSlotOccupied,
@@ -237,7 +245,11 @@ fun SharedInstrumentPanel(
             }
             setupMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val stack = maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f
+                // At this width, the two 76sp readouts can wrap a normal
+                // five-character energy value (for example 15.11) even
+                // though the measurement field is still above the semantic
+                // narrow-width floor. Stack before either reading splits.
+                val stack = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f
                 val target: @Composable () -> Unit = {
                     InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
                         (draftResolution.displayUnit ?: capability?.unit)?.symbol() ?: "°C")
@@ -355,7 +367,7 @@ fun SharedInstrumentPanel(
                 Text(when { !hasSamples -> "No usable samples yet"; complete -> "Recorded coverage complete"; else -> "Incomplete coverage" },
                     style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
             } }
-            if (maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f) {
+            if (maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { coverageBadge(); Text(sampleAge, style = MaterialTheme.typography.bodySmall) }
             } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.weight(1.4f)) { coverageBadge() }

@@ -1,6 +1,9 @@
 package cloud.airchive.shared.data.thinq
 
 import cloud.airchive.shared.contract.thinq.AcCommand
+import cloud.airchive.shared.contract.thinq.AcControls
+import cloud.airchive.shared.contract.thinq.TemperatureCapability
+import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.LocalHistoryPort
 import cloud.airchive.shared.contract.owner.OwnerSession
@@ -73,6 +76,83 @@ class ThinQContextCoordinatorTest {
         assertTrue(live is ThinQLiveRefreshState.Current)
         assertTrue(live.canIssueCommands, "the verified profile was published before the live read")
         assertEquals(TEST_DEVICE_ID, live.state.deviceId)
+    }
+
+    @Test
+    fun explicitProfileRefreshUpdatesCapabilitiesWithoutChangingTheContextGeneration() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        val keyBefore = fixture.coordinator.contextKey.value
+        val refreshedProfile = testProfile().copy(
+            controls = AcControls(
+                powerWritable = true,
+                targetTemperature = TemperatureCapability(
+                    min = 18.0,
+                    max = 29.0,
+                    step = 0.5,
+                    unit = TemperatureUnit.CELSIUS,
+                ),
+            ),
+        )
+        fixture.port.onProfile = { refreshedProfile }
+        fixture.port.onLiveState = { testLive().copy(targetTemperature = 27.0) }
+
+        val result = fixture.coordinator.refreshDeviceProfile()
+
+        assertEquals(ThinQEntryResult.Success, result)
+        assertEquals(keyBefore, fixture.coordinator.contextKey.value,
+            "an explicit same-owner profile update does not end or replace its credential context")
+        assertEquals(2, fixture.port.listCalls, "the explicit action refetches the device list")
+        assertEquals(2, fixture.port.profileCalls, "the explicit action refetches current capabilities")
+        assertEquals(2, fixture.port.liveCalls, "the explicit action also refreshes the matched live observation")
+        assertEquals(refreshedProfile, fixture.coordinator.deviceProfile.value?.profile)
+        val live = assertIs<ThinQLiveRefreshState.Current>(fixture.coordinator.liveStateController.state.value)
+        assertEquals(27.0, live.state.targetTemperature)
+        assertEquals(keyBefore, fixture.coordinator.deviceProfile.value?.contextKey)
+    }
+
+    @Test
+    fun forcedProfileRefreshDropsLateResultWhenTheOwnerChanges() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        val originalKey = fixture.coordinator.contextKey.value
+        val profileStep = NetworkStep()
+        fixture.port.onProfile = {
+            profileStep.hold()
+            testProfile().copy(
+                controls = AcControls(
+                    powerWritable = true,
+                    targetTemperature = TemperatureCapability(
+                        min = 18.0,
+                        max = 25.0,
+                        step = 1.0,
+                        unit = TemperatureUnit.CELSIUS,
+                    ),
+                ),
+            )
+        }
+
+        val refresh = async { fixture.coordinator.refreshDeviceProfile() }
+        profileStep.awaitEntered()
+        try {
+            withTimeout(INVALIDATION_TIMEOUT_MS) {
+                fixture.coordinator.onOwnerChanged("owner-b", TEST_PROJECT_ID)
+            }
+            assertEquals("owner-b", fixture.coordinator.contextKey.value.ownerUid)
+            assertNull(fixture.coordinator.deviceProfile.value,
+                "owner invalidation clears the old verified profile before late publication")
+        } finally {
+            profileStep.release()
+        }
+
+        assertEquals(ThinQEntryResult.Superseded, refresh.await())
+        assertEquals(2, fixture.port.profileCalls)
+        assertEquals(1, fixture.port.liveCalls, "superseded profile refresh sends no follow-up live read")
+        assertNull(fixture.coordinator.deviceProfile.value)
+        assertTrue(fixture.coordinator.contextKey.value != originalKey)
+        assertTrue(fixture.coordinator.liveStateController.state.value is ThinQLiveRefreshState.NotRead)
     }
 
     @Test
