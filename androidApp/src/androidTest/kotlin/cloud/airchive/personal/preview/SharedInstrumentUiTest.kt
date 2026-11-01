@@ -1630,10 +1630,159 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun narrowPhoneWindowKeepsReadingsImeAndDialogReachable() {
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        val widthDp = metrics.widthPixels / metrics.density
+        assertTrue("the emulator window is measured below 300dp (was ${widthDp}dp)", widthDp < 300f)
+        assertEquals("the narrow-width run uses the default scale", 1.0f,
+            instrumentation.targetContext.resources.configuration.fontScale, 0.01f)
+        clearFixturePreferences()
+
+        launchShell().use { scene ->
+            signInAndConnectSyntheticThinQ(scene)
+            clickTab("Home")
+            awaitNode { it.text?.toString() == "Airchive" }
+            val homeTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+            assertTrue("Home exposes the temperature reading: $homeTree", homeTree.contains("Set temperature"))
+            assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Sampled today"))
+            assertTrue("the long sampled value stays complete: $homeTree", homeTree.contains("15.11"))
+
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val temperature = find(root) { it.text?.toString()?.contains("Set temperature") == true }
+                ?: throw AssertionError("Temperature reading semantics were unavailable: $homeTree")
+            val sampled = find(root) { it.text?.toString()?.contains("Sampled today") == true }
+                ?: throw AssertionError("Sampled reading semantics were unavailable: $homeTree")
+            val temperatureBounds = Rect().also(temperature::getBoundsInScreen)
+            val sampledBounds = Rect().also(sampled::getBoundsInScreen)
+            assertTrue("the reading fields measure below 300dp",
+                temperatureBounds.width() / metrics.density < 300f && sampledBounds.width() / metrics.density < 300f)
+            assertTrue("the two readings stack before the values shrink",
+                sampledBounds.top > temperatureBounds.top)
+            assertTrue("the current route exposes selected semantics", selectedDestination("Home"))
+            val heading = awaitVisibleNode { it.text?.toString() == "Airchive" }
+            val headingBounds = Rect().also(heading::getBoundsInScreen)
+            assertTrue("the route heading begins below the status inset",
+                headingBounds.top >= systemBarDimensionPx("status_bar_height"))
+            val homeTab = awaitVisibleNode { it.text?.toString() == "Home" }
+            val tabBounds = Rect().also(homeTab::getBoundsInScreen)
+            assertTrue("the route tab stays above the system navigation inset",
+                tabBounds.bottom <= metrics.heightPixels - systemBarDimensionPx("navigation_bar_height"))
+            saveCapture("synthetic-home-narrow-under-300dp-scale-1.0")
+
+            scrollForward()
+            saveCapture("synthetic-home-narrow-controls-reachable-scale-1.0")
+
+            clickTab("Settings")
+            clickText("Replace ThinQ PAT")
+            val fields = awaitEditableFields()
+            assertEquals("the Settings form exposes token and country inputs", 2, fields.size)
+            clickNode(fields[0])
+            awaitTrue("the Settings input opens the native keyboard", ::inputMethodShown)
+            assertTrue("the token field retains its password semantics", awaitEditableFields()[0].isPassword)
+            assertTrue("native Tab advances focus to the country field", uiDevice.pressKeyCode(61))
+            awaitTrue("the country field receives focus") { awaitEditableFields().getOrNull(1)?.isFocused == true }
+            assertTrue("native Back first dismisses the keyboard", uiDevice.pressBack())
+            awaitTrue("the IME is dismissed") { !inputMethodShown() }
+            assertEquals("Back leaves the Settings form in place", 2, awaitEditableFields().size)
+            clickText("Cancel")
+
+            clickDisclosure("Account actions")
+            var disclosure = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                it.text?.toString() == "Account actions"
+            } ?: throw AssertionError("The expanded Account actions disclosure is unavailable")
+            while ((disclosure.stateDescription == null || (!disclosure.isClickable && disclosure.actionList.none {
+                    it.id == AccessibilityNodeInfo.ACTION_CLICK
+                })) && disclosure.parent != null
+            ) disclosure = disclosure.parent
+            val disclosureBounds = Rect().also(disclosure::getBoundsInScreen)
+            assertTrue("Settings recovery disclosure meets the 56dp target; height=${disclosureBounds.height() / metrics.density}dp, bounds=$disclosureBounds, clickable=${disclosure.isClickable}, class=${disclosure.className}, text=${disclosure.text}, state=${disclosure.stateDescription}, density=${metrics.density}",
+                disclosureBounds.height() / metrics.density >= 56f)
+            clickText("Sign out of Google")
+            awaitVisibleNode { it.text?.toString() == "Sign out of Google?" }
+            assertTrue("native Back cancels the confirmation", uiDevice.pressBack())
+            awaitTrue("the confirmation closes without signing out") {
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.text?.toString() == "Sign out of Google?"
+                } == null
+            }
+            assertEquals("the synthetic owner session remains signed in",
+                "Fake Owner", awaitVisibleNode { it.text?.toString() == "Fake Owner" }.text?.toString())
+        }
+    }
+
+    @Test fun productionShellPhoneLandscapeKeepsRoutesReachable() {
+        assertEquals("the emulator is in phone landscape",
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE,
+            instrumentation.targetContext.resources.configuration.orientation)
+        assertEquals("the landscape run uses the default scale", 1.0f,
+            instrumentation.targetContext.resources.configuration.fontScale, 0.01f)
+        clearFixturePreferences()
+
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitShellSettled(scene)
+            clickTab("Home")
+            awaitVisibleNode { it.text?.toString() == "Airchive" }
+            assertTrue("Home remains the selected landscape route", selectedDestination("Home"))
+            awaitVisibleNode { it.text?.toString() == "Sampled today" }
+            awaitVisibleNode { it.text?.toString() == "15.11" }
+            saveCapture("synthetic-home-phone-landscape-scale-1.0")
+
+            val navigationTop = bottomNavigationTopPx("Home")
+            var temperatureUnit: AccessibilityNodeInfo? = null
+            var energyUnit: AccessibilityNodeInfo? = null
+            var unitScrolls = 0
+            while ((temperatureUnit == null || energyUnit == null) && unitScrolls < 5) {
+                scrollForward()
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                temperatureUnit = find(root) { it.isVisibleToUser && it.text?.toString() == "°C" }
+                energyUnit = find(root) { it.isVisibleToUser && it.text?.toString() == "kWh" }
+                if (temperatureUnit != null && energyUnit != null) {
+                    val temperatureBounds = Rect().also(temperatureUnit::getBoundsInScreen)
+                    val energyBounds = Rect().also(energyUnit::getBoundsInScreen)
+                    if (temperatureBounds.bottom > navigationTop || energyBounds.bottom > navigationTop) {
+                        temperatureUnit = null
+                        energyUnit = null
+                    }
+                }
+                unitScrolls++
+            }
+            assertTrue("landscape scrolling exposes the complete temperature and energy units",
+                temperatureUnit != null && energyUnit != null)
+            val temperatureUnitBounds = Rect().also(requireNotNull(temperatureUnit)::getBoundsInScreen)
+            val energyUnitBounds = Rect().also(requireNotNull(energyUnit)::getBoundsInScreen)
+            assertTrue("the landscape readout units remain above the fixed navigation without overlap",
+                temperatureUnitBounds.bottom <= navigationTop && energyUnitBounds.bottom <= navigationTop)
+            saveCapture("synthetic-home-readings-phone-landscape-scale-1.0")
+
+            var action: AccessibilityNodeInfo? = null
+            repeat(8) {
+                action = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.isVisibleToUser && it.text?.toString() == "Refresh history"
+                }
+                if (action == null) scrollForward()
+            }
+            val visibleAction = action
+                ?: throw AssertionError("The Home content action remains reachable by scrolling: " +
+                    accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow))
+            val actionBounds = Rect().also(visibleAction::getBoundsInScreen)
+            assertTrue("Home content action scrolls above the fixed navigation without overlap; action=$actionBounds, navigationTop=$navigationTop",
+                actionBounds.bottom <= navigationTop)
+            saveCapture("synthetic-home-controls-phone-landscape-scale-1.0")
+
+            for (route in listOf("Device", "Energy", "History", "Settings")) {
+                clickTab(route)
+                awaitTrue("$route remains selected in phone landscape") { selectedDestination(route) }
+                saveCapture("synthetic-$route-phone-landscape-scale-1.0")
+            }
+        }
+    }
+
     @Test fun captureSyntheticProductionShellVisualMatrix() {
         val fontScale = instrumentation.targetContext.resources.configuration.fontScale
-        assertTrue("run this matrix at the explicitly configured 1.0 or 1.3 text scale",
-            kotlin.math.abs(fontScale - 1.0f) < 0.01f || kotlin.math.abs(fontScale - 1.3f) < 0.01f)
+        assertTrue("run this matrix at the explicitly configured 1.0, 1.3, or maximum 2.0 text scale",
+            listOf(1.0f, 1.3f, 2.0f).any { kotlin.math.abs(fontScale - it) < 0.01f })
         val scaleLabel = java.lang.String.format(java.util.Locale.ROOT, "%.1f", fontScale)
         val uiMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java)
         val previousNightMode = uiMode.nightMode
@@ -1954,6 +2103,46 @@ class SharedInstrumentUiTest {
         }
         assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments))
         instrumentation.waitForIdleSync()
+    }
+
+    private fun signInAndConnectSyntheticThinQ(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {
+        clickText("Continue with Google")
+        awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+        clickTab("Settings")
+        awaitShellSettled(scene)
+        clickText("Set up ThinQ PAT")
+        awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+        setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+        clickText("Verify and save securely")
+        awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+    }
+
+    private fun inputMethodShown(): Boolean {
+        val output = ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand("dumpsys input_method"),
+        ).bufferedReader().use { it.readText() }
+        return Regex("mInputShown=(true|false)").find(output)?.groupValues?.get(1) == "true"
+    }
+
+    private fun systemBarDimensionPx(name: String): Int {
+        val context = instrumentation.targetContext
+        val resource = context.resources.getIdentifier(name, "dimen", "android")
+        return if (resource == 0) 0 else context.resources.getDimensionPixelSize(resource)
+    }
+
+    private fun bottomNavigationTopPx(label: String): Int {
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        var node = awaitVisibleNode { it.text?.toString() == label }
+        while (node.parent != null) {
+            node = node.parent
+            val bounds = Rect().also(node::getBoundsInScreen)
+            if (bounds.width() >= metrics.widthPixels * 0.9f &&
+                bounds.top >= metrics.heightPixels * 0.55f &&
+                bounds.height() >= metrics.density * 64f &&
+                bounds.height() <= metrics.heightPixels * 0.45f
+            ) return bounds.top
+        }
+        throw AssertionError("Could not measure the fixed bottom navigation container for $label")
     }
 
     private fun clearFixturePreferences() {

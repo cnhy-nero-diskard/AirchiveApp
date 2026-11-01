@@ -113,14 +113,111 @@ layout; the width threshold was changed to stack before shrink at 360dp. The
 default-scale Home capture shows the full value on one line. These captures do
 not change, score, or waive the historical 74.69% pixel gate.
 
+### Narrow, landscape, and maximum-text acceptance (tasks 5.4 and 6.1)
+
+- **Source/test parent:** `c0c35af880a416571490a42f437cec042df2f69f`
+- **Narrow and maximum-text test tree:**
+  `290e0b9c1cdd47ddfa32b5944384ce39161b50c0` (parent plus instrumentation
+  source before the later landscape-only extension)
+- **Final landscape and branch-build source/test tree:**
+  `c388393205f2c3a264c0f3b6aa861b9296186060` (same application source plus
+  the extended landscape case and navigation-bounds helper; documentation,
+  captures, and synced specifications are excluded)
+- **Device:** `Medium_Phone_API_35` AVD, Android 15/API 35, physical 1080x2400
+  at 420dpi. Fake owner/history/ThinQ ports and synthetic credentials were used.
+
+**Narrow window:** `narrowPhoneWindowKeepsReadingsImeAndDialogReachable` passed
+with `adb shell wm size 720x1600`, 420dpi, and effective `font_scale=1.0`, which
+measured a 274dp-wide window. The test confirmed stacked complete readings,
+selected-route semantics, status/navigation insets, the Settings token and
+country fields, native IME visibility, Tab focus to country, Back dismissing
+the IME first, a measured 56dp Account actions disclosure, and Back cancelling
+sign-out. Two captures are recorded as
+`narrow-synthetic-home-under-300dp-scale-1.0.png` and
+`narrow-synthetic-home-controls-reachable-scale-1.0.png`.
+
+```text
+adb shell am instrument -w -e class cloud.airchive.personal.preview.SharedInstrumentUiTest#narrowPhoneWindowKeepsReadingsImeAndDialogReachable cloud.airchive.personal.test/androidx.test.runner.AndroidJUnitRunner
+Result: OK (1 test)
+```
+
+**Phone landscape:** `productionShellPhoneLandscapeKeepsRoutesReachable` passed
+at logical 914x411dp and effective `font_scale=1.0`. It checked the `15.11`
+sampled reading, scrolled until both `°C` and `kWh` were fully above the fixed
+navigation container, confirmed the Home `Refresh history` action stays above
+navigation, and selected all five routes. Captures are recorded as
+`landscape-synthetic-{home,home-readings,home-controls,device,energy,history,settings}-scale-1.0.png`.
+
+```text
+adb shell am instrument -w -e class cloud.airchive.personal.preview.SharedInstrumentUiTest#productionShellPhoneLandscapeKeepsRoutesReachable cloud.airchive.personal.test/androidx.test.runner.AndroidJUnitRunner
+Result: OK (1 test)
+```
+
+**Maximum system text:** the Android Display size and text slider was set to its
+maximum; `font_scale=2.0` was checked before the run. The five-route production
+shell matrix passed in Simple/Detailed and light/dark, including the long
+Settings/measurement explanations and the complete `25°C` / `15.11kWh`
+readings. Twenty route captures and four lower Home chart captures are recorded
+with `scale-2.0` filenames.
+
+```text
+adb shell am instrument -w -e class cloud.airchive.personal.preview.SharedInstrumentUiTest#captureSyntheticProductionShellVisualMatrix cloud.airchive.personal.test/androidx.test.runner.AndroidJUnitRunner
+Result: OK (1 test)
+```
+
+The narrow and maximum-text instrumentation runs used tree
+`290e0b9c1cdd47ddfa32b5944384ce39161b50c0`; the later test-only landscape
+extension does not change application source. The final landscape test and
+branch build used tree `c388393205f2c3a264c0f3b6aa861b9296186060`. A repeat of
+the maximum-text matrix on that final test tree was interrupted during the
+switch to physical-device testing, so no result is claimed for that repeat.
+
+Home step buttons use explicit 48dp size and action buttons use 48dp minimums;
+the native test exercises these controls, while only the Settings disclosure
+has an automated measured 56dp bounds assertion. Full TalkBack labels/order/
+announcements were not manually checked because TalkBack was unavailable on
+this AVD. Source semantics and selected/expanded-state assertions are not a
+TalkBack certification. After the tests, the AVD was restored to 1080x2400,
+420dpi, both text scales 1.0, light mode, automatic rotation enabled, and
+portrait orientation.
+
+The connected phone was identified as Xiaomi `2406APNFAG` (Android 16/API 36,
+1220x2712 at 520dpi). It already contained a non-debug
+`cloud.airchive.personal` 0.1.0 installation, which is the instrumentation APK's
+target package. No install, replacement, or uninstall was attempted;
+physical-phone acceptance remains unverified pending a side-by-side test
+application ID or explicit authorization to replace that installation.
+
+### Final branch validation (tasks 5.1 and 7.2)
+
+- **Tested source/test parent:** `c0c35af880a416571490a42f437cec042df2f69f`
+- **Tested source/test tree:** `c388393205f2c3a264c0f3b6aa861b9296186060`
+- **Command:** `.gradlew.bat --no-daemon --max-workers=2 :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug`
+- **Result:** `BUILD SUCCESSFUL`; 383 shared host tests passed with 0 failures,
+  errors, or skips. Debug APK and instrumentation APK assembled. Debug lint
+  reported the same six findings: `OldTargetApi`, `GradleDependency`,
+  `DataExtractionRules`, `MissingApplicationIcon`, `UseKtx`, and
+  `AutoboxingStateCreation`.
+- **OpenSpec:** strict validation of `deliver-shared-instrument-ui` and
+  `openspec validate --specs` both passed after the additive sync. The change
+  remains active and unarchived.
+- **Main recheck:** fetched `origin/main` at `1c87a60` (`add impeccable to
+  gitignore`). Its only path is `.gitignore`; it does not affect the app,
+  instrumentation, specs, or native evidence. No source verification was
+  invalidated by that commit. The working branch remains based on its existing
+  history and the PR will target the fetched `main`.
+- The source/test tree above is the final native-test/build tree. OpenSpec sync,
+  task tracking, and evidence edits after it are documentation/specification
+  only; no application source changed afterward.
+
 ### Remaining unverified acceptance
 
 - **Task 5.3:** Passed for all five production routes, both interface modes,
   both system themes, and font scales 1.0/1.3; see the source/test tree and 44
   new native captures above.
-- **Task 5.4:** `<300dp` measured field, landscape, maximum system text scale,
-  IME/Back/focus traversal and full screen-reader/TalkBack acceptance remain
-  unverified. No physical phone was used.
+- **Task 5.4:** Narrow, landscape, maximum-text, IME/Back/focus, inset and
+  disclosure checks passed within the AVD scope above. Full TalkBack
+  announcements/order and physical-phone acceptance remain unverified.
 - **Task 5.5:** Source/manifest boundary inspection found the preview Activity
   only in the non-exported `src/debug` manifest and the production `MainActivity`
   builds `ProductionAirchiveApp` with Firebase/Android ThinQ adapters, not the
@@ -132,6 +229,8 @@ not change, score, or waive the historical 74.69% pixel gate.
 - No production account, real ThinQ credential, household device command,
   Firebase-emulator suite, private signing material, tablet, or iOS acceptance
   was used or claimed.
+- The connected physical phone was not modified; its existing non-debug app
+  prevented a safe instrumentation install under the current package ID.
 - The historical Home pixel gate remains failed/open at exactly 74.69%; none of
   these captures changes, scores, or waives that historical gate.
 
