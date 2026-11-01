@@ -512,12 +512,27 @@ private fun InstrumentEnergyChart(day: EnergyDaySummary) {
         "${it.hour}:00, ${it.energyWh?.let { value -> instrumentNumber(value) + " Wh recorded" } ?: if (it.expected == 0) "future" else "gap"}, ${it.usable} of ${it.expected} intervals measured"
     } + ". Dashed outlines mark partial groups. Open Energy for individual five-minute values."
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Row(Modifier.fillMaxWidth()) {
-        groups.forEach { group ->
-            Text(group.energyWh?.let { if (abs(it - it.roundToLong()) < .01) it.roundToLong().toString() else instrumentNumber(it) }
-                ?: if (group.expected == 0) "" else "Gap", modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    val labels = groups.map { group ->
+        group.energyWh?.let { if (abs(it - it.roundToLong()) < .01) it.roundToLong().toString() else instrumentNumber(it) }
+            ?: if (group.expected == 0) "" else "Gap"
+    }
+    if (LocalDensity.current.fontScale > 1.2f) {
+        groups.indices.chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { index ->
+                    Text(labels[index], modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        }
+    } else {
+        Row(Modifier.fillMaxWidth()) {
+            labels.forEach { label ->
+                Text(label, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
         }
     }
     Canvas(Modifier.fillMaxWidth().height(76.dp).semantics { contentDescription = description }) {

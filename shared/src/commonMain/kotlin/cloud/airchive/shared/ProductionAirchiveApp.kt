@@ -358,7 +358,9 @@ private fun ProductionBottomNavigation(
     current: ProductionRoute,
     onSelect: (ProductionRoute) -> Unit,
 ) {
-    InstrumentNavigation(current.ordinal) { onSelect(ProductionRoute.entries[it]) }
+    key(current) {
+        InstrumentNavigation(current.ordinal) { onSelect(ProductionRoute.entries[it]) }
+    }
 }
 
 @Composable

@@ -12,6 +12,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -68,9 +72,17 @@ fun AirchiveTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable ()
 fun InstrumentNavigation(selectedIndex: Int, onSelect: (Int) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
         ShellDestination.entries.forEachIndexed { index, destination ->
-            NavigationBarItem(selected = selectedIndex == index, onClick = { onSelect(index) },
+            NavigationBarItem(
+                selected = selectedIndex == index,
+                onClick = { onSelect(index) },
                 icon = { DestinationGlyph(destination, selectedIndex == index) },
-                label = { Text(listOf("Home", "Device", "Energy", "History", "Settings")[index]) })
+                label = {
+                    Text(listOf("Home", "Device", "Energy", "History", "Settings")[index],
+                        modifier = Modifier.semantics {
+                            selected = selectedIndex == index
+                            if (selectedIndex == index) stateDescription = "Selected"
+                        })
+                })
         }
     }
 }

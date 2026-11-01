@@ -1107,6 +1107,8 @@ class SharedInstrumentUiTest {
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             assertDisclosureState("History and storage", "Expanded")
             awaitVisibleNode { it.text?.toString() == "Local diagnostics · nonsecret" }
+            scrollBackward()
+            assertDisclosureState("History access", "Expanded")
             assertDisclosureState("Account actions", "Collapsed")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             scene.onActivity {
@@ -1628,6 +1630,110 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun captureSyntheticProductionShellVisualMatrix() {
+        val fontScale = instrumentation.targetContext.resources.configuration.fontScale
+        assertTrue("run this matrix at the explicitly configured 1.0 or 1.3 text scale",
+            kotlin.math.abs(fontScale - 1.0f) < 0.01f || kotlin.math.abs(fontScale - 1.3f) < 0.01f)
+        val scaleLabel = java.lang.String.format(java.util.Locale.ROOT, "%.1f", fontScale)
+        val uiMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java)
+        val previousNightMode = uiMode.nightMode
+        fun setSystemTheme(mode: String) {
+            ParcelFileDescriptor.AutoCloseInputStream(
+                instrumentation.uiAutomation.executeShellCommand("cmd uimode night $mode"),
+            ).bufferedReader().use { it.readText() }
+        }
+
+        try {
+            for (dark in listOf(false, true)) {
+                setSystemTheme(if (dark) "yes" else "no")
+                clearFixturePreferences()
+                launchShell().use { scene ->
+                    clickText("Continue with Google")
+                    awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+                    clickTab("Settings")
+                    awaitShellSettled(scene)
+                    clickText("Set up ThinQ PAT")
+                    awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+                    setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+                    clickText("Verify and save securely")
+                    awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+
+                    for (detail in listOf("Simple", "Detailed")) {
+                        clickTab("Settings")
+                        if (detail == "Detailed") {
+                            clickText("Set up ThinQ PAT")
+                            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+                            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
+                            clickText("Verify and save securely")
+                            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+                        }
+                        if (detail == "Detailed") clickText("Detailed")
+                        val description = if (detail == "Detailed") {
+                            "More explanations and technical details across the app."
+                        } else {
+                            "Essentials first. Open extra details when you need them."
+                        }
+                        awaitVisibleNode { it.text?.toString() == description }
+                        awaitVisibleNode { it.text?.toString() == "Interface detail" }
+                        instrumentation.uiAutomation.waitForIdle(200, 5_000)
+
+                        for ((route, anchor) in listOf(
+                            "Home" to "Airchive",
+                            "Device" to "Temperature",
+                            "Energy" to "Sampled energy",
+                            "History" to "History",
+                        )) {
+                            clickTab(route)
+                            try {
+                                awaitNode { it.text?.toString() == anchor }
+                            } catch (failure: AssertionError) {
+                                throw AssertionError("$route content anchor '$anchor' is unavailable", failure)
+                            }
+                            try {
+                                awaitTrue("$route exposes its selected native destination") {
+                                    selectedDestination(route)
+                                }
+                            } catch (failure: AssertionError) {
+                                throw AssertionError(
+                                    "$route selection semantics: ${destinationSemantics(route)}", failure,
+                                )
+                            }
+                            instrumentation.uiAutomation.waitForIdle(200, 5_000)
+                            saveCapture("synthetic-shell-${detail.lowercase()}-$route-${if (dark) "dark" else "light"}-scale-$scaleLabel")
+                            if (route == "Home" && fontScale > 1.2f) {
+                                scrollForward()
+                                awaitVisibleNode { it.text?.toString() == "1829" }
+                                saveCapture(
+                                    "synthetic-shell-${detail.lowercase()}-Home-energy-labels-" +
+                                        "${if (dark) "dark" else "light"}-scale-$scaleLabel",
+                                )
+                            }
+                        }
+
+                        val fixture = AtomicReference<SharedInstrumentShellFixture>()
+                        scene.onActivity { fixture.set(it.shellFixture!!) }
+                        runBlocking { fixture.get().thinQContext.bindings().removeCredential() }
+                        clickTab("Settings")
+                        awaitVisibleNode { it.text?.toString() == "Interface detail" }
+                        assertFalse("the credential-free Settings capture exposes no raw synthetic PAT",
+                            accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+                                .contains(SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER))
+                        instrumentation.uiAutomation.waitForIdle(200, 5_000)
+                        saveCapture("synthetic-shell-${detail.lowercase()}-Settings-${if (dark) "dark" else "light"}-scale-$scaleLabel")
+                    }
+                }
+                clearFixturePreferences()
+            }
+        } finally {
+            clearFixturePreferences()
+            setSystemTheme(when (previousNightMode) {
+                UiModeManager.MODE_NIGHT_YES -> "yes"
+                UiModeManager.MODE_NIGHT_NO -> "no"
+                else -> "auto"
+            })
+        }
+    }
+
     @Test fun captureSyntheticProductionShellSimpleRoutesAtDefaultTextScale() {
         val scale = instrumentation.targetContext.resources.configuration.fontScale
         assertEquals("this evidence batch is explicitly the default text scale", 1.0f, scale, 0.01f)
@@ -1787,6 +1893,48 @@ class SharedInstrumentUiTest {
         throw AssertionError("Could not locate the bottom-navigation destination '$label'")
     }
 
+    private fun selectedDestination(label: String): Boolean {
+        val screenHeight = instrumentation.targetContext.resources.displayMetrics.heightPixels
+        val nodes = allNodes(instrumentation.uiAutomation.rootInActiveWindow)
+        val node = nodes
+            .filter { candidate ->
+                if (candidate.text?.toString() != label || !candidate.isVisibleToUser) return@filter false
+                val bounds = Rect()
+                candidate.getBoundsInScreen(bounds)
+                bounds.top > screenHeight * .6f
+            }
+            .maxByOrNull { candidate ->
+                val bounds = Rect()
+                candidate.getBoundsInScreen(bounds)
+                bounds.top
+            } ?: return false
+        val labelBounds = Rect().also(node::getBoundsInScreen)
+        return nodes.any { candidate ->
+            val selected = candidate.isSelected ||
+                candidate.stateDescription?.toString()?.equals("Selected", ignoreCase = true) == true
+            if (!selected) return@any false
+            val candidateBounds = Rect().also(candidate::getBoundsInScreen)
+            Rect.intersects(labelBounds, candidateBounds)
+        }
+    }
+
+    private fun destinationSemantics(label: String): String {
+        val screenHeight = instrumentation.targetContext.resources.displayMetrics.heightPixels
+        val selectedNodes = allNodes(instrumentation.uiAutomation.rootInActiveWindow).filter { candidate ->
+            if (!candidate.isVisibleToUser || (!candidate.isSelected &&
+                candidate.stateDescription?.toString()?.equals("Selected", ignoreCase = true) != true)
+            ) return@filter false
+            val bounds = Rect()
+            candidate.getBoundsInScreen(bounds)
+            bounds.top > screenHeight * .6f
+        }
+        val selected = selectedNodes.joinToString("; ") { candidate ->
+            val bounds = Rect().also(candidate::getBoundsInScreen)
+            "${candidate.className} text=${candidate.text} state=${candidate.stateDescription} bounds=$bounds"
+        }
+        return "expected $label; selected nodes: $selected"
+    }
+
     private fun setTextByHint(hint: String, value: String) {
         val fields = awaitEditableFields()
         assertEquals("the isolated setup form exposes exactly token and country inputs", 2, fields.size)
@@ -1892,7 +2040,9 @@ class SharedInstrumentUiTest {
     }
 
     private fun assertDisclosureState(title: String, expected: String) {
-        awaitVisibleNode { it.text?.toString() == title }
+        if (disclosureStateNow(title) != expected) {
+            awaitVisibleNode { it.text?.toString() == title }
+        }
         try {
             awaitTrue("$title disclosure state becomes $expected") {
                 disclosureStateNow(title) == expected
@@ -2190,10 +2340,23 @@ class SharedInstrumentUiTest {
             }
             selected
         }
-        // Selector copy exists only on Settings; settle recomposition without
-        // requiring a route-specific label from Home, Device, Energy or History.
-        instrumentation.waitForIdleSync()
-        instrumentation.uiAutomation.waitForIdle(100, 2_000)
+        // Selector copy exists only on Settings. Prefer its rendered label when
+        // it is on the active route; otherwise settle the current route without
+        // searching for a Settings-only string.
+        val selectorOnCurrentRoute = find(instrumentation.uiAutomation.rootInActiveWindow) {
+            it.text?.toString() == "Interface detail" && it.isVisibleToUser
+        } != null
+        if (selectorOnCurrentRoute) {
+            val selectedCopy = if (detail == cloud.airchive.shared.InterfaceDetail.DETAILED) {
+                "More explanations and technical details across the app."
+            } else {
+                "Essentials first. Open extra details when you need them."
+            }
+            awaitVisibleNode { it.text?.toString() == selectedCopy }
+        } else {
+            instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.waitForIdle(100, 2_000)
+        }
     }
 
     /** Stable identity+content fingerprint of an on-disk artifact; null when absent. */
