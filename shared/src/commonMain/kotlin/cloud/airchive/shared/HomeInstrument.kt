@@ -31,6 +31,7 @@ import cloud.airchive.shared.data.thinq.*
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlinx.coroutines.delay
@@ -233,15 +234,19 @@ fun SharedInstrumentPanel(
             Box(Modifier.fillMaxHeight().width(3.dp).background(MaterialTheme.colorScheme.primary))
         }
         Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 440.dp || LocalDensity.current.fontScale > 1.2f
+            val identity: @Composable () -> Unit = {
+                Column {
                     Text(deviceName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.semantics { heading() })
                     Text(known?.let { "Device read ${instrumentAge(nowEpochMillis - it.observedAtEpochMillis)} ago" }
                         ?: "No device read yet", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            }
+            val power: @Composable () -> Unit = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PowerIndicator(if (live is ThinQLiveRefreshState.Current) known?.powerOn else null)
                     Text(when { live !is ThinQLiveRefreshState.Current -> "Unknown"; known?.powerOn == true -> "On"; known?.powerOn == false -> "Off"; else -> "Unknown" },
                         style = MaterialTheme.typography.labelSmall)
@@ -250,6 +255,11 @@ fun SharedInstrumentPanel(
                         enabled = enabled && profile?.controls?.powerWritable == true && known?.powerOn != null,
                         modifier = Modifier.semantics { contentDescription = "AC power" })
                 }
+            }
+            if (compact) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { identity(); power() }
+            else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.weight(1f)) { identity() }; power()
+            }
             }
             setupMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -522,14 +532,31 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
     val index = options.indexOf(selection)
     Column(Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Text(title, style = MaterialTheme.typography.titleSmall)
-        Text("${if (liveIsCurrent) "Current" else "Last observed"}: ${current?.let(label) ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
+        val changed = selection != null && selection != current
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(selection?.let(label) ?: "Unknown", style = MaterialTheme.typography.bodyMedium,
+                color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { stateDescription = when {
+                    changed -> "Changed selection, not yet confirmed"
+                    liveIsCurrent -> "Current confirmed value"
+                    else -> "Last observed value"
+                } })
+        }
         if (options.isEmpty()) Text("Unavailable", style = MaterialTheme.typography.bodySmall)
-        else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { selection = options[if (index < 0) 0 else index - 1] }, enabled = enabled && index != 0, modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("-", modifier = Modifier.semantics { contentDescription = "Previous $title" }) }
-            Text(selection?.let(label) ?: "Choose", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            FilledTonalButton(onClick = { selection = options[if (index < 0) 0 else index + 1] }, enabled = enabled && index < options.lastIndex, modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("+", modifier = Modifier.semantics { contentDescription = "Next $title" }) }
-            Button(onClick = { selection?.let(onSelect) }, enabled = enabled && selection != null && selection != current, modifier = Modifier.heightIn(min = 48.dp)) { Text("Apply") }
+        else {
+            if (options.size > 1) {
+                Slider(value = index.coerceAtLeast(0).toFloat(),
+                    onValueChange = { selection = options[it.roundToInt().coerceIn(0, options.lastIndex)] },
+                    onValueChangeFinished = { selection?.takeIf { enabled && it != current }?.let(onSelect) },
+                    valueRange = 0f..options.lastIndex.toFloat(), steps = (options.size - 2).coerceAtLeast(0),
+                    enabled = enabled, modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = "$title selection"
+                        stateDescription = "${selection?.let(label) ?: "Not selected"}; ${if (changed) "changed, not confirmed" else if (liveIsCurrent) "current confirmed value" else "last observed value"}"
+                    })
+            } else if (selection == null) {
+                TextButton(onClick = { selection = options.single(); onSelect(options.single()) }, enabled = enabled) { Text("Choose ${label(options.single())}") }
+            }
         }
     }
 }

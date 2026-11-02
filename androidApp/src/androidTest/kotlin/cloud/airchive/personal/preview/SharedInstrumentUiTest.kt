@@ -679,6 +679,22 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun modeSliderSendsOnceOnRelease() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShellWithTemperatureDraft(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val slider = awaitVisibleNode { it.contentDescription?.toString() == "Mode selection" }
+            val sliderBounds = Rect().also(slider::getBoundsInScreen)
+            val y = sliderBounds.centerY()
+            assertTrue(uiDevice.swipe(sliderBounds.left + sliderBounds.width() / 8, y,
+                sliderBounds.left + sliderBounds.width() * 2 / 3, y, 20))
+            awaitTrue("one mode command is sent") { fixture.get().counters.thinQCommandSubmissions.get() == 1 }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+    }
+
     @Test fun acceptedCommandRemainsUnconfirmedWithoutAutomaticRetry() {
         clearFixturePreferences()
         launchShell().use { scene ->
