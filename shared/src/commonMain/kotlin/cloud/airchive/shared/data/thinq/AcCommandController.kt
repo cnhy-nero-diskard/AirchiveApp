@@ -12,6 +12,8 @@ import kotlin.time.Clock
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -114,6 +116,10 @@ class AcCommandController(
     private val mutex = Mutex()
     private val mutableState = MutableStateFlow<AcCommandUiState>(AcCommandUiState.Idle)
     private val mutableSlotState = MutableStateFlow<AcCommandSlotState>(AcCommandSlotState.Idle)
+    private val mutableConfirmations = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
+
+    /** One non-replayed event per newly confirmed command, for foreground feedback. */
+    val confirmations = mutableConfirmations.asSharedFlow()
 
     /** Observable command state; starts at [AcCommandUiState.Idle]. */
     val state: StateFlow<AcCommandUiState> = mutableState.asStateFlow()
@@ -322,7 +328,10 @@ class AcCommandController(
      * already reset presentation and this write is dropped.
      */
     private suspend fun publishTerminal(captured: ThinQContextKey?, state: AcCommandUiState) {
-        lifecycle.publishIfCurrent(captured) { mutableState.value = state }
+        lifecycle.publishIfCurrent(captured) {
+            mutableState.value = state
+            if (state is AcCommandUiState.Confirmed) mutableConfirmations.tryEmit(Unit)
+        }
     }
 
     /**
