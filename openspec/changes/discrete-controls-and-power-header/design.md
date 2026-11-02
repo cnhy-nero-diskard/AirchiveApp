@@ -1,0 +1,2 @@
+## Design
+Map slider positions to the exact ordered supported-option list. Slider changes are local drafts; releasing the slider submits one command if changed. Show one value, using color and accessible state to distinguish an unconfirmed selection. Unknown and single-option states remain explicit. Reflow identity and power controls vertically below 440 dp or above 1.2 text scale, retaining switch semantics and authority gates.
