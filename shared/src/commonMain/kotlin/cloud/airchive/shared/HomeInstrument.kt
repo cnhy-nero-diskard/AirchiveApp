@@ -71,7 +71,7 @@ internal fun ProductionHomeInstrument(
     val live = bindings?.liveStateController?.state?.collectAsState()?.value ?: ThinQLiveRefreshState.NotRead
     val command = bindings?.commandController?.state?.collectAsState()?.value ?: AcCommandUiState.Idle
     val commandSlot = bindings?.commandController?.slotState?.collectAsState()?.value ?: AcCommandSlotState.Idle
-    val commandSlotOccupied = commandSlot is AcCommandSlotState.Occupied
+    val commandSlotOccupied = commandSlot != AcCommandSlotState.Idle
     val neutralCommandBusy = commandSlotIsNeutralBusy(commandSlot, contextKey)
     var entrySettled by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     var entryReadComplete by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
@@ -345,6 +345,9 @@ fun SharedInstrumentPanel(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
+            } else if (live is ThinQLiveRefreshState.Loading) {
+                Text("Refreshing device state…", style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             } else if (commandSlotOccupied && commandState == AcCommandUiState.Idle) {
                 Text(
                     "A control request is still finishing. Controls are paused until it completes.",

@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 
-/** Exact event-trigger tests for the ten-minute foreground/manual refresh policy. */
+/** Exact event-trigger tests for the five-minute foreground/manual refresh policy. */
 class ForegroundRefreshControllerTest {
 
     private val nowEpochMillis = 1_750_000_000_000L
@@ -25,7 +25,7 @@ class ForegroundRefreshControllerTest {
     )
 
     @Test
-    fun openAndResumeRefreshOnlyAtTenMinutesButManualAlwaysRefreshes() = runBlocking {
+    fun openAndResumeRefreshOnlyAtFiveMinutesButManualAlwaysRefreshes() = runBlocking {
         val local = FakeLocalHistory()
         val telemetry = CountingMutationTelemetry(
             FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis, observations = emptyList()),
@@ -51,7 +51,7 @@ class ForegroundRefreshControllerTest {
         assertEquals(1, telemetry.persistedCalls)
         assertEquals(1, telemetry.reconciledCalls)
 
-        // At exactly ten minutes, a foreground resume queries both streams.
+        // At exactly five minutes, a foreground resume queries both streams.
         val dueResumeTime = nowEpochMillis + ForegroundRefreshController.MINIMUM_FOREGROUND_REFRESH_AGE_MILLIS
         val dueResume = controller.onForeground(dueResumeTime)
         assertIs<ForegroundRefreshOutcome.Refreshed>(dueResume)

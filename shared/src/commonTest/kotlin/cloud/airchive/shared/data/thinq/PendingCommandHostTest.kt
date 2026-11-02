@@ -24,6 +24,51 @@ import kotlinx.coroutines.withTimeout
 class PendingCommandHostTest {
 
     @Test
+    fun scheduledReadAndCommandShareOneNonQueuingDeviceSlot() = runBlocking {
+        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH") }
+        val port = ScriptedThinQPort()
+        val coordinator = ThinQContextCoordinator(store, port, testVerifier(), TEST_DEVICE_ID,
+            ownerUid = "owner", projectId = TEST_PROJECT_ID, commandScope = this)
+        assertEquals(ThinQEntryResult.Success, coordinator.onDeviceOpened())
+        val key = coordinator.contextKey.value
+        val read = NetworkStep()
+        port.onLiveState = { read.hold(); testLive() }
+        val job = launch { coordinator.refreshScheduledState(key) }
+        withTimeout(COMMAND_TIMEOUT_MS) { read.awaitEntered() }
+        assertEquals(AcCommandSlotState.Reading(key), coordinator.commandController.slotState.value)
+        assertEquals(AcCommandDispatchResult.IgnoredWhilePending, coordinator.dispatchCommand(
+            AcCommand.SetPower(requestedAtEpochMillis = 1L, powerOn = false), key))
+        assertEquals(0, port.commandCalls)
+        job.cancelAndJoin()
+        assertEquals(AcCommandSlotState.Idle, coordinator.commandController.slotState.value)
+        assertIs<ThinQLiveRefreshState.Current>(coordinator.liveStateController.state.value)
+        Unit
+    }
+
+    @Test
+    fun scheduledReadSkipsPendingCommandAndSupersededContext() = runBlocking {
+        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH") }
+        val port = ScriptedThinQPort()
+        val coordinator = ThinQContextCoordinator(store, port, testVerifier(), TEST_DEVICE_ID,
+            ownerUid = "owner", projectId = TEST_PROJECT_ID, commandScope = this)
+        assertEquals(ThinQEntryResult.Success, coordinator.onDeviceOpened())
+        val key = coordinator.contextKey.value
+        val reads = port.liveCalls
+        val command = NetworkStep()
+        port.onSetState = { request -> command.hold(); testOutcome(TEST_DEVICE_ID, request) }
+        assertEquals(AcCommandDispatchResult.Scheduled, coordinator.dispatchCommand(
+            AcCommand.SetPower(requestedAtEpochMillis = 1L, powerOn = false), key))
+        withTimeout(COMMAND_TIMEOUT_MS) { command.awaitEntered() }
+        assertNull(coordinator.refreshScheduledState(key))
+        assertEquals(reads, port.liveCalls)
+        coordinator.onOwnerChanged("another-owner", TEST_PROJECT_ID)
+        command.release()
+        withTimeout(COMMAND_TIMEOUT_MS) { coordinator.commandController.slotState.first { it == AcCommandSlotState.Idle } }
+        assertNull(coordinator.refreshScheduledState(key))
+        assertEquals(reads, port.liveCalls)
+    }
+
+    @Test
     fun oldContextCommandKeepsGlobalSlotAndNewTapIsNeutralNonQueuedBusy() = runBlocking {
         val store = FakeThinQCredentialStore()
         store.save(SEED_TOKEN, "PH")

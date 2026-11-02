@@ -324,6 +324,17 @@ class ThinQContextCoordinator(
         liveStateController.refresh(captured)
     }
 
+    /** Scheduled reads reuse a verified profile and never compete with a command. */
+    suspend fun refreshScheduledState(captured: ThinQContextKey): ThinQLiveRefreshState? {
+        val publication = mutableDeviceProfile.value
+        if (captured.ownerUid == null || publication?.contextKey != captured ||
+            publication.profile?.deviceId != configuredDeviceId) return null
+        return commandController.tryWithDeviceSlot(captured) {
+            liveStateController.refresh(captured)
+            if (lifecycle.isCurrent(captured)) liveStateController.state.value else null
+        }
+    }
+
     /**
      * Graph-owned, non-queueing command dispatch (task 2.5). The owner tap
      * supplies its captured lifecycle key; the operation survives disposable

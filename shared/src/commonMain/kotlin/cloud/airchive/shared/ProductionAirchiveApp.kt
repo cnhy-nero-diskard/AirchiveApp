@@ -241,7 +241,7 @@ private fun ProductionRouteHost(
             val now = nowProvider()
             // Decide from the durable cache under the coordinator's lock, not
             // from a possibly still-empty Compose placeholder. A successful
-            // access check must not bypass the ten-minute incremental gate.
+            // access check must not bypass the five-minute incremental gate.
             coordinator.onForeground(now)
         }
     }

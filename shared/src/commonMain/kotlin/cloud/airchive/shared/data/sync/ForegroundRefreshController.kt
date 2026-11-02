@@ -10,9 +10,9 @@ import kotlinx.coroutines.sync.withLock
  * Event-driven refresh gate for app open/resume and explicit manual requests.
  *
  * This class owns no timer, polling loop, listener, or background worker: the
- * platform calls [onForeground] only when its app becomes active. A foreground
+ * platform calls [onForeground] while its app is active. A foreground
  * refresh runs when there has never been a successful sync or that success is
- * at least ten minutes old. [onManualRefresh] deliberately bypasses the age
+ * at least five minutes old. [onManualRefresh] deliberately bypasses the age
  * threshold. Both events serialize on one mutex; a second concurrent foreground
  * callback re-reads the successful-sync age after the first finishes and skips
  * if it is now fresh.
@@ -49,7 +49,7 @@ class ForegroundRefreshController(
 
     companion object {
         /** Minimum age of the last success before a foreground event refreshes. */
-        const val MINIMUM_FOREGROUND_REFRESH_AGE_MILLIS: Long = 10 * 60 * 1000L
+        const val MINIMUM_FOREGROUND_REFRESH_AGE_MILLIS: Long = 5 * 60 * 1000L
 
         /** Pure gate used by the controller and boundary tests. */
         fun isForegroundRefreshDue(
@@ -65,7 +65,7 @@ class ForegroundRefreshController(
 
 /** Result of an app-open/resume refresh gate decision. */
 sealed interface ForegroundRefreshOutcome {
-    /** A prior success is younger than ten minutes, so no query was attempted. */
+    /** A prior success is younger than five minutes, so no query was attempted. */
     data class SkippedFresh(val lastSuccessfulSyncEpochMillis: Long) : ForegroundRefreshOutcome
 
     /** Both mutation streams and their atomic local commit completed. */

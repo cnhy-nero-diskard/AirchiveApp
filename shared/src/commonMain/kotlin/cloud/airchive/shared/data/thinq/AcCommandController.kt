@@ -127,6 +127,17 @@ class AcCommandController(
     /** Device-global slot state, retained across context invalidation. */
     val slotState: StateFlow<AcCommandSlotState> = mutableSlotState.asStateFlow()
 
+    /** A scheduled read shares the command slot and never queues behind a command. */
+    suspend fun <T> tryWithDeviceSlot(contextKey: ThinQContextKey, action: suspend () -> T): T? {
+        if (!lifecycle.isCurrentContext(contextKey) || !mutex.tryLock()) return null
+        mutableSlotState.value = AcCommandSlotState.Reading(contextKey)
+        return try {
+            if (lifecycle.isCurrentContext(contextKey)) action() else null
+        } finally {
+            releaseSlot()
+        }
+    }
+
     /**
      * Submits one command for exactly [configuredDeviceId].
      *
@@ -431,6 +442,7 @@ sealed interface AcCommandDispatchResult {
 /** One device-global submission slot, intentionally retained across generations. */
 sealed interface AcCommandSlotState {
     data object Idle : AcCommandSlotState
+    data class Reading(val contextKey: ThinQContextKey?) : AcCommandSlotState
 
     /** Opaque context owner only; never contains the command target or outcome. */
     data class Occupied(val contextKey: ThinQContextKey?) : AcCommandSlotState
