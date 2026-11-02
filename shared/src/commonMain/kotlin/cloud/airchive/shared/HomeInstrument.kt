@@ -279,6 +279,8 @@ fun SharedInstrumentPanel(
                     Box(Modifier.weight(1f)) { usage() }
                 }
             }
+            val controls: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (profile != null) {
                 if (allowed.isNotEmpty()) {
                     if (draft != null) Text(
@@ -359,6 +361,10 @@ fun SharedInstrumentPanel(
             else if ((!enabled || !showEnergy || commandState is AcCommandUiState.Unconfirmed || commandState is AcCommandUiState.Failed) && commandState !is AcCommandUiState.Sending) {
                 TextButton(onClick = onRefresh, enabled = !refreshing) { Text(if (refreshing) "Reading device state…" else "Refresh device state") }
             }
+            }
+            }
+            val energyContent: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (showEnergy) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -403,10 +409,28 @@ fun SharedInstrumentPanel(
                         style = MaterialTheme.typography.titleSmall)
                 }
             }
+            }
+            }
+            }
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                if (showEnergy && useInstrumentColumns(maxWidth.value, LocalDensity.current.fontScale)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        Box(Modifier.weight(1f)) { controls() }
+                        Box(Modifier.weight(1f)) { energyContent() }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        controls()
+                        energyContent()
+                    }
+                }
+            }
         }
     }
 }
-}
+
+internal fun useInstrumentColumns(widthDp: Float, fontScale: Float): Boolean =
+    widthDp >= 640f && fontScale <= 1.2f
 
 internal fun homeControlsEnabled(
     live: ThinQLiveRefreshState,

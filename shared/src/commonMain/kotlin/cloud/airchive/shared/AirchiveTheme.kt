@@ -9,6 +9,11 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -86,3 +91,26 @@ fun InstrumentNavigation(selectedIndex: Int, onSelect: (Int) -> Unit) {
         }
     }
 }
+
+@Composable
+fun InstrumentNavigationRail(selectedIndex: Int, onSelect: (Int) -> Unit) {
+    NavigationRail(modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
+        containerColor = MaterialTheme.colorScheme.surface) {
+        ShellDestination.entries.forEachIndexed { index, destination ->
+            NavigationRailItem(
+                selected = selectedIndex == index,
+                onClick = { onSelect(index) },
+                icon = { DestinationGlyph(destination, selectedIndex == index) },
+                label = { Text(listOf("Home", "Device", "Energy", "History", "Settings")[index],
+                    modifier = Modifier.semantics {
+                        selected = selectedIndex == index
+                        if (selectedIndex == index) stateDescription = "Selected"
+                    }) },
+                alwaysShowLabel = true,
+            )
+        }
+    }
+}
+
+internal fun useInstrumentRail(widthDp: Float, heightDp: Float): Boolean =
+    widthDp >= 600f && widthDp > heightDp

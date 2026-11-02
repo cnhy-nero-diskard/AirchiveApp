@@ -3,7 +3,9 @@ package cloud.airchive.shared
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -269,16 +271,19 @@ private fun ProductionRouteHost(
         }
     }
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val useRail = useInstrumentRail(maxWidth.value, maxHeight.value)
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
-            ProductionBottomNavigation(current = route, onSelect = { route = it })
+            if (!useRail) ProductionBottomNavigation(current = route, onSelect = { route = it })
         },
     ) { innerPadding ->
+        Row(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        if (useRail) InstrumentNavigationRail(route.ordinal) { route = ProductionRoute.entries[it] }
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+                .weight(1f).fillMaxHeight(),
             contentAlignment = Alignment.TopCenter,
         ) {
             when (route) {
@@ -358,6 +363,8 @@ private fun ProductionRouteHost(
                 )
             }
         }
+        }
+    }
     }
 }
 
@@ -403,7 +410,7 @@ private fun ProductionHome(
     nowProvider: () -> Long,
 ) {
     Column(
-        modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().fillMaxHeight()
+        modifier = Modifier.widthIn(max = 1100.dp).fillMaxWidth().fillMaxHeight()
             .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

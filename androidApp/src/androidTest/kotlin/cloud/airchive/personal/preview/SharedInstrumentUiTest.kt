@@ -1664,14 +1664,15 @@ class SharedInstrumentUiTest {
     }
 
     @Test fun productionShellPhoneLandscapeKeepsRoutesReachable() {
-        assertEquals("the emulator is in phone landscape",
-            android.content.res.Configuration.ORIENTATION_LANDSCAPE,
-            instrumentation.targetContext.resources.configuration.orientation)
-        assertEquals("the landscape run uses the default scale", 1.0f,
-            instrumentation.targetContext.resources.configuration.fontScale, 0.01f)
         clearFixturePreferences()
 
         launchShell().use { scene ->
+            scene.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            awaitTrue("the emulator is in phone landscape") {
+                instrumentation.targetContext.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            }
+            assertEquals("the landscape run uses the default scale", 1.0f,
+                instrumentation.targetContext.resources.configuration.fontScale, 0.01f)
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitShellSettled(scene)
@@ -1682,15 +1683,20 @@ class SharedInstrumentUiTest {
             awaitVisibleNode { it.text?.toString()?.contains("Today so far: 15.11") == true }
             saveCapture("synthetic-home-phone-landscape-scale-1.0")
 
-            val navigationTop = bottomNavigationTopPx("Home")
+            val navigationTop = if (usesLandscapeRail()) instrumentation.targetContext.resources.displayMetrics.heightPixels
+                else bottomNavigationTopPx("Home")
+            if (usesLandscapeRail()) {
+                val homeBounds = Rect().also(awaitVisibleNode { it.text?.toString() == "Home" }::getBoundsInScreen)
+                val headingBounds = Rect().also(awaitVisibleNode { it.text?.toString() == "Airchive" }::getBoundsInScreen)
+                assertTrue("landscape navigation sits beside the content", homeBounds.right < headingBounds.left)
+            }
             var temperatureUnit: AccessibilityNodeInfo? = null
             var energyUnit: AccessibilityNodeInfo? = null
             var unitScrolls = 0
             while ((temperatureUnit == null || energyUnit == null) && unitScrolls < 5) {
-                scrollForward()
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 temperatureUnit = find(root) { it.isVisibleToUser && it.text?.toString() == "°C" }
-                energyUnit = find(root) { it.isVisibleToUser && it.text?.toString() == "kWh" }
+                energyUnit = find(root) { it.isVisibleToUser && it.text?.toString()?.startsWith("kWh · ") == true }
                 if (temperatureUnit != null && energyUnit != null) {
                     val temperatureBounds = Rect().also(temperatureUnit::getBoundsInScreen)
                     val energyBounds = Rect().also(energyUnit::getBoundsInScreen)
@@ -1699,6 +1705,7 @@ class SharedInstrumentUiTest {
                         energyUnit = null
                     }
                 }
+                if (temperatureUnit == null || energyUnit == null) scrollForward()
                 unitScrolls++
             }
             assertTrue("landscape scrolling exposes the complete temperature and energy units",
@@ -1729,6 +1736,24 @@ class SharedInstrumentUiTest {
                 awaitTrue("$route remains selected in phone landscape") { selectedDestination(route) }
                 saveCapture("synthetic-$route-phone-landscape-scale-1.0")
             }
+        }
+    }
+
+    @Test fun productionLandscapeAtLargeTextKeepsDestinationsReachable() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            scene.onActivity { it.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            awaitTrue("landscape is active at large text") {
+                val config = instrumentation.targetContext.resources.configuration
+                config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && config.fontScale >= 1.9f
+            }
+            clickText("Continue with Google")
+            awaitShellSettled(scene)
+            for (route in listOf("Home", "Device", "Energy", "History", "Settings")) {
+                clickTab(route)
+                awaitTrue("$route remains reachable at large text") { selectedDestination(route) }
+            }
+            saveCapture("synthetic-settings-landscape-scale-2.0")
         }
     }
 
@@ -1973,11 +1998,16 @@ class SharedInstrumentUiTest {
     /** Navigation labels are visually tappable even when Compose exposes their merged click action inconsistently. */
     private fun clickTab(label: String) {
         val screenHeight = instrumentation.targetContext.resources.displayMetrics.heightPixels
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        val rail = usesLandscapeRail()
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
             val candidates = allNodes(instrumentation.uiAutomation.rootInActiveWindow)
                 .filter { it.text?.toString() == label && it.isVisibleToUser }
-            val tab = candidates.maxByOrNull { candidate ->
+            val tab = candidates.filter { candidate ->
+                val bounds = Rect().also(candidate::getBoundsInScreen)
+                if (rail) bounds.left < metrics.density * 100f else bounds.top > screenHeight * .6f
+            }.maxByOrNull { candidate ->
                 val bounds = Rect()
                 candidate.getBoundsInScreen(bounds)
                 bounds.top
@@ -1985,25 +2015,33 @@ class SharedInstrumentUiTest {
             if (tab != null) {
                 val bounds = Rect()
                 tab.getBoundsInScreen(bounds)
-                if (bounds.top > screenHeight * .6f) {
+                if (rail || bounds.top > screenHeight * .6f) {
                     tapNodeCenter(tab)
                     return
                 }
             }
+            if (rail) {
+                val x = (metrics.density * 40).toInt()
+                val up = label != "Home"
+                uiDevice.swipe(x, (screenHeight * if (up) .8 else .2).toInt(),
+                    x, (screenHeight * if (up) .2 else .8).toInt(), 10)
+            }
             instrumentation.waitForIdleSync()
         }
-        throw AssertionError("Could not locate the bottom-navigation destination '$label'")
+        throw AssertionError("Could not locate the navigation destination '$label'")
     }
 
     private fun selectedDestination(label: String): Boolean {
         val screenHeight = instrumentation.targetContext.resources.displayMetrics.heightPixels
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        val rail = usesLandscapeRail()
         val nodes = allNodes(instrumentation.uiAutomation.rootInActiveWindow)
         val node = nodes
             .filter { candidate ->
                 if (candidate.text?.toString() != label || !candidate.isVisibleToUser) return@filter false
                 val bounds = Rect()
                 candidate.getBoundsInScreen(bounds)
-                bounds.top > screenHeight * .6f
+                if (rail) bounds.left < metrics.density * 100f else bounds.top > screenHeight * .6f
             }
             .maxByOrNull { candidate ->
                 val bounds = Rect()
@@ -2018,6 +2056,11 @@ class SharedInstrumentUiTest {
             val candidateBounds = Rect().also(candidate::getBoundsInScreen)
             Rect.intersects(labelBounds, candidateBounds)
         }
+    }
+
+    private fun usesLandscapeRail(): Boolean {
+        val config = instrumentation.targetContext.resources.configuration
+        return config.screenWidthDp >= 600 && config.screenWidthDp > config.screenHeightDp
     }
 
     private fun destinationSemantics(label: String): String {
@@ -2338,7 +2381,9 @@ class SharedInstrumentUiTest {
     }
 
     private fun scrollContent(forward: Boolean) {
-        val scrollable = find(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
+        val scrollable = allNodes(instrumentation.uiAutomation.rootInActiveWindow)
+            .filter { it.isScrollable }
+            .maxByOrNull { Rect().also(it::getBoundsInScreen).width() }
         if (scrollable == null) {
             instrumentation.waitForIdleSync()
             return
