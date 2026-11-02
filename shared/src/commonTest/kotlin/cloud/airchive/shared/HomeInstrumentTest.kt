@@ -125,6 +125,22 @@ class HomeInstrumentTest {
         assertEquals(start + 2 * 300_000L, latestUsableEnergyPoint(day)?.intervalEndEpochMillis)
     }
 
+    @Test fun currentHourKeepsMissingUnknownAndFutureSamplesOutOfTheHeadline() {
+        val date = LocalDate.parse("2026-10-24")
+        val start = energyPeriodRange(EnergyPeriodType.DAY, date).startEpochMillis
+        fun sample(slot: Int, amount: Double, unit: EnergyUnit?) = Observation(
+            "$slot", start + slot * 300_000L, start + (slot + 1) * 300_000L, amount, unit,
+        )
+        val day = presentEnergyHistory(
+            listOf(sample(11, 99.0, EnergyUnit.WH), sample(12, 0.0, EnergyUnit.WH),
+                sample(13, 20.0, null), sample(15, 40.0, EnergyUnit.WH)),
+            emptyList(), emptyList(), EnergyPeriodType.DAY, date, start + 15 * 300_000L,
+        ).days.single()
+        assertEquals(CurrentHourEnergy(0.0, true), currentHourEnergy(day, 1, true))
+        assertEquals(CurrentHourEnergy(null, true), currentHourEnergy(day, 2, false))
+        assertTrue(currentHourEnergy(day, 1, false).partial)
+    }
+
     @Test fun homeChartBuildsEightThreeHourGroupsFromTheFullManilaDay() {
         val date = LocalDate.parse("2026-10-24")
         val period = energyPeriodRange(EnergyPeriodType.DAY, date)

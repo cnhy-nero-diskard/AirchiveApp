@@ -1,5 +1,6 @@
 package cloud.airchive.shared
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -10,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
@@ -197,6 +199,11 @@ fun SharedInstrumentPanel(
     temperatureDraft: TemperatureDraft? = null,
     onTemperatureDraftChange: ((TemperatureDraft?) -> Unit)? = null,
 ) {
+    var showConfirmation by remember { mutableStateOf(false) }
+    LaunchedEffect(commandState) {
+        showConfirmation = commandState is AcCommandUiState.Confirmed
+        if (showConfirmation) { delay(3000); showConfirmation = false }
+    }
     val zone = remember { TimeZone.of(DEFAULT_DAY_TIME_ZONE) }
     val today = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).date
     val energy = remember(snapshot, today, nowEpochMillis) {
@@ -235,11 +242,12 @@ fun SharedInstrumentPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(when (known?.powerOn) { true -> "On"; false -> "Off"; null -> "Unknown" },
+                    PowerIndicator(if (live is ThinQLiveRefreshState.Current) known?.powerOn else null)
+                    Text(when { live !is ThinQLiveRefreshState.Current -> "Unknown"; known?.powerOn == true -> "On"; known?.powerOn == false -> "Off"; else -> "Unknown" },
                         style = MaterialTheme.typography.labelSmall)
-                    Switch(checked = known?.powerOn == true,
+                    Switch(checked = live is ThinQLiveRefreshState.Current && known?.powerOn == true,
                         onCheckedChange = { onCommand?.invoke(AcCommand.SetPower(nowEpochMillis, it)) },
-                        enabled = enabled && profile?.controls?.powerWritable == true && known != null,
+                        enabled = enabled && profile?.controls?.powerWritable == true && known?.powerOn != null,
                         modifier = Modifier.semantics { contentDescription = "AC power" })
                 }
             }
@@ -255,7 +263,13 @@ fun SharedInstrumentPanel(
                         (draftResolution.displayUnit ?: capability?.unit)?.symbol() ?: "°C")
                 }
                 val usage: @Composable () -> Unit = {
-                    InstrumentReadout("Sampled today", day.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—", "kWh")
+                    val localHour = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).hour
+                    val hour = currentHourEnergy(day, localHour, energy.queryCoverage.fullyQueried)
+                    Column {
+                        InstrumentReadout("Hour to date", hour.energyWh?.let { instrumentNumber(it / 1000) } ?: "\u2014", "kWh \u00b7 ${localHour.toString().padStart(2, '0')}:00\u2013now")
+                        Text(if (hour.energyWh == null) "Hour unavailable" else if (hour.partial) "Partial hour" else "Recorded this hour", style = MaterialTheme.typography.bodySmall)
+                        Text("Today so far: ${day.usableEnergyValueWh?.let { instrumentNumber(it / 1000) + " kWh" } ?: "unavailable"}${if (day.usableSlotCount < day.expectedSlotCount || !energy.queryCoverage.fullyQueried) " \u00b7 partial" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 if (!showEnergy) target()
                 else if (stack) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { target(); HorizontalDivider(); usage() }
@@ -309,19 +323,21 @@ fun SharedInstrumentPanel(
                         )
                     } ?: Text("Temperature adjustment is unavailable on this profile.", style = MaterialTheme.typography.bodySmall)
                 }
-                InstrumentChoice("Mode", known?.mode, profile.controls.allowedModes, enabled,
+                SteppedChoice("Mode", known?.mode, profile.controls.allowedModes, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
                     onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) })
-                InstrumentChoice("Fan speed", known?.fanSpeed, profile.controls.allowedFanSpeeds, enabled,
+                SteppedChoice("Fan speed", known?.fanSpeed, profile.controls.allowedFanSpeeds, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
                     onSelect = { onCommand?.invoke(AcCommand.SetFanSpeed(nowEpochMillis, it)) })
             }
             if (!enabled && setupMessage == null) {
                 Text("Controls unavailable until a fresh verified device read succeeds.", style = MaterialTheme.typography.bodySmall)
             }
-            commandState.feedbackText(false)?.let { feedback ->
-                Text(feedback, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            commandState.feedbackText(false)?.takeIf { commandState !is AcCommandUiState.Confirmed || showConfirmation }?.let { feedback ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                    if (commandState is AcCommandUiState.Sending) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(feedback, style = MaterialTheme.typography.bodySmall, color = if (commandState is AcCommandUiState.Failed || commandState is AcCommandUiState.Unconfirmed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                }
             }
             if (neutralCommandBusy) {
                 Text(
@@ -337,7 +353,7 @@ fun SharedInstrumentPanel(
                 )
             }
             if (onSetup != null) TextButton(onClick = onSetup) { Text("Open Settings") }
-            else if ((!enabled || !showEnergy) && commandState !is AcCommandUiState.Sending) {
+            else if ((!enabled || !showEnergy || commandState is AcCommandUiState.Unconfirmed || commandState is AcCommandUiState.Failed) && commandState !is AcCommandUiState.Sending) {
                 TextButton(onClick = onRefresh, enabled = !refreshing) { Text(if (refreshing) "Reading device state…" else "Refresh device state") }
             }
             if (showEnergy) {
@@ -351,8 +367,9 @@ fun SharedInstrumentPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             InstrumentEnergyChart(day)
             if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) {
-                Text("${day.usableSlotCount} of ${day.expectedSlotCount} elapsed five-minute intervals carry usable energy. Gaps are not measured zero. Sampled sums stay separate from finalized LG totals. Day boundaries use $DEFAULT_DAY_TIME_ZONE.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                InstrumentDisclosure("Coverage details", "Samples and day boundary") {
+                    Text("${day.usableSlotCount} of ${day.expectedSlotCount} elapsed intervals have usable energy. Gaps are not zero. Day boundary: $DEFAULT_DAY_TIME_ZONE.", style = MaterialTheme.typography.bodySmall)
+                }
             }
             val hasSamples = day.usableSlotCount > 0
             val complete = hasSamples && day.usableSlotCount == day.expectedSlotCount && energy.queryCoverage.fullyQueried
@@ -473,30 +490,46 @@ private fun StepControl(increase: Boolean, enabled: Boolean, onClick: () -> Unit
 }
 
 @Composable
-private fun <T> InstrumentChoice(title: String, current: T?, options: List<T>, enabled: Boolean, label: (T) -> String, onSelect: (T) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Column {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Box {
-        TextButton(onClick = { open = true }, enabled = enabled && options.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            contentPadding = PaddingValues(0.dp)) {
-            Text(title, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-            Text(current?.let(label) ?: if (options.isEmpty()) "Unavailable" else "Unknown")
-            val arrow = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .38f)
-            Canvas(Modifier.padding(start = 8.dp).size(16.dp).clearAndSetSemantics {}) {
-                drawLine(arrow, Offset(size.width * .35f, size.height * .2f), Offset(size.width * .65f, size.height * .5f), 2.dp.toPx(), StrokeCap.Round)
-                drawLine(arrow, Offset(size.width * .65f, size.height * .5f), Offset(size.width * .35f, size.height * .8f), 2.dp.toPx(), StrokeCap.Round)
-            }
-        }
-        DropdownMenu(expanded = open && enabled, onDismissRequest = { open = false }) {
-            options.forEach { option -> DropdownMenuItem(
-                text = { Text(label(option) + if (option == current) " · current" else "") },
-                enabled = option != current,
-                onClick = { open = false; onSelect(option) },
-            ) }
+internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, enabled: Boolean, liveIsCurrent: Boolean, label: (T) -> String, onSelect: (T) -> Unit) {
+    var selection by remember(options, current) { mutableStateOf(current?.takeIf { it in options }) }
+    val index = options.indexOf(selection)
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text("${if (liveIsCurrent) "Current" else "Last observed"}: ${current?.let(label) ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
+        if (options.isEmpty()) Text("Unavailable", style = MaterialTheme.typography.bodySmall)
+        else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = { selection = options[if (index < 0) 0 else index - 1] }, enabled = enabled && index != 0, modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("-", modifier = Modifier.semantics { contentDescription = "Previous $title" }) }
+            Text(selection?.let(label) ?: "Choose", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            FilledTonalButton(onClick = { selection = options[if (index < 0) 0 else index + 1] }, enabled = enabled && index < options.lastIndex, modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("+", modifier = Modifier.semantics { contentDescription = "Next $title" }) }
+            Button(onClick = { selection?.let(onSelect) }, enabled = enabled && selection != null && selection != current, modifier = Modifier.heightIn(min = 48.dp)) { Text("Apply") }
         }
     }
+}
+
+internal data class CurrentHourEnergy(val energyWh: Double?, val partial: Boolean)
+
+internal fun currentHourEnergy(day: EnergyDaySummary, localHour: Int, fullyQueried: Boolean): CurrentHourEnergy {
+    val firstSlot = localHour * 12
+    val elapsed = (day.expectedSlotCount - firstSlot).coerceIn(0, 12)
+    val points = day.points.filter { it.slotIndex in firstSlot until firstSlot + elapsed && it.usable && it.energyValueWh != null }
+    return CurrentHourEnergy(points.takeIf { it.isNotEmpty() }?.sumOf { it.energyValueWh!! }, !fullyQueried || points.size < elapsed)
+}
+
+@Composable
+private fun PowerIndicator(power: Boolean?) {
+    val rotation = if (power == true) {
+        val transition = rememberInfiniteTransition()
+        transition.animateFloat(0f, 360f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "fan").value
+    } else 0f
+    val color = if (power == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(Modifier.padding(end = 8.dp).size(22.dp).rotate(rotation).clearAndSetSemantics {}) {
+        val center = Offset(size.width / 2, size.height / 2)
+        drawCircle(color, radius = size.minDimension * .10f)
+        repeat(3) { i ->
+            val angle = (i * 120.0 - 90.0) * kotlin.math.PI / 180.0
+            drawLine(color, center, Offset(center.x + kotlin.math.cos(angle).toFloat() * size.width * .4f, center.y + kotlin.math.sin(angle).toFloat() * size.height * .4f), strokeWidth = size.width * .15f, cap = StrokeCap.Round)
+        }
     }
 }
 

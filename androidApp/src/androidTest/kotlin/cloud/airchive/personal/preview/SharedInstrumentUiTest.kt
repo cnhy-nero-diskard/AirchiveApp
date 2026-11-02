@@ -673,7 +673,7 @@ class SharedInstrumentUiTest {
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
             }
             clickTab("Home")
-            awaitNode { it.text?.toString()?.contains("Confirmed: AC currently reports") == true }
+            awaitNode { it.text?.toString()?.contains("confirmed") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
     }
@@ -1004,7 +1004,7 @@ class SharedInstrumentUiTest {
         for (dark in listOf(false, true)) {
         systemTheme(if (dark) "yes" else "no")
         launch(dark).use {
-            awaitNode { it.text?.toString() == "Sampled today" }
+            awaitNode { it.text?.toString() == "Hour to date" }
             instrumentation.waitForIdleSync()
             instrumentation.uiAutomation.waitForIdle(250, 5_000)
             val bitmap = instrumentation.uiAutomation.takeScreenshot()
@@ -1335,7 +1335,7 @@ class SharedInstrumentUiTest {
 
             listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
             assertTextPresent("Set temperature")
-            assertTextPresent("Sampled today")
+            assertTextPresent("Hour to date")
             assertTextPresent("Temperature")
             assertTextPresent("Apply")
             assertTextPresent("Mode")
@@ -1346,7 +1346,7 @@ class SharedInstrumentUiTest {
             fixture.get().setThinQReadFailure(IllegalStateException("synthetic fake read failure"))
             clickText("Device")
             awaitNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
-            assertTextAbsent("Sampled today")
+            assertTextAbsent("Hour to date")
             assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
 
             fixture.get().setThinQReadFailure(null)
@@ -1644,13 +1644,13 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Airchive" }
             val homeTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
             assertTrue("Home exposes the temperature reading: $homeTree", homeTree.contains("Set temperature"))
-            assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Sampled today"))
+            assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Hour to date"))
             assertTrue("the long sampled value stays complete: $homeTree", homeTree.contains("15.11"))
 
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val temperature = find(root) { it.text?.toString()?.contains("Set temperature") == true }
                 ?: throw AssertionError("Temperature reading semantics were unavailable: $homeTree")
-            val sampled = find(root) { it.text?.toString()?.contains("Sampled today") == true }
+            val sampled = find(root) { it.text?.toString()?.contains("Hour to date") == true }
                 ?: throw AssertionError("Sampled reading semantics were unavailable: $homeTree")
             val temperatureBounds = Rect().also(temperature::getBoundsInScreen)
             val sampledBounds = Rect().also(sampled::getBoundsInScreen)
@@ -1725,8 +1725,8 @@ class SharedInstrumentUiTest {
             clickTab("Home")
             awaitVisibleNode { it.text?.toString() == "Airchive" }
             assertTrue("Home remains the selected landscape route", selectedDestination("Home"))
-            awaitVisibleNode { it.text?.toString() == "Sampled today" }
-            awaitVisibleNode { it.text?.toString() == "15.11" }
+            awaitVisibleNode { it.text?.toString() == "Hour to date" }
+            awaitVisibleNode { it.text?.toString()?.contains("Today so far: 15.11") == true }
             saveCapture("synthetic-home-phone-landscape-scale-1.0")
 
             val navigationTop = bottomNavigationTopPx("Home")

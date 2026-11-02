@@ -23,6 +23,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -51,6 +53,7 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 import kotlin.time.Clock
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /**
  * Profile-derived quick controls for the configured AC (OpenSpec task 5.2).
@@ -107,6 +110,15 @@ fun DeviceControlsCard(
     val liveState by liveStateController.state.collectAsState()
     val commandUiState by commandController.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    var showConfirmation by remember { mutableStateOf(false) }
+    LaunchedEffect(commandUiState) {
+        showConfirmation = commandUiState is AcCommandUiState.Confirmed
+        if (showConfirmation) { delay(3000); showConfirmation = false }
+    }
+    LaunchedEffect(commandController, haptic) {
+        commandController.confirmations.collect { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    }
 
     val isSending = commandUiState is AcCommandUiState.Sending
     val currentSnapshot = liveState as? ThinQLiveRefreshState.Current
@@ -163,7 +175,7 @@ fun DeviceControlsCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            commandUiState.feedbackText(simulated)?.let { feedback ->
+            commandUiState.feedbackText(simulated)?.takeIf { commandUiState !is AcCommandUiState.Confirmed || showConfirmation }?.let { feedback ->
                 Text(
                     feedback,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -395,8 +407,8 @@ private fun ModeControl(
         )
         return
     }
-    OptionRow(
-        options = allowedModes,
+    SteppedChoice(
+        title = "Mode", options = allowedModes,
         current = currentMode,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
@@ -421,46 +433,14 @@ private fun FanControl(
         )
         return
     }
-    OptionRow(
-        options = allowedSpeeds,
+    SteppedChoice(
+        title = "Fan speed", options = allowedSpeeds,
         current = currentSpeed,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
         label = { it.displayLabel() },
         onSelect = onSelect,
     )
-}
-
-@Composable
-private fun <T> OptionRow(
-    options: List<T>,
-    current: T?,
-    liveIsCurrent: Boolean,
-    enabled: Boolean,
-    label: (T) -> String,
-    onSelect: (T) -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEach { option ->
-            val isCurrent = option == current
-            Button(
-                enabled = enabled && !isCurrent,
-                onClick = { onSelect(option) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) {
-                Text(
-                    when {
-                        isCurrent && liveIsCurrent -> "${label(option)} · current"
-                        isCurrent -> "${label(option)} · last observed (old)"
-                        else -> "Set ${label(option)}"
-                    },
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -537,7 +517,7 @@ internal fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (
             "but current state is not confirmed. Refresh live state before acting again."
 
     is AcCommandUiState.Confirmed ->
-        "${if (simulated) "Demo state confirms" else "Confirmed: AC currently reports"} ${outcome.command.commandLabel()}."
+        "${outcome.command.commandLabel()} confirmed${if (simulated) " (demo)" else ""}."
 
     is AcCommandUiState.Failed -> failureText(outcome.failure, simulated)
     is AcCommandUiState.Unconfirmed -> failureText(outcome.failure, simulated)
