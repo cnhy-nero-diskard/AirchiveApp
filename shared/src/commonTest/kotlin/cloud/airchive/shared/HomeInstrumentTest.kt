@@ -117,12 +117,38 @@ class HomeInstrumentTest {
         val groups = instrumentEnergyGroups(day)
         assertEquals(20.0, groups[0].energyWh)
         assertEquals(2, groups[0].usable)
-        assertEquals(36, groups[0].expected)
+        assertEquals(12, groups[0].expected)
         assertNull(groups[1].energyWh)
-        assertEquals(1, groups[2].expected)
-        assertNull(groups[2].energyWh)
-        assertEquals(0, groups[3].expected)
+        assertEquals(1, groups[6].expected)
+        assertNull(groups[6].energyWh)
+        assertEquals(0, groups[7].expected)
         assertEquals(start + 2 * 300_000L, latestUsableEnergyPoint(day)?.intervalEndEpochMillis)
+    }
+
+    @Test fun automaticHistorySelectionStopsAtCompletedIntervalsAndPeriodEnd() {
+        val period = energyPeriodRange(EnergyPeriodType.DAY, LocalDate.parse("2026-10-24"))
+        val start = period.startEpochMillis
+        assertEquals(start, completedHistoryEnd(period, start - 1))
+        assertEquals(start + 300_000L, completedHistoryEnd(period, start + 599_999L))
+        assertEquals(start + 300_000L, completedHistoryEnd(period, start + 300_001L))
+        assertEquals(period.endExclusiveEpochMillis, completedHistoryEnd(period, period.endExclusiveEpochMillis + 600_000L))
+    }
+
+    @Test fun historyGroupsAreNewestFirstAndKeepIndividualQualityEvidence() {
+        val date = LocalDate.parse("2026-10-24")
+        val start = energyPeriodRange(EnergyPeriodType.DAY, date).startEpochMillis
+        val samples = listOf(
+            Observation("old", start, start + 300_000L, 0.0, EnergyUnit.WH),
+            Observation("new", start + 3_600_000L, start + 3_900_000L, 5.0, EnergyUnit.WH),
+            Observation("unknown", start + 3_900_000L, start + 4_200_000L, 10.0, null),
+        )
+        val groups = historyHours(samples, start + 4_200_000L)
+        assertEquals(listOf(1, 0), groups.map { it.group.hour })
+        assertEquals(5.0, groups[0].group.energyWh)
+        assertEquals(1, groups[0].group.usable)
+        assertEquals(2, groups[0].group.expected)
+        assertEquals(listOf("unknown", "new"), groups[0].samples.map { it.sampleId })
+        assertEquals(0.0, groups[1].group.energyWh)
     }
 
     @Test fun currentHourKeepsMissingUnknownAndFutureSamplesOutOfTheHeadline() {
@@ -158,9 +184,9 @@ class HomeInstrumentTest {
         ).days.single()
 
         val groups = instrumentEnergyGroups(day)
-        assertEquals(8, groups.size)
-        assertEquals((0..7).map { it * 3 }, groups.map { it.hour })
-        assertTrue(groups.all { it.expected == 36 && it.usable == 36 })
+        assertEquals(24, groups.size)
+        assertEquals((0..23).toList(), groups.map { it.hour })
+        assertTrue(groups.all { it.expected == 12 && it.usable == 12 })
         assertEquals(day.usableEnergyValueWh, groups.sumOf { it.energyWh ?: 0.0 })
     }
 
@@ -193,16 +219,16 @@ class HomeInstrumentTest {
         ).days.single()
 
         val groups = instrumentEnergyGroups(day)
-        assertEquals(8, groups.size)
+        assertEquals(24, groups.size)
         assertEquals(0.0, groups[0].energyWh)
-        assertEquals(36, groups[0].expected)
-        assertEquals(36, groups[0].usable)
-        assertEquals(7.0, groups[1].energyWh)
-        assertEquals(4, groups[1].expected)
-        assertEquals(1, groups[1].usable)
-        assertEquals(0, groups[2].expected)
-        assertEquals(0, groups[2].usable)
-        assertNull(groups[2].energyWh)
+        assertEquals(12, groups[0].expected)
+        assertEquals(12, groups[0].usable)
+        assertEquals(7.0, groups[3].energyWh)
+        assertEquals(4, groups[3].expected)
+        assertEquals(1, groups[3].usable)
+        assertEquals(0, groups[4].expected)
+        assertEquals(0, groups[4].usable)
+        assertNull(groups[4].energyWh)
         assertEquals(7.0, day.usableEnergyValueWh)
     }
 

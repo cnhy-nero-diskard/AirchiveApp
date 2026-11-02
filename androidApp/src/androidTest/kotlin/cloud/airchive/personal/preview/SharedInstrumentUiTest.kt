@@ -204,6 +204,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             clickText("History")
             awaitNode { it.text?.toString() == "Sample status guide" }
+            expandFirstHistoryHour()
             var row: AccessibilityNodeInfo? = null
             repeat(6) {
                 if (row == null) {
@@ -1026,6 +1027,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Daily energy measures" }
         }
         launch(route = 3).use {
+            expandFirstHistoryHour()
             var sample: AccessibilityNodeInfo? = null
             repeat(5) {
                 if (sample == null) {
@@ -1096,7 +1098,7 @@ class SharedInstrumentUiTest {
             awaitVisibleNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
 
             clickTab("History")
-            awaitNode { it.text?.toString() == "Cached observations (newest first)" }
+            awaitNode { it.text?.toString() == "Recorded hours (newest first)" }
             assertDisclosureState("Sync and collector health", "Collapsed")
             assertDisclosureState("Sample status guide", "Collapsed")
             assertTextAbsent("What each sample status means")
@@ -1233,7 +1235,7 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
-    @Test fun energyPeriodBrowsingIsCachedUntilExplicitLoadAndCoveredRevisitsAreLocal() {
+    @Test fun energyPeriodAutomaticallyLoadsMissingRangesAndCoveredRetriesAreLocal() {
         clearFixturePreferences()
         launchShell().use { scene ->
             clickText("Continue with Google")
@@ -1241,79 +1243,29 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "History synced 0 sec ago" }
             awaitShellSettled(scene)
             clickText("Energy")
-            awaitVisibleNode { it.text?.toString() == "Load sampled intervals" }
-
+            awaitVisibleNode { it.text?.toString() == "Retry history loading" }
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
-            val readsBeforeBrowsing = AtomicInteger()
-            scene.onActivity {
-                fixture.set(it.shellFixture!!)
-                readsBeforeBrowsing.set(fixture.get().counters.telemetryReads.get())
-            }
-            clickText("Week")
+            scene.onActivity { fixture.set(it.shellFixture!!) }
             clickText("Month")
-            clickText("Previous")
-            clickText("Next")
-            clickText("Day")
-            scene.onActivity {
-                assertEquals("period and date selection only changes cached presentation",
-                    readsBeforeBrowsing.get(), fixture.get().counters.telemetryReads.get())
-            }
-
-            // The current month extends well beyond the synthetic bootstrap
-            // cache, so only this explicit action may request the missing range.
-            clickText("Month")
-            val readsBeforeLoad = AtomicInteger()
-            val writesBeforeLoad = AtomicInteger()
-            scene.onActivity {
-                readsBeforeLoad.set(fixture.get().counters.telemetryReads.get())
-                writesBeforeLoad.set(fixture.get().counters.localHistoryWrites.get())
-            }
-            clickText("Load sampled intervals")
             awaitNode { it.text?.toString()?.contains("remote page(s) fetched") == true }
-            scene.onActivity {
-                assertTrue(fixture.get().counters.telemetryReads.get() > readsBeforeLoad.get())
-                assertTrue(fixture.get().counters.localHistoryWrites.get() > writesBeforeLoad.get())
-            }
             awaitShellSettled(scene)
             val owner = requireNotNull(fixture.get().coordinator.session.value)
             val partition = fixture.get().coordinator.partitionFor(owner)
             val now = fixture.get().clock.now()
-            val selectedDate = kotlinx.datetime.LocalDate.parse(
-                java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.of("Asia/Manila")).toLocalDate().toString(),
-            )
-            val month = cloud.airchive.shared.data.energy.energyPeriodRange(
-                cloud.airchive.shared.data.energy.EnergyPeriodType.MONTH,
-                selectedDate,
-            )
-            val afterFirstLoad = runBlocking {
-                fixture.get().coordinator.local.observe(partition).first()
-            }
-            val remainingGaps = cloud.airchive.shared.data.sync.HistoricalRangeLoader.uncoveredRanges(
-                month.startEpochMillis,
-                minOf(month.endExclusiveEpochMillis, now),
-                afterFirstLoad.coveredRanges,
-            )
-            assertTrue("the first explicit load records coverage for the elapsed month: $remainingGaps", remainingGaps.isEmpty())
-
-            val readsAfterLoad = AtomicInteger()
-            scene.onActivity { readsAfterLoad.set(fixture.get().counters.telemetryReads.get()) }
-            clickText("Load sampled intervals")
+            val date = kotlinx.datetime.LocalDate.parse(java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.of("Asia/Manila")).toLocalDate().toString())
+            val month = cloud.airchive.shared.data.energy.energyPeriodRange(cloud.airchive.shared.data.energy.EnergyPeriodType.MONTH, date)
+            val snapshot = runBlocking { fixture.get().coordinator.local.observe(partition).first() }
+            val elapsed = (minOf(month.endExclusiveEpochMillis, now) - month.startEpochMillis).coerceAtLeast(0L)
+            val completedEnd = month.startEpochMillis + elapsed / 300_000L * 300_000L
+            assertTrue(cloud.airchive.shared.data.sync.HistoricalRangeLoader.uncoveredRanges(month.startEpochMillis, completedEnd, snapshot.coveredRanges).isEmpty())
+            val reads = fixture.get().counters.telemetryReads.get()
+            clickText("Retry history loading")
             awaitLoadButtonEnabled()
             awaitShellSettled(scene)
-            scene.onActivity {
-                assertEquals("a covered revisit performs no telemetry reads",
-                    readsAfterLoad.get(), fixture.get().counters.telemetryReads.get())
-            }
-
-            val readsBeforeFuture = AtomicInteger()
-            scene.onActivity { readsBeforeFuture.set(fixture.get().counters.telemetryReads.get()) }
+            assertEquals("a covered retry performs no telemetry reads", reads, fixture.get().counters.telemetryReads.get())
             clickText("Next")
-            clickText("Load sampled intervals")
-            awaitLoadButtonEnabled()
-            scene.onActivity {
-                assertEquals("an entirely future period is skipped locally",
-                    readsBeforeFuture.get(), fixture.get().counters.telemetryReads.get())
-            }
+            awaitNode { it.text?.toString()?.contains("nothing to fetch") == true }
+            assertEquals("future periods do not fetch", reads, fixture.get().counters.telemetryReads.get())
         }
         clearFixturePreferences()
     }
@@ -1364,13 +1316,14 @@ class SharedInstrumentUiTest {
 
             clickText("Energy")
             awaitNode { it.text?.toString() == "Sampled energy" }
-            awaitVisibleNode { it.text?.toString() == "Load sampled intervals" }
+            awaitVisibleNode { it.text?.toString() == "Retry history loading" }
             assertTextPresent("Coverage and measurement details")
             val energyTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
-            assertTrue(energyTree.indexOf("Sampled energy") < energyTree.indexOf("Download this period"))
+            assertTrue(energyTree.indexOf("Sampled energy") < energyTree.indexOf("Offline history"))
 
             clickText("History")
-            awaitVisibleNode { it.text?.toString() == "Cached observations (newest first)" }
+            awaitVisibleNode { it.text?.toString() == "Recorded hours (newest first)" }
+            expandFirstHistoryHour()
             val firstSample = awaitNode { it.contentDescription?.toString()?.startsWith("Sample at ") == true }
             clickNode(firstSample)
             awaitNode { it.text?.toString() == "Sample detail" }
@@ -1913,7 +1866,7 @@ class SharedInstrumentUiTest {
                     "Home" to "Airchive",
                     "Device" to "Device details",
                     "Energy" to "Sampled energy",
-                    "History" to "Cached observations (newest first)",
+                    "History" to "Recorded hours (newest first)",
                 )) {
                     clickTab(route)
                     awaitVisibleNode { it.text?.toString() == label }
@@ -2249,9 +2202,9 @@ class SharedInstrumentUiTest {
         val fixedLabels = setOf(
             "Home", "Device", "Energy", "History", "Settings", "Day", "Week", "Month",
             "Coverage and measurement details", "Daily record", "Daily records", "Units and conversions",
-            "Period summary", "Sampled energy", "Sampled five-minute interval energy", "Load sampled intervals",
+            "Period summary", "Sampled energy", "Sampled five-minute interval energy", "Retry history loading",
             "History access", "History and storage", "Connection details", "Account actions",
-            "Sync and collector health", "Sample status guide", "Cached observations (newest first)",
+            "Sync and collector health", "Sample status guide", "Recorded hours (newest first)",
             "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Apply",
             "Refresh history", "Refreshing history…", "Retry history sync",
         )
@@ -2457,10 +2410,15 @@ class SharedInstrumentUiTest {
         throw AssertionError("Timed out waiting for: $description")
     }
 
+    private fun expandFirstHistoryHour() {
+        val hour = awaitVisibleNode { it.text?.toString()?.contains("Show details") == true }
+        clickNode(hour)
+    }
+
     private fun awaitLoadButtonEnabled() {
         awaitTrue("the explicit Energy load action finishes") {
             find(instrumentation.uiAutomation.rootInActiveWindow) {
-                it.text?.toString() == "Load sampled intervals"
+                it.text?.toString() == "Retry history loading"
             }?.isEnabled == true
         }
     }

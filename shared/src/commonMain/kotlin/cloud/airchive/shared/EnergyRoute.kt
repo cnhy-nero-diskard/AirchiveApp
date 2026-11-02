@@ -3,6 +3,8 @@ package cloud.airchive.shared
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -25,10 +28,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,41 +76,11 @@ import kotlin.math.roundToLong
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
-/**
- * Energy day/week/month route (OpenSpec task 5.3).
- *
- * This is a **read-only presentation shell** over the pure projection API in
- * `cloud.airchive.shared.data.energy`. The parent passes the already-observed
- * [HistorySnapshot] (from `LocalHistoryPort.observe`) so this screen renders
- * cached data first; when the parent's snapshot updates after a fetch, this
- * route recomposes from the new cache without ever querying Firestore directly.
- *
- * Contract guarantees:
- *
- *  - **No auto-fetch.** Entering the route, switching Day/Week/Month, and
- *    navigating periods only change *local presentation state* (the anchor
- *    [LocalDate], initially today in [timeZoneId]). Nothing is fetched until the
- *    explicit `Load sampled intervals for this period` button is pressed.
- *  - **Explicit read-and-cache only.** The button builds a
- *    [HistoricalRangeLoader] and requests exactly
- *    `period.startEpochMillis .. min(period.endExclusiveEpochMillis, now)`.
- *    Empty/future ranges are skipped with a fixed message, and every adapter
- *    failure maps to a fixed safe UI string — never a raw exception.
- *  - **Measurement meaning is preserved.** Five-minute interval values are shown
- *    as *sampled energy*, converted to Wh only from recognized source units, and
- *    any energy÷time conversion is labeled *interval-average power* — never
- *    instantaneous wattage. Null intervals stay gaps (never zeros), anomalous
- *    and unknown-unit values are counted and flagged but excluded from usable
- *    sums, and finalized LG daily totals stay separate from local interval sums
- *    and from the sampled five-minute sum.
- *  - **No ThinQ and no raw payload.** This route touches only the telemetry and
- *    local-history ports and renders only sanitized projections.
- */
+/** Cache-first energy presentation. Selected elapsed periods load missing history while this route is active. */
 @Composable
 fun EnergyRoute(
     snapshot: HistorySnapshot,
@@ -124,7 +97,7 @@ fun EnergyRoute(
     val zoneId = remember(timeZoneId) {
         if (runCatching { TimeZone.of(timeZoneId) }.isSuccess) timeZoneId else DEFAULT_DAY_TIME_ZONE
     }
-    val scope = rememberCoroutineScope()
+    var retry by remember(partition) { mutableStateOf(0) }
 
     var periodType by remember { mutableStateOf(EnergyPeriodType.DAY) }
     var anchorDate by remember(zoneId) { mutableStateOf(todayIn(zoneId, nowProvider())) }
@@ -149,32 +122,25 @@ fun EnergyRoute(
         )
     }
 
-    fun launchLoad() {
-        // Capture the selection at press time; navigation during the load never
-        // reports feedback for the wrong period.
-        val requestedType = periodType
-        val requestedAnchor = anchorDate
-        scope.launch {
-            loadState = EnergyLoadUiState.Loading
-            val now = nowProvider()
-            val requestedPeriod = energyPeriodRange(requestedType, requestedAnchor, zoneId)
-            val end = minOf(requestedPeriod.endExclusiveEpochMillis, now)
-            if (end <= requestedPeriod.startEpochMillis) {
-                // Empty or entirely future range: nothing to fetch.
-                loadState = EnergyLoadUiState.SkippedFuture
-                return@launch
-            }
-            loadState = try {
-                val result = loadRange?.invoke(requestedPeriod.startEpochMillis, end)
-                    ?: HistoricalRangeLoader(telemetry, local, partition)
-                        .loadHistoricalRange(requestedPeriod.startEpochMillis, end)
-                EnergyLoadUiState.Loaded(result)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Fixed safe message; raw exceptions never surface.
-                EnergyLoadUiState.Failed
-            }
+    LaunchedEffect(partition, periodType, anchorDate, zoneId, remoteLoadEnabled, retry) {
+        if (!remoteLoadEnabled) {
+            loadState = EnergyLoadUiState.Idle
+            return@LaunchedEffect
+        }
+        val end = completedHistoryEnd(period, nowProvider())
+        if (end <= period.startEpochMillis) {
+            loadState = EnergyLoadUiState.SkippedFuture
+            return@LaunchedEffect
+        }
+        loadState = EnergyLoadUiState.Loading
+        loadState = try {
+            val result = loadRange?.invoke(period.startEpochMillis, end)
+                ?: HistoricalRangeLoader(telemetry, local, partition).loadHistoricalRange(period.startEpochMillis, end)
+            EnergyLoadUiState.Loaded(result)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            EnergyLoadUiState.Failed
         }
     }
 
@@ -191,7 +157,10 @@ fun EnergyRoute(
             }
         }
         InstrumentPanel {
-            EnergyLoadCard(loadState, loadState is EnergyLoadUiState.Loading, ::launchLoad, remoteLoadEnabled)
+            if (presentation.periodType == EnergyPeriodType.DAY) InstrumentDisclosure("Interval coverage diagnostics", informational = false) {
+                presentation.days.firstOrNull()?.let { IntervalStrip(it, EnergyLegendColors(MaterialTheme.colorScheme)) }
+            }
+            EnergyLoadCard(loadState, loadState is EnergyLoadUiState.Loading, { retry++ }, remoteLoadEnabled)
             if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.",
                 modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
         }
@@ -206,6 +175,11 @@ fun EnergyRoute(
             }
         }
     }
+}
+
+internal fun completedHistoryEnd(period: EnergyPeriodRange, nowEpochMillis: Long): Long {
+    val elapsed = (minOf(period.endExclusiveEpochMillis, nowEpochMillis) - period.startEpochMillis).coerceAtLeast(0L)
+    return period.startEpochMillis + elapsed / 300_000L * 300_000L
 }
 
 // ---------------------------------------------------------------------------
@@ -311,10 +285,10 @@ private fun EnergyLoadCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Download this period", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            Text("Offline history", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
-                if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "Save this period for offline viewing."
-                else "Download five-minute intervals into your local history. Already cached ranges are reused.",
+                if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "This period loads automatically for offline viewing."
+                else "Missing history is loaded for this period; cached ranges are reused.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
@@ -325,7 +299,7 @@ private fun EnergyLoadCard(
                     .fillMaxWidth()
                     .heightIn(min = 48.dp),
             ) {
-                Text(if (loading) "Loading sampled intervals…" else "Load sampled intervals")
+                Text(if (loading) "Loading sampled intervals…" else "Retry history loading")
             }
             loadStateDialogText(state)?.let { text ->
                 Text(
@@ -464,6 +438,50 @@ private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
 // Charts: day slot strip (DAY) and per-day bars (WEEK/MONTH)
 // ---------------------------------------------------------------------------
 
+internal fun hourlyKwh(wh: Double): String {
+    val milliKwh = wh.roundToLong()
+    val sign = if (milliKwh < 0) "-" else ""
+    val magnitude = kotlin.math.abs(milliKwh)
+    return "$sign${magnitude / 1000}.${(magnitude % 1000).toString().padStart(3, '0')}"
+}
+
+/** Scrollable hourly bars keep each selectable hour large enough for touch and accessibility. */
+@Composable
+internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
+    val groups = remember(day) { instrumentEnergyGroups(day) }
+    var selected by remember(day.date) { mutableStateOf<Int?>(null) }
+    val max = groups.mapNotNull { it.energyWh }.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+    val color = MaterialTheme.colorScheme.primary
+    val outline = MaterialTheme.colorScheme.outline
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            groups.forEach { group ->
+                val value = group.energyWh
+                val future = nowEpochMillis < day.dayStartEpochMillis + group.hour * 3_600_000L
+                val status = when { future -> "future"; value == null -> "unavailable"; group.usable < group.expected || group.expected < 12 -> "partial"; else -> "recorded" }
+                val description = "${group.hour.toString().padStart(2, '0')}:00, ${value?.let { hourlyKwh(it) + " kWh" } ?: status}, $status, ${group.usable} of ${group.expected} intervals measured"
+                Column(Modifier.width(48.dp).clickable { selected = group.hour }.semantics { contentDescription = description }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Canvas(Modifier.width(32.dp).height(90.dp)) {
+                        val height = value?.let { (it.coerceAtLeast(0.0) / max * size.height).toFloat() } ?: 0f
+                        if (value != null && height > 0f) drawRect(color, Offset(4f, size.height - height), Size(size.width - 8f, height), style = if (group.usable < group.expected || group.expected < 12) androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
+                        else if (value != null) drawLine(color, Offset(4f, size.height - 2.dp.toPx()), Offset(size.width - 4f, size.height - 2.dp.toPx()), 2.dp.toPx())
+                        else if (!future) drawLine(outline, Offset(4f, size.height - 2.dp.toPx()), Offset(size.width - 4f, size.height - 2.dp.toPx()), 1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
+                    }
+                    Text(group.hour.toString().padStart(2, '0'), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        val chosen = selected?.let { groups[it] }
+        Text(if (chosen == null) "Select an hour for its value. Outlined bars are partial; gaps are unavailable." else {
+            val value = chosen.energyWh?.let { hourlyKwh(it) + " kWh" } ?: if (nowEpochMillis < day.dayStartEpochMillis + chosen.hour * 3_600_000L) "Future" else "Unavailable"
+            val points = day.points.filter { it.slotIndex / 12 == chosen.hour }
+            val anomalous = points.count { it.quality == ObservationQuality.ANOMALOUS }
+            val unknown = points.count { it.energyValue != null && it.recordedUnit == null && it.quality != ObservationQuality.ANOMALOUS }
+            "${chosen.hour.toString().padStart(2, '0')}:00-${(chosen.hour + 1).toString().padStart(2, '0')}:00 - $value - ${chosen.usable}/${chosen.expected} samples" + (if (chosen.energyWh != null && (chosen.usable < chosen.expected || chosen.expected < 12)) " - partial" else "") + (if (anomalous > 0) " - $anomalous anomalous" else "") + (if (unknown > 0) " - $unknown unknown unit" else "")
+        }, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
 private data class EnergyLegendColors(val scheme: ColorScheme) {
     val usable: Color = scheme.primary
     val gap: Color = scheme.surfaceVariant
@@ -482,7 +500,7 @@ private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
         ) {
             Text(
                 if (presentation.periodType == EnergyPeriodType.DAY) {
-                    "Five-minute interval coverage"
+                    "Hourly recorded energy (kWh)"
                 } else {
                     "Daily energy measures"
                 },
@@ -490,11 +508,11 @@ private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
                 style = MaterialTheme.typography.titleMedium,
             )
             val colors = EnergyLegendColors(MaterialTheme.colorScheme)
-            EnergyLegend(colors = colors, intervalDay = presentation.periodType == EnergyPeriodType.DAY)
+            if (presentation.periodType != EnergyPeriodType.DAY) EnergyLegend(colors = colors, intervalDay = false)
             when (presentation.periodType) {
                 EnergyPeriodType.DAY -> {
                     val day = presentation.days.firstOrNull()
-                    if (day != null) IntervalStrip(day = day, colors = colors)
+                    if (day != null) HourlyEnergyChart(day, presentation.nowEpochMillis)
                 }
                 EnergyPeriodType.WEEK, EnergyPeriodType.MONTH -> DayBars(days = presentation.days, colors = colors)
             }

@@ -363,9 +363,9 @@ fun SharedInstrumentPanel(
                     modifier = Modifier.weight(1f).semantics { heading() })
                 TextButton(onClick = onEnergy) { Text("Energy") }
             }
-            Text("3-hour recorded energy (Wh)", style = MaterialTheme.typography.bodySmall,
+            Text("Hourly recorded energy (kWh)", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            InstrumentEnergyChart(day)
+            InstrumentEnergyChart(day, nowEpochMillis)
             if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) {
                 InstrumentDisclosure("Coverage details", "Samples and day boundary") {
                     Text("${day.usableSlotCount} of ${day.expectedSlotCount} elapsed intervals have usable energy. Gaps are not zero. Day boundary: $DEFAULT_DAY_TIME_ZONE.", style = MaterialTheme.typography.bodySmall)
@@ -534,75 +534,17 @@ private fun PowerIndicator(power: Boolean?) {
 }
 
 @Composable
-private fun InstrumentEnergyChart(day: EnergyDaySummary) {
-    val primary = MaterialTheme.colorScheme.primary
-    val outline = MaterialTheme.colorScheme.outlineVariant
-    val groups = remember(day) { instrumentEnergyGroups(day) }
-    val values = groups.mapNotNull { it.energyWh }
-    val maximum = values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-    val minimum = values.minOrNull()?.coerceAtMost(0.0) ?: 0.0
-    val description = groups.joinToString("; ") {
-        "${it.hour}:00, ${it.energyWh?.let { value -> instrumentNumber(value) + " Wh recorded" } ?: if (it.expected == 0) "future" else "gap"}, ${it.usable} of ${it.expected} intervals measured"
-    } + ". Dashed outlines mark partial groups. Open Energy for individual five-minute values."
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    val labels = groups.map { group ->
-        group.energyWh?.let { if (abs(it - it.roundToLong()) < .01) it.roundToLong().toString() else instrumentNumber(it) }
-            ?: if (group.expected == 0) "" else "Gap"
-    }
-    if (LocalDensity.current.fontScale > 1.2f) {
-        groups.indices.chunked(4).forEach { row ->
-            Row(Modifier.fillMaxWidth()) {
-                row.forEach { index ->
-                    Text(labels[index], modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                }
-            }
-        }
-    } else {
-        Row(Modifier.fillMaxWidth()) {
-            labels.forEach { label ->
-                Text(label, modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            }
-        }
-    }
-    Canvas(Modifier.fillMaxWidth().height(76.dp).semantics { contentDescription = description }) {
-        val step = size.width / 8f
-        val chartHeight = size.height - 8.dp.toPx()
-        val baseline = 4.dp.toPx() + (maximum / (maximum - minimum) * chartHeight).toFloat()
-        drawLine(outline, Offset(0f, baseline), Offset(size.width, baseline), 1.dp.toPx())
-        groups.forEachIndexed { slot, group ->
-            val value = group.energyWh
-            val x = slot * step + step * .2f
-            if (value != null) {
-                val h = (value / (maximum - minimum) * chartHeight).toFloat()
-                if (value == 0.0) drawLine(primary, Offset(x, baseline), Offset(x + step * .6f, baseline), 2.dp.toPx())
-                else drawRect(primary, Offset(x, if (h >= 0) baseline - h else baseline),
-                    Size(step * .6f, abs(h)), style = if (group.usable < group.expected)
-                        Stroke(width = 2.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())))
-                        else androidx.compose.ui.graphics.drawscope.Fill)
-            } else if (group.expected > 0) drawLine(outline, Offset(x, baseline - 2.dp.toPx()), Offset(x + step * .6f, baseline - 2.dp.toPx()), 1.dp.toPx())
-        }
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        groups.forEach {
-            Text(it.hour.toString().padStart(2, '0'), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    if (groups.any { it.usable > 0 && it.usable < it.expected }) Text("Outlined bars: partial samples", style = MaterialTheme.typography.bodySmall)
-    }
+private fun InstrumentEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
+    HourlyEnergyChart(day, nowEpochMillis)
 }
 
 internal data class InstrumentEnergyGroup(val hour: Int, val expected: Int, val usable: Int, val energyWh: Double?)
 
-internal fun instrumentEnergyGroups(day: EnergyDaySummary): List<InstrumentEnergyGroup> = (0 until 8).map { index ->
-    val start = index * 36
-    val expected = (day.expectedSlotCount - start).coerceIn(0, 36)
+internal fun instrumentEnergyGroups(day: EnergyDaySummary): List<InstrumentEnergyGroup> = (0 until 24).map { index ->
+    val start = index * 12
+    val expected = (day.expectedSlotCount - start).coerceIn(0, 12)
     val values = day.points.filter { it.slotIndex in start until start + expected }.mapNotNull { it.energyValueWh }
-    InstrumentEnergyGroup(index * 3, expected, values.size, values.takeIf { it.isNotEmpty() }?.sum())
+    InstrumentEnergyGroup(index, expected, values.size, values.takeIf { it.isNotEmpty() }?.sum())
 }
 
 internal fun latestUsableEnergyPoint(day: EnergyDaySummary): EnergyIntervalPoint? =

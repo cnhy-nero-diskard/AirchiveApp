@@ -50,6 +50,8 @@ import cloud.airchive.shared.contract.telemetry.ObservationQuality
 import cloud.airchive.shared.contract.telemetry.QualityFlag
 import cloud.airchive.shared.contract.telemetry.SourceReadFailure
 import cloud.airchive.shared.data.energy.normalizeToWh
+import cloud.airchive.shared.data.energy.presentEnergyHistory
+import cloud.airchive.shared.data.energy.EnergyPeriodType
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.telemetry.DEFAULT_DAY_TIME_ZONE
@@ -86,11 +88,8 @@ import kotlinx.datetime.toLocalDateTime
  *    from usable counts; unknown/legacy-null units are labeled "unit not
  *    recorded/unknown" and never guessed; usable Wh conversions are shown only
  *    for recognized units.
- *  - **Virtualized and accessible.** The observation list is a [LazyColumn]
- *    keyed by `sampleId` (history may hold thousands of explicit cached rows),
- *    every row is a tappable, labeled control with a screen-reader description,
- *    and tapping opens a detail dialog that whitelists exactly the display
- *    fields above.
+ *  - **Virtualized and accessible.** Hour groups are virtualized, with selectable
+ *    observation details available within each expanded group.
  */
 @Composable
 fun HistoryHealthRoute(
@@ -114,6 +113,7 @@ fun HistoryHealthRoute(
             .distinctBy { it.sampleId }
     }
     val counters = remember(observations) { countSampleTypes(observations) }
+    val hours = remember(observations, nowEpochMillis) { historyHours(observations, nowEpochMillis) }
 
     var selectedSample by remember(snapshot.partition) { mutableStateOf<HistorySampleSelection?>(null) }
     val selected = selectedHistoryObservation(selectedSample, snapshot)
@@ -168,20 +168,24 @@ fun HistoryHealthRoute(
                 }
                 item(key = "list-header") {
                     Text(
-                        "Cached observations (newest first)",
+                        "Recorded hours (newest first)",
                         modifier = Modifier.padding(top = 20.dp, bottom = 12.dp).semantics { heading() },
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
-                items(observations, key = { it.sampleId }) { sample ->
-                    // Row strings are formed lazily only for visible items; the
-                    // cached snapshot can include thousands of explicitly loaded
-                    // historical observations.
-                    val row = observationRowUi(sample)
-                    ObservationRow(
-                        row = row,
-                        onClick = { selectedSample = HistorySampleSelection(snapshot.partition, row.sample.sampleId) },
-                    )
+                items(hours, key = { it.key }) { hour ->
+                    var expanded by remember(snapshot.partition, hour.key) { mutableStateOf(false) }
+                    InstrumentPanel {
+                        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            val amount = hour.group.energyWh?.let { hourlyKwh(it) + " kWh" } ?: "Unavailable"
+                            val status = if (hour.group.energyWh != null && (hour.group.usable < hour.group.expected || hour.group.expected < 12)) " - partial" else ""
+                            Text("${hour.key}:00-${(hour.group.hour + 1).toString().padStart(2, '0')}:00 - $amount$status - ${if (expanded) "Hide details" else "Show details"}")
+                        }
+                        if (expanded) hour.samples.forEach { sample ->
+                            val row = observationRowUi(sample)
+                            ObservationRow(row = row, onClick = { selectedSample = HistorySampleSelection(snapshot.partition, sample.sampleId) })
+                        }
+                    }
                 }
             }
         }
@@ -190,6 +194,21 @@ fun HistoryHealthRoute(
     val selectedRow = selected?.let(::observationRowUi)
     if (selectedRow != null) {
         ObservationDetailDialog(row = selectedRow, onDismiss = { selectedSample = null })
+    }
+}
+
+internal data class HistoryHour(val key: String, val group: InstrumentEnergyGroup, val samples: List<Observation>)
+
+internal fun historyHours(observations: List<Observation>, nowEpochMillis: Long): List<HistoryHour> {
+    val zone = TimeZone.of(DEFAULT_DAY_TIME_ZONE)
+    val byDate = observations.groupBy { Instant.fromEpochMilliseconds(it.intervalStartEpochMillis).toLocalDateTime(zone).date }
+    return byDate.entries.sortedByDescending { it.key }.flatMap { (date, samples) ->
+        val day = presentEnergyHistory(samples, emptyList(), emptyList(), EnergyPeriodType.DAY, date, nowEpochMillis).days.single()
+        val groups = instrumentEnergyGroups(day)
+        samples.groupBy { Instant.fromEpochMilliseconds(it.intervalStartEpochMillis).toLocalDateTime(zone).hour }
+            .entries.sortedByDescending { it.key }.map { (hour, values) ->
+                HistoryHour("$date ${hour.toString().padStart(2, '0')}", groups[hour], values.sortedByDescending { it.intervalStartEpochMillis })
+            }
     }
 }
 
