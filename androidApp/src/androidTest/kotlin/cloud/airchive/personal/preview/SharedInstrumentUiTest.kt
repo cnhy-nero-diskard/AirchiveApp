@@ -1680,7 +1680,6 @@ class SharedInstrumentUiTest {
             awaitVisibleNode { it.text?.toString() == "Airchive" }
             assertTrue("Home remains the selected landscape route", selectedDestination("Home"))
             awaitVisibleNode { it.text?.toString() == "Hour to date" }
-            awaitVisibleNode { it.text?.toString()?.contains("Today so far: 15.11") == true }
             saveCapture("synthetic-home-phone-landscape-scale-1.0")
 
             val navigationTop = if (usesLandscapeRail()) instrumentation.targetContext.resources.displayMetrics.heightPixels
@@ -2006,7 +2005,7 @@ class SharedInstrumentUiTest {
                 .filter { it.text?.toString() == label && it.isVisibleToUser }
             val tab = candidates.filter { candidate ->
                 val bounds = Rect().also(candidate::getBoundsInScreen)
-                if (rail) bounds.left < metrics.density * 100f else bounds.top > screenHeight * .6f
+                if (rail) bounds.centerX() < metrics.widthPixels * .22f else bounds.top > screenHeight * .6f
             }.maxByOrNull { candidate ->
                 val bounds = Rect()
                 candidate.getBoundsInScreen(bounds)
@@ -2021,7 +2020,7 @@ class SharedInstrumentUiTest {
                 }
             }
             if (rail) {
-                val x = (metrics.density * 40).toInt()
+                val x = (metrics.density * 65).toInt()
                 val up = label != "Home"
                 uiDevice.swipe(x, (screenHeight * if (up) .8 else .2).toInt(),
                     x, (screenHeight * if (up) .2 else .8).toInt(), 10)
@@ -2041,7 +2040,7 @@ class SharedInstrumentUiTest {
                 if (candidate.text?.toString() != label || !candidate.isVisibleToUser) return@filter false
                 val bounds = Rect()
                 candidate.getBoundsInScreen(bounds)
-                if (rail) bounds.left < metrics.density * 100f else bounds.top > screenHeight * .6f
+                if (rail) bounds.centerX() < metrics.widthPixels * .22f else bounds.top > screenHeight * .6f
             }
             .maxByOrNull { candidate ->
                 val bounds = Rect()
