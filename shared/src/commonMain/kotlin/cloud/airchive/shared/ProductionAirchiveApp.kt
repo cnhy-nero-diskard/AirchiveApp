@@ -755,6 +755,8 @@ fun ProductionSettingsRoute(
         InstrumentPanel { InterfaceDetailSelector() }
         InstrumentPanel {
             ProductionAccountCard(accountController, session, history, afterSettingsAction, nowProvider)
+        }
+        InstrumentPanel {
             if (thinQBindings != null) {
                 ProductionThinQCredentialCard(thinQBindings, credentialState, ownerUid = session?.uid)
             } else SummaryCard("AC connection") {
@@ -836,12 +838,6 @@ private fun ProductionThinQCredentialCard(
             !ownerContextReady -> Text("Updating the AC connection for the active account. Please wait.")
             else -> {
             Text(credentialState.productionCredentialStatus())
-            InstrumentDisclosure("Connection details", "Protected storage and command access", inset = 0.dp, showDivider = false, informational = true) {
-                Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("LG client ID: ${credentialState.clientId}", style = MaterialTheme.typography.bodySmall)
-                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
 
             productionSetupFeedback(feedbackFor, activeContextKey)?.let {
                 Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
@@ -955,6 +951,12 @@ private fun ProductionThinQCredentialCard(
                     enabled = !busy,
                     onClick = { confirmingRemoval = true },
                 ) { Text("Remove ThinQ PAT") }
+            }
+            InstrumentDisclosure("Connection details", "Protected storage and command access", inset = 0.dp, showDivider = false, informational = true) {
+                Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("LG client ID: ${credentialState.clientId}", style = MaterialTheme.typography.bodySmall)
+                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.", style = MaterialTheme.typography.bodySmall)
+                }
             }
             }
         }
