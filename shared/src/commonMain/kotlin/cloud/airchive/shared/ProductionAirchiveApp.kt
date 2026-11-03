@@ -42,8 +42,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -200,12 +198,6 @@ private fun ProductionRouteHost(
         emptyCredentialState
     } else {
         thinQBindings.credentialState.collectAsState(initial = emptyCredentialState).value
-    }
-    val haptic = LocalHapticFeedback.current
-    LaunchedEffect(thinQBindings, haptic) {
-        thinQBindings?.commandController?.confirmations?.collect {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
     }
     val activeThinQContextKey = thinQBindings?.contextKey?.collectAsState()?.value
     // Keep an unapplied setpoint above the conditional route composition. The

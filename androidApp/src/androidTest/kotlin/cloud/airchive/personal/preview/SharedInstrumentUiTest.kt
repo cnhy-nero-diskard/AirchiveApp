@@ -680,18 +680,33 @@ class SharedInstrumentUiTest {
     }
 
     @Test fun modeSliderSendsOnceOnRelease() {
-        clearFixturePreferences()
-        launchShell().use { scene ->
-            prepareConfiguredShellWithTemperatureDraft(scene)
-            val fixture = AtomicReference<SharedInstrumentShellFixture>()
-            scene.onActivity { fixture.set(it.shellFixture!!) }
-            val slider = awaitVisibleNode { it.contentDescription?.toString() == "Mode selection" }
+        launch().use { scene ->
+            val slider = awaitModeSlider()
+            val sliderState = slider.contentDescription?.toString().orEmpty()
+            assertTrue(
+                "the slider exposes its currently confirmed named value; actual='$sliderState'",
+                sliderState.contains("Current confirmed value Fan"),
+            )
+            listOf("Fan", "Dry").forEach { supportedMode ->
+                awaitAccessibilityNode("supported mode $supportedMode") { it.text?.toString() == supportedMode }
+            }
             val sliderBounds = Rect().also(slider::getBoundsInScreen)
             val y = sliderBounds.centerY()
             assertTrue(uiDevice.swipe(sliderBounds.left + sliderBounds.width() / 8, y,
                 sliderBounds.left + sliderBounds.width() * 2 / 3, y, 20))
-            awaitTrue("one mode command is sent") { fixture.get().counters.thinQCommandSubmissions.get() == 1 }
-            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
+            SystemClock.sleep(100)
+            scene.onActivity { assertEquals(1, it.submittedCommands) }
+        }
+    }
+
+    @Test fun modeSliderSupportsTappingAStop() {
+        launch().use { scene ->
+            val slider = awaitModeSlider()
+            val sliderBounds = Rect().also(slider::getBoundsInScreen)
+
+            assertTrue(uiDevice.click(sliderBounds.left + sliderBounds.width() * 9 / 10, sliderBounds.centerY()))
+            SystemClock.sleep(100)
+            scene.onActivity { assertEquals(1, it.submittedCommands) }
         }
     }
 
@@ -2436,6 +2451,44 @@ class SharedInstrumentUiTest {
         throw AssertionError("Expected accessible instrument content was not visible")
     }
 
+    private fun awaitAccessibilityNode(
+        description: String,
+        predicate: (AccessibilityNodeInfo) -> Boolean,
+    ): AccessibilityNodeInfo {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
+                ?.takeIf { it.isVisibleToUser }
+                ?.let { return it }
+            SystemClock.sleep(50)
+        }
+        throw AssertionError("Expected visible accessibility node: $description")
+    }
+
+    private fun awaitModeSlider(): AccessibilityNodeInfo {
+        val predicate: (AccessibilityNodeInfo) -> Boolean = {
+            it.contentDescription?.toString()?.startsWith("Mode selection.") == true
+        }
+        val deadline = SystemClock.uptimeMillis() + 15_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
+                ?.takeIf { it.isVisibleToUser }
+                ?.let { return it }
+            assertTrue(
+                "the Home content scrolls toward the mode slider",
+                uiDevice.swipe(
+                    uiDevice.displayWidth / 2,
+                    uiDevice.displayHeight * 2 / 3,
+                    uiDevice.displayWidth / 2,
+                    uiDevice.displayHeight / 4,
+                    20,
+                ),
+            )
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Expected visible accessibility node: Mode selection slider")
+    }
+
     private fun awaitVisibleNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
         // First cover the case where the requested control is above the current
         // viewport (for example the disclosure headers above a virtualized list).
@@ -2493,6 +2546,14 @@ class SharedInstrumentUiTest {
     private fun prepareConfiguredShellWithTemperatureDraft(
         scene: ActivityScenario<SharedInstrumentPreviewActivity>,
     ) {
+        prepareConfiguredShell(scene)
+        clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+        awaitNode { it.text?.toString() == "26" }
+        awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+        scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+    }
+
+    private fun prepareConfiguredShell(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {
         clickText("Continue with Google")
         awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
         awaitShellSettled(scene)
@@ -2504,10 +2565,6 @@ class SharedInstrumentUiTest {
         awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
         clickTab("Home")
         awaitNode { it.text?.toString() == "25" }
-        clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
-        awaitNode { it.text?.toString() == "26" }
-        awaitNode { it.text?.toString()?.contains("Currently 25") == true }
-        scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
     }
 
     private fun awaitShellSettled(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {

@@ -110,16 +110,11 @@ fun DeviceControlsCard(
     val liveState by liveStateController.state.collectAsState()
     val commandUiState by commandController.state.collectAsState()
     val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
     var showConfirmation by remember { mutableStateOf(false) }
     LaunchedEffect(commandUiState) {
         showConfirmation = commandUiState is AcCommandUiState.Confirmed
         if (showConfirmation) { delay(3000); showConfirmation = false }
     }
-    LaunchedEffect(commandController, haptic) {
-        commandController.confirmations.collect { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
-    }
-
     val isSending = commandUiState is AcCommandUiState.Sending
     val currentSnapshot = liveState as? ThinQLiveRefreshState.Current
     val liveIsCurrent = currentSnapshot != null
@@ -245,6 +240,7 @@ private fun PowerControl(
     enabled: Boolean,
     onPowerToggle: (powerOn: Boolean) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     SectionTitle("Power")
     if (!controls.powerWritable) {
         Text(
@@ -263,7 +259,11 @@ private fun PowerControl(
     )
     Button(
         enabled = enabled && powerIsOn != null,
-        onClick = { onPowerToggle(powerIsOn != true) },
+        onClick = {
+            val turningOn = powerIsOn != true
+            haptic.performHapticFeedback(if (turningOn) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
+            onPowerToggle(turningOn)
+        },
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp),
@@ -287,6 +287,7 @@ private fun TemperatureControl(
     enabled: Boolean,
     onSubmit: (value: Double, unit: TemperatureUnit) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     SectionTitle("Target temperature")
     if (capability == null) {
         Text(
@@ -308,10 +309,17 @@ private fun TemperatureControl(
     var index by remember(capability, allowed) {
         mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: allowed.first()))
     }
+    var lastHapticIndex by remember(capability, allowed) {
+        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: allowed.first()))
+    }
     // Re-sync the pending selection to the freshest allowed live value after a
     // fresh read; the selection is never sent unless Apply is tapped.
     LaunchedEffect(liveTemperature) {
-        safeLiveTemperature?.let { index = allowed.nearestIndex(it) }
+        safeLiveTemperature?.let {
+            val refreshedIndex = allowed.nearestIndex(it)
+            index = refreshedIndex
+            lastHapticIndex = refreshedIndex
+        }
     }
     val selected = allowed[index.coerceIn(allowed.indices)]
 
@@ -342,7 +350,14 @@ private fun TemperatureControl(
         val rangeEnd = capability.max.toFloat()
         Slider(
             value = selected.toFloat().coerceIn(rangeStart, rangeEnd),
-            onValueChange = { raw -> index = allowed.nearestIndex(raw.toDouble()) },
+            onValueChange = { raw ->
+                val nextIndex = allowed.nearestIndex(raw.toDouble())
+                if (enabled && nextIndex != lastHapticIndex) {
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    lastHapticIndex = nextIndex
+                }
+                index = nextIndex
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics {
@@ -361,7 +376,12 @@ private fun TemperatureControl(
     ) {
         TextButton(
             enabled = enabled && index > 0,
-            onClick = { index -= 1 },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                val nextIndex = index - 1
+                index = nextIndex
+                lastHapticIndex = nextIndex
+            },
             modifier = Modifier
                 .widthIn(min = 48.dp)
                 .heightIn(min = 48.dp)
@@ -380,7 +400,12 @@ private fun TemperatureControl(
         }
         TextButton(
             enabled = enabled && index < allowed.lastIndex,
-            onClick = { index += 1 },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                val nextIndex = index + 1
+                index = nextIndex
+                lastHapticIndex = nextIndex
+            },
             modifier = Modifier
                 .widthIn(min = 48.dp)
                 .heightIn(min = 48.dp)

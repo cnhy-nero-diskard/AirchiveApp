@@ -4,7 +4,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,13 +14,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
@@ -201,6 +207,7 @@ fun SharedInstrumentPanel(
     onTemperatureDraftChange: ((TemperatureDraft?) -> Unit)? = null,
 ) {
     var showConfirmation by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     LaunchedEffect(commandState) {
         showConfirmation = commandState is AcCommandUiState.Confirmed
         if (showConfirmation) { delay(3000); showConfirmation = false }
@@ -251,7 +258,10 @@ fun SharedInstrumentPanel(
                     Text(when { live !is ThinQLiveRefreshState.Current -> "Unknown"; known?.powerOn == true -> "On"; known?.powerOn == false -> "Off"; else -> "Unknown" },
                         style = MaterialTheme.typography.labelSmall)
                     Switch(checked = live is ThinQLiveRefreshState.Current && known?.powerOn == true,
-                        onCheckedChange = { onCommand?.invoke(AcCommand.SetPower(nowEpochMillis, it)) },
+                        onCheckedChange = {
+                            haptic.performHapticFeedback(if (it) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
+                            onCommand?.invoke(AcCommand.SetPower(nowEpochMillis, it))
+                        },
                         enabled = enabled && profile?.controls?.powerWritable == true && known?.powerOn != null,
                         modifier = Modifier.semantics { contentDescription = "AC power" })
                 }
@@ -517,7 +527,11 @@ private fun InstrumentReadout(label: String, value: String, unit: String) {
 @Composable
 private fun StepControl(increase: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val ink = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .38f)
-    FilledTonalIconButton(onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.small,
+    val haptic = LocalHapticFeedback.current
+    FilledTonalIconButton(onClick = {
+        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        onClick()
+    }, enabled = enabled, shape = MaterialTheme.shapes.small,
         modifier = Modifier.size(48.dp).semantics { contentDescription = if (increase) "Increase target temperature" else "Decrease target temperature" }) {
         Canvas(Modifier.size(20.dp)) {
             drawLine(ink, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 2.dp.toPx(), StrokeCap.Round)
@@ -529,33 +543,133 @@ private fun StepControl(increase: Boolean, enabled: Boolean, onClick: () -> Unit
 @Composable
 internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, enabled: Boolean, liveIsCurrent: Boolean, label: (T) -> String, onSelect: (T) -> Unit) {
     var selection by remember(options, current) { mutableStateOf(current?.takeIf { it in options }) }
+    var lastHapticIndex by remember(options, current) { mutableStateOf(options.indexOf(current)) }
     val index = options.indexOf(selection)
+    val haptic = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         val changed = selection != null && selection != current
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(selection?.let(label) ?: "Unknown", style = MaterialTheme.typography.bodyMedium,
-                color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.semantics { stateDescription = when {
-                    changed -> "Changed selection, not yet confirmed"
-                    liveIsCurrent -> "Current confirmed value"
-                    else -> "Last observed value"
-                } })
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.semantics {
+                stateDescription = when {
+                    changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
+                    liveIsCurrent && current != null -> "Current confirmed value ${selection?.let(label) ?: "unknown"}"
+                    else -> "Last observed value ${selection?.let(label) ?: "unknown"}"
+                }
+            }) {
+                Text(
+                    if (changed) "Selected: ${selection?.let(label) ?: "Unknown"}" else selection?.let(label) ?: "Unknown",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    when {
+                        changed -> "Current: ${current?.let(label) ?: "Unknown"}"
+                        liveIsCurrent && current != null -> "Confirmed"
+                        else -> "Last observed"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (options.isEmpty()) Text("Unavailable", style = MaterialTheme.typography.bodySmall)
         else {
             if (options.size > 1) {
-                Slider(value = index.coerceAtLeast(0).toFloat(),
-                    onValueChange = { selection = options[it.roundToInt().coerceIn(0, options.lastIndex)] },
-                    onValueChangeFinished = { selection?.takeIf { enabled && it != current }?.let(onSelect) },
-                    valueRange = 0f..options.lastIndex.toFloat(), steps = (options.size - 2).coerceAtLeast(0),
-                    enabled = enabled, modifier = Modifier.fillMaxWidth().semantics {
-                        contentDescription = "$title selection"
-                        stateDescription = "${selection?.let(label) ?: "Not selected"}; ${if (changed) "changed, not confirmed" else if (liveIsCurrent) "current confirmed value" else "last observed value"}"
-                    })
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val stopCellWidth = maxWidth / options.size.toFloat()
+                    val thumbRadius = 14.dp
+                    val sliderInset = (stopCellWidth / 2 - thumbRadius).coerceAtLeast(0.dp)
+                    val sliderColors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        activeTickColor = MaterialTheme.colorScheme.onPrimary,
+                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        inactiveTickColor = MaterialTheme.colorScheme.outline,
+                        disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
+                        disabledActiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
+                        disabledActiveTickColor = MaterialTheme.colorScheme.surface,
+                        disabledInactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f),
+                        disabledInactiveTickColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
+                    )
+                    val tickColor = if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
+                    val accessibleState = when {
+                        changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
+                        liveIsCurrent && current != null -> "Current confirmed value ${selection?.let(label) ?: "unknown"}"
+                        else -> "Last observed value ${selection?.let(label) ?: "unknown"}"
+                    }
+                    Slider(
+                        value = index.coerceAtLeast(0).toFloat(),
+                        onValueChange = { raw ->
+                            val nextIndex = raw.roundToInt().coerceIn(0, options.lastIndex)
+                            if (enabled && nextIndex != lastHapticIndex) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                lastHapticIndex = nextIndex
+                            }
+                            selection = options[nextIndex]
+                        },
+                        onValueChangeFinished = { selection?.takeIf { enabled && it != current }?.let(onSelect) },
+                        valueRange = 0f..options.lastIndex.toFloat(),
+                        steps = (options.size - 2).coerceAtLeast(0),
+                        enabled = enabled,
+                        colors = sliderColors,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = sliderInset).semantics {
+                            contentDescription = "$title selection. $accessibleState"
+                            stateDescription = accessibleState
+                        },
+                        thumb = {
+                            Box(
+                                Modifier.size(28.dp)
+                                    .shadow(2.dp, CircleShape)
+                                    .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
+                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                            )
+                        },
+                        track = { sliderState ->
+                            SliderDefaults.Track(
+                                sliderState = sliderState,
+                                enabled = enabled,
+                                colors = sliderColors,
+                                drawStopIndicator = { offset ->
+                                    drawLine(
+                                        color = tickColor,
+                                        start = Offset(offset.x, offset.y - 4.dp.toPx()),
+                                        end = Offset(offset.x, offset.y + 4.dp.toPx()),
+                                        strokeWidth = 2.dp.toPx(),
+                                        cap = StrokeCap.Round,
+                                    )
+                                },
+                                drawTick = { offset, color ->
+                                    drawLine(
+                                        color = color,
+                                        start = Offset(offset.x, offset.y - 4.dp.toPx()),
+                                        end = Offset(offset.x, offset.y + 4.dp.toPx()),
+                                        strokeWidth = 2.dp.toPx(),
+                                        cap = StrokeCap.Round,
+                                    )
+                                },
+                            )
+                        },
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        options.forEachIndexed { optionIndex, option ->
+                            Text(
+                                label(option),
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (optionIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
             } else if (selection == null) {
-                TextButton(onClick = { selection = options.single(); onSelect(options.single()) }, enabled = enabled) { Text("Choose ${label(options.single())}") }
+                TextButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    selection = options.single()
+                    onSelect(options.single())
+                }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Choose ${label(options.single())}") }
             }
         }
     }
