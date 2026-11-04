@@ -225,10 +225,12 @@ fun SharedInstrumentPanel(
     var localDraft by remember { mutableStateOf<TemperatureDraft?>(null) }
     val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
     val draftResolution = resolveTemperatureDraft(draft, observed, capability)
+    val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
     fun updateDraft(value: TemperatureDraft?) {
         if (onTemperatureDraftChange != null) onTemperatureDraftChange(value) else localDraft = value
     }
     val selected = draftResolution.displayValue
+        ?: fallbackSetpoint.value.takeIf { draft == null && observed == null }
     val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
     val yesterday = today.minus(1, DateTimeUnit.DAY).toString()
     val finalized = snapshot.dailyTotals.firstOrNull {
@@ -280,7 +282,7 @@ fun SharedInstrumentPanel(
                 val stack = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f
                 val target: @Composable () -> Unit = {
                     InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
-                        (draftResolution.displayUnit ?: capability?.unit)?.symbol() ?: "°C")
+                        (draftResolution.displayUnit ?: capability?.unit ?: fallbackSetpoint.unit).symbol())
                 }
                 val usage: @Composable () -> Unit = {
                     val localHour = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).hour
@@ -319,6 +321,7 @@ fun SharedInstrumentPanel(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         val controlBase = selected?.takeIf { it in allowed }
                             ?: observed?.takeIf { it in allowed }
+                            ?: fallbackSetpoint.value.takeIf { it in allowed }
                             ?: allowed.first()
                         val index = allowed.indexOf(controlBase)
                         StepControl(false, enabled && index > 0) {
@@ -348,8 +351,8 @@ fun SharedInstrumentPanel(
                 SteppedChoice("Mode", known?.mode, profile.controls.allowedModes, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
                     onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) })
-                SteppedChoice("Fan speed", known?.fanSpeed, profile.controls.allowedFanSpeeds, enabled, live is ThinQLiveRefreshState.Current,
-                    label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
+                SteppedChoice("Fan speed", known?.fanSpeed, supportedFanSpeedSteps(profile.controls.allowedFanSpeeds), enabled, live is ThinQLiveRefreshState.Current,
+                    label = { it.selectorLabel() },
                     onSelect = { onCommand?.invoke(AcCommand.SetFanSpeed(nowEpochMillis, it)) })
             }
             if (!enabled && setupMessage == null) {
@@ -511,6 +514,17 @@ internal fun resolveTemperatureDraft(
     )
 }
 
+/** The initial local target is 25°C (77°F), rounded only to a profile-supported value. */
+internal fun defaultTemperatureSetpoint(capability: TemperatureCapability?): TemperatureDraft {
+    val unit = capability?.unit ?: TemperatureUnit.CELSIUS
+    val requestedValue = when (unit) {
+        TemperatureUnit.CELSIUS -> 25.0
+        TemperatureUnit.FAHRENHEIT -> 77.0
+    }
+    val supportedValue = capability?.allowedValues()?.minByOrNull { abs(it - requestedValue) }
+    return TemperatureDraft(supportedValue ?: requestedValue, unit)
+}
+
 /** True only when the one device-global command slot belongs to another context. */
 internal fun commandSlotIsNeutralBusy(slot: AcCommandSlotState, currentKey: ThinQContextKey?): Boolean =
     slot is AcCommandSlotState.Occupied && slot.contextKey != currentKey
@@ -547,28 +561,24 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
     val index = options.indexOf(selection)
     val haptic = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth()) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         val changed = selection != null && selection != current
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             Column(horizontalAlignment = Alignment.End, modifier = Modifier.semantics {
                 stateDescription = when {
                     changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
-                    liveIsCurrent && current != null -> "Current confirmed value ${selection?.let(label) ?: "unknown"}"
-                    else -> "Last observed value ${selection?.let(label) ?: "unknown"}"
+                    liveIsCurrent && current != null -> "Current confirmed value ${label(current)}"
+                    else -> "Last observed value ${current?.let(label) ?: "unknown"}"
                 }
             }) {
                 Text(
-                    if (changed) "Selected: ${selection?.let(label) ?: "Unknown"}" else selection?.let(label) ?: "Unknown",
+                    if (changed) "Selected: ${selection?.let(label) ?: "Unknown"}"
+                    else (selection ?: current)?.let(label) ?: "Unknown",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    when {
-                        changed -> "Current: ${current?.let(label) ?: "Unknown"}"
-                        liveIsCurrent && current != null -> "Confirmed"
-                        else -> "Last observed"
-                    },
+                if (changed) Text(
+                    "Current: ${current?.let(label) ?: "Unknown"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -596,8 +606,8 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                     val tickColor = if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
                     val accessibleState = when {
                         changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
-                        liveIsCurrent && current != null -> "Current confirmed value ${selection?.let(label) ?: "unknown"}"
-                        else -> "Last observed value ${selection?.let(label) ?: "unknown"}"
+                        liveIsCurrent && current != null -> "Current confirmed value ${label(current)}"
+                        else -> "Last observed value ${current?.let(label) ?: "unknown"}"
                     }
                     Slider(
                         value = index.coerceAtLeast(0).toFloat(),
@@ -619,12 +629,14 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                             stateDescription = accessibleState
                         },
                         thumb = {
-                            Box(
-                                Modifier.size(28.dp)
-                                    .shadow(2.dp, CircleShape)
-                                    .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
-                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
-                            )
+                            if (selection != null) {
+                                Box(
+                                    Modifier.size(28.dp)
+                                        .shadow(2.dp, CircleShape)
+                                        .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
+                                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                )
+                            }
                         },
                         track = { sliderState ->
                             SliderDefaults.Track(
@@ -654,13 +666,27 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                     )
                     Row(Modifier.fillMaxWidth()) {
                         options.forEachIndexed { optionIndex, option ->
-                            Text(
-                                label(option),
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (optionIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                            )
+                            val selectedOption = optionIndex == index
+                            Surface(
+                                modifier = Modifier.weight(1f).heightIn(min = 36.dp),
+                                shape = MaterialTheme.shapes.small,
+                                color = if (selectedOption && enabled) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Box(
+                                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 36.dp).padding(horizontal = 4.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        label(option),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selectedOption && enabled) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

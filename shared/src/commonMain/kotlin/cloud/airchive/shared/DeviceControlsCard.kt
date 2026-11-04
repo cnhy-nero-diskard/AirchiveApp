@@ -306,11 +306,12 @@ private fun TemperatureControl(
     }
 
     val safeLiveTemperature = liveTemperature?.takeIf { it.isFinite() }
+    val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
     var index by remember(capability, allowed) {
-        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: allowed.first()))
+        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: fallbackSetpoint.value))
     }
     var lastHapticIndex by remember(capability, allowed) {
-        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: allowed.first()))
+        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: fallbackSetpoint.value))
     }
     // Re-sync the pending selection to the freshest allowed live value after a
     // fresh read; the selection is never sent unless Apply is tapped.
@@ -459,11 +460,11 @@ private fun FanControl(
         return
     }
     SteppedChoice(
-        title = "Fan speed", options = allowedSpeeds,
+        title = "Fan speed", options = supportedFanSpeedSteps(allowedSpeeds),
         current = currentSpeed,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
-        label = { it.displayLabel() },
+        label = { it.selectorLabel() },
         onSelect = onSelect,
     )
 }
@@ -627,6 +628,17 @@ internal fun AcOperatingMode.displayLabel(): String =
 
 internal fun FanSpeed.displayLabel(): String =
     name.lowercase().split('_').joinToString(" ")
+
+internal fun FanSpeed.selectorLabel(): String = when (this) {
+    FanSpeed.AUTO -> "AUTO"
+    FanSpeed.LOW -> "LOW"
+    FanSpeed.MEDIUM -> "MID"
+    FanSpeed.HIGH -> "HIGH"
+    FanSpeed.TURBO -> "TURBO"
+}
+
+internal fun supportedFanSpeedSteps(supportedSpeeds: List<FanSpeed>): List<FanSpeed> =
+    listOf(FanSpeed.LOW, FanSpeed.MEDIUM, FanSpeed.HIGH).filter { it in supportedSpeeds }
 
 internal fun TemperatureCapability.allowedValues(): List<Double> {
     if (!min.isFinite() || !max.isFinite() || !step.isFinite() || step <= 0.0) return emptyList()
