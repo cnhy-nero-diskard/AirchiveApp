@@ -79,6 +79,55 @@ class ThinQContextCoordinatorTest {
     }
 
     @Test
+    fun tabEntriesReuseCurrentAndFailedReadingsUntilAnExplicitRefresh() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        val initial = fixture.coordinator.liveStateController.state.value
+        repeat(3) { assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened()) }
+        assertEquals(initial, fixture.coordinator.liveStateController.state.value)
+        assertEquals(1, fixture.port.listCalls)
+        assertEquals(1, fixture.port.profileCalls)
+        assertEquals(1, fixture.port.liveCalls, "Home/Device navigation must not poll")
+
+        fixture.port.onLiveState = { throw ThinQClientException.Network }
+        fixture.coordinator.refreshLiveState()
+        val stale = fixture.coordinator.liveStateController.state.value
+        repeat(3) { assertEquals(ThinQEntryResult.Failed, fixture.coordinator.onDeviceOpened()) }
+        assertEquals(stale, fixture.coordinator.liveStateController.state.value)
+        assertEquals(2, fixture.port.liveCalls, "navigation must not retry a failed poll")
+
+        fixture.port.onLiveState = { testLive().copy(targetTemperature = 27.0) }
+        fixture.coordinator.refreshLiveState()
+        assertEquals(3, fixture.port.liveCalls, "explicit refresh still bypasses reuse")
+        assertEquals(27.0, assertIs<ThinQLiveRefreshState.Current>(
+            fixture.coordinator.liveStateController.state.value).state.targetTemperature)
+    }
+
+    @Test
+    fun tabEntryDuringScheduledReadDoesNotQueueAnotherRead() = runBlocking {
+        val fixture = Fixture()
+        fixture.seedCredential()
+        fixture.coordinator.onDeviceOpened()
+        val previous = fixture.coordinator.liveStateController.state.value
+        val step = NetworkStep()
+        fixture.port.onLiveState = { step.hold(); testLive().copy(powerOn = false) }
+        val poll = async { fixture.coordinator.refreshScheduledState(fixture.coordinator.contextKey.value) }
+        step.awaitEntered()
+        try {
+            assertEquals(previous, assertIs<ThinQLiveRefreshState.Loading>(
+                fixture.coordinator.liveStateController.state.value).previous)
+            withTimeout(CONCURRENCY_TIMEOUT_MS) { fixture.coordinator.onDeviceOpened() }
+            assertEquals(2, fixture.port.liveCalls)
+        } finally {
+            step.release()
+        }
+        assertIs<ThinQLiveRefreshState.Current>(poll.await())
+        assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
+        assertEquals(2, fixture.port.liveCalls)
+    }
+
+    @Test
     fun explicitProfileRefreshUpdatesCapabilitiesWithoutChangingTheContextGeneration() = runBlocking {
         val fixture = Fixture()
         fixture.seedCredential()
@@ -412,7 +461,7 @@ class ThinQContextCoordinatorTest {
         val publicationBefore = fixture.coordinator.deviceProfile.value
         fixture.port.onLiveState = { throw ThinQClientException.Network }
 
-        val result = fixture.coordinator.onDeviceOpened()
+        val result = fixture.coordinator.refreshDeviceProfile()
 
         assertEquals(ThinQEntryResult.Failed, result)
         assertEquals(keyBefore, fixture.coordinator.contextKey.value, "a same-context failure never invalidates")

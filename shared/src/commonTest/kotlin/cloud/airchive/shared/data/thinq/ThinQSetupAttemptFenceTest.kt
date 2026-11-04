@@ -598,14 +598,14 @@ class ThinQSetupAttemptFenceTest {
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val savesBefore = fixture.store.saveCalls
 
-        // A second Device entry suspended in the LG live read (its cached
-        // device/profile publication already matches the captured context).
+        // An explicit refresh suspended in the LG live read. Tab entry now
+        // reuses the existing same-context reading without network work.
         val liveStep = NetworkStep()
         fixture.port.onLiveState = {
             liveStep.hold()
             testLive()
         }
-        val entry = async { fixture.coordinator.onDeviceOpened() }
+        val entry = async { fixture.coordinator.refreshDeviceProfile() }
         withTimeout(SETUP_TIMEOUT_MS) { liveStep.awaitEntered() }
 
         // A setup attempt suspended in LG verification.

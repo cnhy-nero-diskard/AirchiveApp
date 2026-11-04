@@ -152,7 +152,8 @@ class ThinQContextCoordinator(
     // ------------------------------------------------------------------
 
     /**
-     * Device-route entry: load the exact account device and profile before
+     * Device-route entry: reuse existing same-context readings. On first entry,
+     * load the exact account device and profile before
      * reading live state, then perform the live read for the **captured**
      * context. If setup has not happened, no LG call is made.
      *
@@ -216,6 +217,27 @@ class ThinQContextCoordinator(
 
         val captured = snapshot.contextKey
         if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
+
+        // Navigation is presentation-only once this context has attempted a
+        // read. The graph-owned schedule and explicit refresh actions own all
+        // subsequent reads, including recovery from stale/unavailable state.
+        val retainedProfile = mutableDeviceProfile.value
+        if (!forceProfileRefresh && retainedProfile?.contextKey == captured &&
+            retainedProfile.device.deviceId == configuredDeviceId &&
+            retainedProfile.profile?.deviceId == configuredDeviceId
+        ) {
+            val retainedLive = liveStateController.state.value
+            val result = when (retainedLive) {
+                is ThinQLiveRefreshState.Current ->
+                    if (retainedLive.state.deviceId == configuredDeviceId) ThinQEntryResult.Success else null
+                is ThinQLiveRefreshState.Stale, is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed
+                is ThinQLiveRefreshState.Loading -> ThinQEntryResult.Unavailable
+                ThinQLiveRefreshState.NotRead -> null
+            }
+            if (result != null) {
+                return if (lifecycle.isCurrent(captured)) result else ThinQEntryResult.Superseded
+            }
+        }
 
         // Capture the protected credential once for list + profile. A setup
         // replacement can proceed while this local read is suspended, but the

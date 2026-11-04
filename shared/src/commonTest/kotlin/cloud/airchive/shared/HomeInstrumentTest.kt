@@ -20,6 +20,21 @@ class HomeInstrumentTest {
         unit = TemperatureUnit.CELSIUS,
     )
 
+    @Test fun refreshKeepsAllStatusReadingsAndPowerUntilTheNextResult() {
+        val observed = state.copy(mode = AcOperatingMode.COOL, fanSpeed = FanSpeed.AUTO)
+        val current = ThinQLiveRefreshState.Current(observed, true)
+        val loading = ThinQLiveRefreshState.Loading(current)
+        assertEquals(observed, loading.knownLiveState())
+        assertEquals("On", instrumentPowerLabel(loading))
+        assertFalse(homeControlsEnabled(loading, profile, AcCommandUiState.Idle))
+        assertEquals("Off", instrumentPowerLabel(ThinQLiveRefreshState.Loading(
+            ThinQLiveRefreshState.Current(observed.copy(powerOn = false), true))))
+        assertEquals("Last confirmed: On", instrumentPowerLabel(
+            ThinQLiveRefreshState.Stale(observed, ThinQRefreshFailureKind.NETWORK, 101)))
+        assertEquals("Unknown", instrumentPowerLabel(ThinQLiveRefreshState.Loading()))
+        assertNull(ThinQLiveRefreshState.NotRead.knownLiveState())
+    }
+
     @Test fun controlsRequireTheSameVerifiedLiveDeviceAndNoPendingCommand() {
         assertTrue(homeControlsEnabled(ThinQLiveRefreshState.Current(state, true), profile, AcCommandUiState.Idle))
         assertFalse(homeControlsEnabled(ThinQLiveRefreshState.Current(state, false), profile, AcCommandUiState.Idle))

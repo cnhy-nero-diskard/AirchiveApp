@@ -48,6 +48,9 @@ import kotlinx.datetime.*
  * A new owner/credential must finish its own read before retained controller
  * state can appear (OpenSpec `deliver-shared-instrument-ui` tasks 2.1/2.3).
  *
+ * Retained readings are gated by the graph-owned publication's context key.
+ * Route entry reuses them without polling; scheduled and explicit refreshes
+ * keep them visible while controls wait for a current verified reading.
  * All entry state is keyed on the active lifecycle context, so an invalidation
  * — including a replacement whose credential mask and timestamp are identical
  * to the old one — resets it and starts a fresh entry read. Readiness is
@@ -81,7 +84,6 @@ internal fun ProductionHomeInstrument(
     val commandSlotOccupied = commandSlot != AcCommandSlotState.Idle
     val neutralCommandBusy = commandSlotIsNeutralBusy(commandSlot, contextKey)
     var entrySettled by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
-    var entryReadComplete by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     var entryReadFailed by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     var reading by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     val now by produceState(nowProvider()) {
@@ -90,10 +92,7 @@ internal fun ProductionHomeInstrument(
     suspend fun refresh(forceProfileRefresh: Boolean = false) {
         if (reading) return
         reading = true
-        entrySettled = false
-        entryReadComplete = false
         entryReadFailed = false
-        val capturedKey = contextKey
         try {
             val entryBindings = bindings ?: return
             // Route entry reuses a valid same-context publication; only the
@@ -105,13 +104,6 @@ internal fun ProductionHomeInstrument(
             } else {
                 entryBindings.onDeviceOpened()
             }
-            entryReadComplete = homeEntryReady(
-                result = result,
-                capturedKey = capturedKey,
-                currentKey = entryBindings.contextKey.value,
-                live = entryBindings.liveStateController.state.value,
-                profile = entryBindings.deviceProfile.value?.profile,
-            )
             entryReadFailed = result == ThinQEntryResult.Failed
             // A superseded read must not settle: the new context's remembered
             // state and LaunchedEffect take over as soon as the key changes.
@@ -129,12 +121,18 @@ internal fun ProductionHomeInstrument(
         if (hasSession && credential.present && !credential.unlockFailed) refresh()
     }
     val canRead = hasSession && credential.present && !credential.unlockFailed && bindings != null
+    // The publication and live controller are graph-owned and invalidated
+    // together. Route-local entry flags must never hide their retained readings.
+    val presentationReady = canRead && contextKey != null && publication?.contextKey == contextKey
+    val entryReadComplete = presentationReady && homeEntryReady(
+        ThinQEntryResult.Success, contextKey, bindings?.contextKey?.value, live, profile,
+    )
     SharedInstrumentPanel(
         snapshot = history, nowEpochMillis = now, showEnergy = !comfortOnly,
-        live = if (canRead && entrySettled) live else ThinQLiveRefreshState.NotRead,
-        profile = profile?.takeIf { canRead && entrySettled },
-        deviceName = device?.alias?.takeIf { canRead && entrySettled } ?: "Air conditioner",
-        commandState = if (canRead && entrySettled) command else AcCommandUiState.Idle,
+        live = if (presentationReady) live else ThinQLiveRefreshState.NotRead,
+        profile = profile?.takeIf { presentationReady },
+        deviceName = device?.alias?.takeIf { presentationReady } ?: "Air conditioner",
+        commandState = if (presentationReady) command else AcCommandUiState.Idle,
         // Controls dispatch only after a successful matching read for this
         // context; the tap-time context key fences the scheduled submission.
         onCommand = if (canRead && entryReadComplete) { request ->
@@ -154,8 +152,10 @@ internal fun ProductionHomeInstrument(
         setupMessage = when {
             !hasSession -> "Sign in to connect your AC and recorded history."
             !canRead -> "Connect ThinQ in Settings to read and control your AC."
-            !entrySettled -> "Reading device state… Controls will appear after verification."
-            entryReadFailed -> "The device read failed. Check the connection and retry."
+            !presentationReady && !entrySettled -> "Reading device state… Controls will appear after verification."
+            presentationReady && live is ThinQLiveRefreshState.Loading -> null
+            live is ThinQLiveRefreshState.Stale || live is ThinQLiveRefreshState.Unavailable ||
+                (!presentationReady && entryReadFailed) -> "The device read failed. Check the connection and retry."
             !entryReadComplete -> "Device profile unavailable. Retry the device read."
             else -> null
         },
@@ -184,6 +184,16 @@ internal fun homeEntryReady(
     live is ThinQLiveRefreshState.Current &&
     live.canIssueCommands &&
     live.state.deviceId == profile.deviceId
+
+/** Keep the last observed power visible while refreshing or recovering. */
+internal fun instrumentPowerLabel(live: ThinQLiveRefreshState): String {
+    val label = when (live.knownLiveState()?.powerOn) {
+        true -> "On"
+        false -> "Off"
+        null -> return "Unknown"
+    }
+    return if (live is ThinQLiveRefreshState.Stale) "Last confirmed: $label" else label
+}
 
 /** Semantic native implementation of the approved Shared Instrument; no concept values ship here. */
 @Composable
@@ -256,10 +266,10 @@ fun SharedInstrumentPanel(
             }
             val power: @Composable () -> Unit = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PowerIndicator(if (live is ThinQLiveRefreshState.Current) known?.powerOn else null)
-                    Text(when { live !is ThinQLiveRefreshState.Current -> "Unknown"; known?.powerOn == true -> "On"; known?.powerOn == false -> "Off"; else -> "Unknown" },
+                    PowerIndicator(known?.powerOn)
+                    Text(instrumentPowerLabel(live),
                         style = MaterialTheme.typography.labelSmall)
-                    Switch(checked = live is ThinQLiveRefreshState.Current && known?.powerOn == true,
+                    Switch(checked = known?.powerOn == true,
                         onCheckedChange = {
                             haptic.performHapticFeedback(if (it) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
                             onCommand?.invoke(AcCommand.SetPower(nowEpochMillis, it))
