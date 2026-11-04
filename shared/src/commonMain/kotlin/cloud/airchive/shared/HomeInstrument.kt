@@ -351,7 +351,7 @@ fun SharedInstrumentPanel(
                 SteppedChoice("Mode", known?.mode, profile.controls.allowedModes, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
                     onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) })
-                SteppedChoice("Fan speed", known?.fanSpeed, supportedFanSpeedSteps(profile.controls.allowedFanSpeeds), enabled, live is ThinQLiveRefreshState.Current,
+                SteppedChoice("Fan speed", known?.fanSpeed, profile.controls.allowedFanSpeeds, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.selectorLabel() },
                     onSelect = { onCommand?.invoke(AcCommand.SetFanSpeed(nowEpochMillis, it)) })
             }
@@ -560,7 +560,16 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
     var lastHapticIndex by remember(options, current) { mutableStateOf(options.indexOf(current)) }
     val index = options.indexOf(selection)
     val haptic = LocalHapticFeedback.current
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .65f),
+                MaterialTheme.shapes.medium,
+            )
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         val changed = selection != null && selection != current
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleSmall)
@@ -629,14 +638,12 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                             stateDescription = accessibleState
                         },
                         thumb = {
-                            if (selection != null) {
-                                Box(
-                                    Modifier.size(28.dp)
-                                        .shadow(2.dp, CircleShape)
-                                        .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
-                                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
-                                )
-                            }
+                            Box(
+                                Modifier.size(28.dp)
+                                    .shadow(2.dp, CircleShape)
+                                    .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
+                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                            )
                         },
                         track = { sliderState ->
                             SliderDefaults.Track(
@@ -666,27 +673,13 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                     )
                     Row(Modifier.fillMaxWidth()) {
                         options.forEachIndexed { optionIndex, option ->
-                            val selectedOption = optionIndex == index
-                            Surface(
-                                modifier = Modifier.weight(1f).heightIn(min = 36.dp),
-                                shape = MaterialTheme.shapes.small,
-                                color = if (selectedOption && enabled) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant,
-                            ) {
-                                Box(
-                                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 36.dp).padding(horizontal = 4.dp, vertical = 4.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        label(option),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (selectedOption && enabled) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
+                            Text(
+                                label(option),
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (optionIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
                         }
                     }
                 }

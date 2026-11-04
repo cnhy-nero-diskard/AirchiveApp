@@ -460,7 +460,7 @@ private fun FanControl(
         return
     }
     SteppedChoice(
-        title = "Fan speed", options = supportedFanSpeedSteps(allowedSpeeds),
+        title = "Fan speed", options = allowedSpeeds,
         current = currentSpeed,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
@@ -636,9 +636,6 @@ internal fun FanSpeed.selectorLabel(): String = when (this) {
     FanSpeed.HIGH -> "HIGH"
     FanSpeed.TURBO -> "TURBO"
 }
-
-internal fun supportedFanSpeedSteps(supportedSpeeds: List<FanSpeed>): List<FanSpeed> =
-    listOf(FanSpeed.LOW, FanSpeed.MEDIUM, FanSpeed.HIGH).filter { it in supportedSpeeds }
 
 internal fun TemperatureCapability.allowedValues(): List<Double> {
     if (!min.isFinite() || !max.isFinite() || !step.isFinite() || step <= 0.0) return emptyList()
