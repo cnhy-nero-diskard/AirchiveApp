@@ -214,6 +214,8 @@ fun DeviceControlsCard(
                 currentMode = known?.mode,
                 liveIsCurrent = liveIsCurrent,
                 enabled = controlsEnabled,
+                commandState = commandUiState,
+                showConfirmation = showConfirmation,
                 onSelect = { mode ->
                     issueCommand(AcCommand.SetMode(requestedAtEpochMillis = nowEpochMillis(), mode = mode))
                 },
@@ -224,6 +226,8 @@ fun DeviceControlsCard(
                 currentSpeed = known?.fanSpeed,
                 liveIsCurrent = liveIsCurrent,
                 enabled = controlsEnabled,
+                commandState = commandUiState,
+                showConfirmation = showConfirmation,
                 onSelect = { speed ->
                     issueCommand(AcCommand.SetFanSpeed(requestedAtEpochMillis = nowEpochMillis(), speed = speed))
                 },
@@ -423,6 +427,8 @@ private fun ModeControl(
     currentMode: AcOperatingMode?,
     liveIsCurrent: Boolean,
     enabled: Boolean,
+    commandState: AcCommandUiState,
+    showConfirmation: Boolean,
     onSelect: (mode: AcOperatingMode) -> Unit,
 ) {
     SectionTitle("Operating mode")
@@ -440,6 +446,7 @@ private fun ModeControl(
         enabled = enabled,
         label = { it.displayLabel() },
         onSelect = onSelect,
+        status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetMode },
     )
 }
 
@@ -449,6 +456,8 @@ private fun FanControl(
     currentSpeed: FanSpeed?,
     liveIsCurrent: Boolean,
     enabled: Boolean,
+    commandState: AcCommandUiState,
+    showConfirmation: Boolean,
     onSelect: (speed: FanSpeed) -> Unit,
 ) {
     SectionTitle("Fan strength")
@@ -466,6 +475,7 @@ private fun FanControl(
         enabled = enabled,
         label = { it.selectorLabel() },
         onSelect = onSelect,
+        status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetFanSpeed },
     )
 }
 

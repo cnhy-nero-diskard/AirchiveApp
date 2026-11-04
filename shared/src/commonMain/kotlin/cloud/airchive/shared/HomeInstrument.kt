@@ -350,10 +350,12 @@ fun SharedInstrumentPanel(
                 }
                 SteppedChoice("Mode", known?.mode, profile.controls.allowedModes, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.displayLabel().replaceFirstChar(Char::uppercase) },
-                    onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) })
+                    onSelect = { onCommand?.invoke(AcCommand.SetMode(nowEpochMillis, it)) },
+                    status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetMode })
                 SteppedChoice("Fan speed", known?.fanSpeed, profile.controls.allowedFanSpeeds, enabled, live is ThinQLiveRefreshState.Current,
                     label = { it.selectorLabel() },
-                    onSelect = { onCommand?.invoke(AcCommand.SetFanSpeed(nowEpochMillis, it)) })
+                    onSelect = { onCommand?.invoke(AcCommand.SetFanSpeed(nowEpochMillis, it)) },
+                    status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetFanSpeed })
             }
             if (!enabled && setupMessage == null) {
                 Text("Controls unavailable until a fresh verified device read succeeds.", style = MaterialTheme.typography.bodySmall)
@@ -554,8 +556,66 @@ private fun StepControl(increase: Boolean, enabled: Boolean, onClick: () -> Unit
     }
 }
 
+internal enum class SelectorControlStatus { SUCCESS, ERROR }
+
+internal fun AcCommandUiState.selectorControlStatus(
+    showConfirmation: Boolean,
+    matches: (AcCommand) -> Boolean,
+): SelectorControlStatus? = when (this) {
+    is AcCommandUiState.Confirmed ->
+        if (showConfirmation && matches(outcome.command)) SelectorControlStatus.SUCCESS else null
+    is AcCommandUiState.Failed ->
+        if (matches(outcome.command)) SelectorControlStatus.ERROR else null
+    else -> null
+}
+
 @Composable
-internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, enabled: Boolean, liveIsCurrent: Boolean, label: (T) -> String, onSelect: (T) -> Unit) {
+private fun SelectorStatusIndicator(title: String, status: SelectorControlStatus?) {
+    if (status == null) {
+        Spacer(Modifier.size(24.dp))
+        return
+    }
+    val color = when (status) {
+        SelectorControlStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+        SelectorControlStatus.ERROR -> MaterialTheme.colorScheme.error
+    }
+    Canvas(
+        Modifier.size(24.dp).semantics {
+            contentDescription = when (status) {
+                SelectorControlStatus.SUCCESS -> "$title change confirmed"
+                SelectorControlStatus.ERROR -> "$title change failed"
+            }
+            liveRegion = LiveRegionMode.Polite
+        },
+    ) {
+        val strokeWidth = 2.dp.toPx()
+        drawCircle(
+            color = color,
+            radius = size.minDimension / 2f - strokeWidth,
+            center = Offset(size.width / 2f, size.height / 2f),
+            style = Stroke(strokeWidth),
+        )
+        if (status == SelectorControlStatus.SUCCESS) {
+            drawLine(color, Offset(size.width * .28f, size.height * .51f), Offset(size.width * .44f, size.height * .66f), strokeWidth, StrokeCap.Round)
+            drawLine(color, Offset(size.width * .44f, size.height * .66f), Offset(size.width * .73f, size.height * .35f), strokeWidth, StrokeCap.Round)
+        } else {
+            drawLine(color, Offset(size.width * .35f, size.height * .35f), Offset(size.width * .65f, size.height * .65f), strokeWidth, StrokeCap.Round)
+            drawLine(color, Offset(size.width * .65f, size.height * .35f), Offset(size.width * .35f, size.height * .65f), strokeWidth, StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+internal fun <T> SteppedChoice(
+    title: String,
+    current: T?,
+    options: List<T>,
+    enabled: Boolean,
+    liveIsCurrent: Boolean,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+    status: SelectorControlStatus? = null,
+) {
     var selection by remember(options, current) { mutableStateOf(current?.takeIf { it in options }) }
     var lastHapticIndex by remember(options, current) { mutableStateOf(options.indexOf(current)) }
     val index = options.indexOf(selection)
@@ -573,25 +633,7 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
         val changed = selection != null && selection != current
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleSmall)
-            Column(horizontalAlignment = Alignment.End, modifier = Modifier.semantics {
-                stateDescription = when {
-                    changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
-                    liveIsCurrent && current != null -> "Current confirmed value ${label(current)}"
-                    else -> "Last observed value ${current?.let(label) ?: "unknown"}"
-                }
-            }) {
-                Text(
-                    if (changed) "Selected: ${selection?.let(label) ?: "Unknown"}"
-                    else (selection ?: current)?.let(label) ?: "Unknown",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
-                if (changed) Text(
-                    "Current: ${current?.let(label) ?: "Unknown"}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            SelectorStatusIndicator(title, status)
         }
         if (options.isEmpty()) Text("Unavailable", style = MaterialTheme.typography.bodySmall)
         else {
@@ -618,68 +660,70 @@ internal fun <T> SteppedChoice(title: String, current: T?, options: List<T>, ena
                         liveIsCurrent && current != null -> "Current confirmed value ${label(current)}"
                         else -> "Last observed value ${current?.let(label) ?: "unknown"}"
                     }
-                    Slider(
-                        value = index.coerceAtLeast(0).toFloat(),
-                        onValueChange = { raw ->
-                            val nextIndex = raw.roundToInt().coerceIn(0, options.lastIndex)
-                            if (enabled && nextIndex != lastHapticIndex) {
-                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                lastHapticIndex = nextIndex
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Slider(
+                            value = index.coerceAtLeast(0).toFloat(),
+                            onValueChange = { raw ->
+                                val nextIndex = raw.roundToInt().coerceIn(0, options.lastIndex)
+                                if (enabled && nextIndex != lastHapticIndex) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                    lastHapticIndex = nextIndex
+                                }
+                                selection = options[nextIndex]
+                            },
+                            onValueChangeFinished = { selection?.takeIf { enabled && it != current }?.let(onSelect) },
+                            valueRange = 0f..options.lastIndex.toFloat(),
+                            steps = (options.size - 2).coerceAtLeast(0),
+                            enabled = enabled,
+                            colors = sliderColors,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = sliderInset).semantics {
+                                contentDescription = "$title selection. $accessibleState"
+                                stateDescription = accessibleState
+                            },
+                            thumb = {
+                                Box(
+                                    Modifier.size(28.dp)
+                                        .shadow(2.dp, CircleShape)
+                                        .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
+                                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                )
+                            },
+                            track = { sliderState ->
+                                SliderDefaults.Track(
+                                    sliderState = sliderState,
+                                    enabled = enabled,
+                                    colors = sliderColors,
+                                    drawStopIndicator = { offset ->
+                                        drawLine(
+                                            color = tickColor,
+                                            start = Offset(offset.x, offset.y - 4.dp.toPx()),
+                                            end = Offset(offset.x, offset.y + 4.dp.toPx()),
+                                            strokeWidth = 2.dp.toPx(),
+                                            cap = StrokeCap.Round,
+                                        )
+                                    },
+                                    drawTick = { offset, color ->
+                                        drawLine(
+                                            color = color,
+                                            start = Offset(offset.x, offset.y - 4.dp.toPx()),
+                                            end = Offset(offset.x, offset.y + 4.dp.toPx()),
+                                            strokeWidth = 2.dp.toPx(),
+                                            cap = StrokeCap.Round,
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                        Row(Modifier.fillMaxWidth()) {
+                            options.forEachIndexed { optionIndex, option ->
+                                Text(
+                                    label(option),
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (optionIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
                             }
-                            selection = options[nextIndex]
-                        },
-                        onValueChangeFinished = { selection?.takeIf { enabled && it != current }?.let(onSelect) },
-                        valueRange = 0f..options.lastIndex.toFloat(),
-                        steps = (options.size - 2).coerceAtLeast(0),
-                        enabled = enabled,
-                        colors = sliderColors,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = sliderInset).semantics {
-                            contentDescription = "$title selection. $accessibleState"
-                            stateDescription = accessibleState
-                        },
-                        thumb = {
-                            Box(
-                                Modifier.size(28.dp)
-                                    .shadow(2.dp, CircleShape)
-                                    .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
-                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
-                            )
-                        },
-                        track = { sliderState ->
-                            SliderDefaults.Track(
-                                sliderState = sliderState,
-                                enabled = enabled,
-                                colors = sliderColors,
-                                drawStopIndicator = { offset ->
-                                    drawLine(
-                                        color = tickColor,
-                                        start = Offset(offset.x, offset.y - 4.dp.toPx()),
-                                        end = Offset(offset.x, offset.y + 4.dp.toPx()),
-                                        strokeWidth = 2.dp.toPx(),
-                                        cap = StrokeCap.Round,
-                                    )
-                                },
-                                drawTick = { offset, color ->
-                                    drawLine(
-                                        color = color,
-                                        start = Offset(offset.x, offset.y - 4.dp.toPx()),
-                                        end = Offset(offset.x, offset.y + 4.dp.toPx()),
-                                        strokeWidth = 2.dp.toPx(),
-                                        cap = StrokeCap.Round,
-                                    )
-                                },
-                            )
-                        },
-                    )
-                    Row(Modifier.fillMaxWidth()) {
-                        options.forEachIndexed { optionIndex, option ->
-                            Text(
-                                label(option),
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (optionIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                            )
                         }
                     }
                 }
