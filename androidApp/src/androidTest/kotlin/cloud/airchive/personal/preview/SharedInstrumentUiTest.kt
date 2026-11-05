@@ -35,6 +35,43 @@ class SharedInstrumentUiTest {
             .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route).apply { if (detail != null) putExtra("detail", detail) },
     )
 
+    @Test fun hourlyChartsKeepAllHoursOnScreenAndShowSelectedRangeBelowPlot() {
+        listOf(false, true).forEach { dark ->
+        listOf(0, 2).forEach { route ->
+            launch(route = route, dark = dark).use {
+                if (route == 0) {
+                    awaitVisibleNode { it.text?.toString()?.contains("Target read from AC") == true }
+                    saveCapture("usage-home-temperature-$dark")
+                }
+                awaitVisibleNode { it.text?.toString() == "Energy (kWh)" }
+                File(instrumentation.targetContext.getExternalFilesDir(null), "usage-tree-$route-$dark.txt")
+                    .writeText(accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow))
+                saveCapture("usage-before-selection-$route-$dark")
+                val bars = allNodes(instrumentation.uiAutomation.rootInActiveWindow).filter {
+                    it.contentDescription?.toString()?.contains("intervals measured") == true
+                }
+                assertEquals("Every hour remains available on route $route", 24, bars.size)
+                bars.forEach { bar ->
+                    val bounds = Rect()
+                    bar.getBoundsInScreen(bounds)
+                    assertTrue("Hour fits the screen width: $bounds", bounds.left >= 0 && bounds.right <= uiDevice.displayWidth)
+                }
+                val last = bars.single { it.contentDescription.toString().startsWith("11 PM – 12 AM,") }
+                tapNodeCenter(last)
+                awaitVisibleNode { it.text?.toString() == "11 PM – 12 AM" }
+                val selected = awaitNode { it.contentDescription?.toString()?.startsWith("11 PM – 12 AM,") == true }
+                assertTrue("The chosen hour has native selected semantics", selected.stateDescription?.toString() == "Selected")
+                val plot = Rect()
+                selected.getBoundsInScreen(plot)
+                val detail = Rect()
+                awaitNode { it.text?.toString() == "11 PM – 12 AM" }.getBoundsInScreen(detail)
+                assertTrue("Details sit below the graph", detail.top >= plot.bottom)
+                saveCapture("usage-chart-$route-$dark")
+            }
+        }
+        }
+    }
+
     private fun launchShell() = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
             .putExtra("shell", true),
@@ -406,7 +443,7 @@ class SharedInstrumentUiTest {
             clickTab("Home")
             awaitNode { it.text?.toString() == "Device read 0 sec ago" }
             awaitNode { it.text?.toString() == "25" }
-            awaitVisibleNode { it.text?.toString() == "Temperature" }
+            awaitVisibleNode { it.text?.toString() == "Adjust target temperature" }
             val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
             clickNode(increase)
             awaitNode { it.text?.toString() == "26" }
@@ -1319,7 +1356,7 @@ class SharedInstrumentUiTest {
             listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
             assertTextPresent("Set temperature")
             assertTextPresent("Hour to date")
-            assertTextPresent("Temperature")
+            assertTextPresent("Adjust target temperature")
             assertTextPresent("Apply")
             assertTextPresent("Mode")
             assertTextPresent("Fan speed")
@@ -1836,7 +1873,7 @@ class SharedInstrumentUiTest {
 
                         for ((route, anchor) in listOf(
                             "Home" to "Airchive",
-                            "Device" to "Temperature",
+                            "Device" to "Adjust target temperature",
                             "Energy" to "Sampled energy",
                             "History" to "History",
                         )) {

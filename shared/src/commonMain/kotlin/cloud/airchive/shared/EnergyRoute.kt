@@ -1,5 +1,6 @@
 package cloud.airchive.shared
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -26,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +46,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -445,40 +449,138 @@ internal fun hourlyKwh(wh: Double): String {
     return "$sign${magnitude / 1000}.${(magnitude % 1000).toString().padStart(3, '0')}"
 }
 
-/** Scrollable hourly bars keep each selectable hour large enough for touch and accessibility. */
+/** A full local day: every hour owns one equal-width slot, including missing/future hours. */
+internal fun energyHourRange(hour: Int): String {
+    fun label(value: Int): String {
+        val h = value % 24
+        return "${if (h % 12 == 0) 12 else h % 12} ${if (h < 12) "AM" else "PM"}"
+    }
+    return "${label(hour)} – ${label(hour + 1)}"
+}
+
 @Composable
 internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
     val groups = remember(day) { instrumentEnergyGroups(day) }
-    var selected by remember(day.date) { mutableStateOf<Int?>(null) }
-    val max = groups.mapNotNull { it.energyWh }.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+    var selectedHour by remember(day.date) { mutableStateOf<Int?>(null) }
     val color = MaterialTheme.colorScheme.primary
-    val outline = MaterialTheme.colorScheme.outline
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            groups.forEach { group ->
-                val value = group.energyWh
-                val future = nowEpochMillis < day.dayStartEpochMillis + group.hour * 3_600_000L
-                val status = when { future -> "future"; value == null -> "unavailable"; group.usable < group.expected || group.expected < 12 -> "partial"; else -> "recorded" }
-                val description = "${group.hour.toString().padStart(2, '0')}:00, ${value?.let { hourlyKwh(it) + " kWh" } ?: status}, $status, ${group.usable} of ${group.expected} intervals measured"
-                Column(Modifier.width(48.dp).clickable { selected = group.hour }.semantics { contentDescription = description }, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Canvas(Modifier.width(32.dp).height(90.dp)) {
-                        val height = value?.let { (it.coerceAtLeast(0.0) / max * size.height).toFloat() } ?: 0f
-                        if (value != null && height > 0f) drawRect(color, Offset(4f, size.height - height), Size(size.width - 8f, height), style = if (group.usable < group.expected || group.expected < 12) androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
-                        else if (value != null) drawLine(color, Offset(4f, size.height - 2.dp.toPx()), Offset(size.width - 4f, size.height - 2.dp.toPx()), 2.dp.toPx())
-                        else if (!future) drawLine(outline, Offset(4f, size.height - 2.dp.toPx()), Offset(size.width - 4f, size.height - 2.dp.toPx()), 1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val chosen = selectedHour?.let { groups[it] }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, grid),
+            color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Energy (kWh)", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.height(144.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                        listOf("1", "0.5", "0").forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    Text(group.hour.toString().padStart(2, '0'), style = MaterialTheme.typography.labelSmall)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.fillMaxWidth().height(144.dp)) {
+                            Canvas(Modifier.matchParentSize().clearAndSetSemantics {}) {
+                                listOf(0f, .5f, 1f).forEach { fraction ->
+                                    val y = (size.height * fraction).coerceIn(.5f, size.height - .5f)
+                                    drawLine(grid, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+                                }
+                                drawLine(grid, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx())
+                            }
+                            Row(Modifier.fillMaxWidth()) {
+                                groups.forEach { group ->
+                                    val value = group.energyWh
+                                    val future = nowEpochMillis < day.dayStartEpochMillis + group.hour * 3_600_000L
+                                    val partial = group.usable < group.expected || group.expected < 12
+                                    val status = when { future -> "future"; value == null -> "unavailable"; partial -> "partial"; else -> "recorded" }
+                                    val isSelected = selectedHour == group.hour
+                                    Canvas(Modifier.weight(1f).height(144.dp)
+                                        .clickable { selectedHour = group.hour }
+                                        .semantics {
+                                            role = Role.Button
+                                            selected = isSelected
+                                            stateDescription = if (isSelected) "Selected" else "Not selected"
+                                            contentDescription = "${energyHourRange(group.hour)}, ${value?.let { hourlyKwh(it) + " kWh" } ?: status}, $status, ${group.usable} of ${group.expected} intervals measured"
+                                        }) {
+                                        val inset = size.width * .18f
+                                        val barWidth = size.width - 2 * inset
+                                        if (value != null) {
+                                            val barHeight = (value / 1000.0).coerceIn(0.0, 1.0).toFloat() * size.height
+                                            if (barHeight > 0f) drawRect(color,
+                                                Offset(inset, size.height - barHeight), Size(barWidth, barHeight),
+                                                style = if (partial) androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
+                                            else drawLine(color, Offset(inset, size.height - 1.dp.toPx()),
+                                                Offset(size.width - inset, size.height - 1.dp.toPx()), 2.dp.toPx())
+                                        }
+                                        if (isSelected) drawLine(color, Offset(size.width / 2, 0f),
+                                            Offset(size.width / 2, size.height), 2.dp.toPx())
+                                    }
+                                }
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            repeat(4) { quarter ->
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (quarter % 2 == 0) "12" else "6", style = MaterialTheme.typography.labelSmall)
+                                    if (quarter % 2 == 0) DayAxisIcon(noon = quarter == 2)
+                                }
+                            }
+                        }
+                        Text("Hour of day", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
-        val chosen = selected?.let { groups[it] }
-        Text(if (chosen == null) "Select an hour for its value. Outlined bars are partial; gaps are unavailable." else {
-            val value = chosen.energyWh?.let { hourlyKwh(it) + " kWh" } ?: if (nowEpochMillis < day.dayStartEpochMillis + chosen.hour * 3_600_000L) "Future" else "Unavailable"
-            val points = day.points.filter { it.slotIndex / 12 == chosen.hour }
-            val anomalous = points.count { it.quality == ObservationQuality.ANOMALOUS }
-            val unknown = points.count { it.energyValue != null && it.recordedUnit == null && it.quality != ObservationQuality.ANOMALOUS }
-            "${chosen.hour.toString().padStart(2, '0')}:00-${(chosen.hour + 1).toString().padStart(2, '0')}:00 - $value - ${chosen.usable}/${chosen.expected} samples" + (if (chosen.energyWh != null && (chosen.usable < chosen.expected || chosen.expected < 12)) " - partial" else "") + (if (anomalous > 0) " - $anomalous anomalous" else "") + (if (unknown > 0) " - $unknown unknown unit" else "")
-        }, style = MaterialTheme.typography.bodySmall)
+        Surface(shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, grid),
+            color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()
+                .semantics { liveRegion = LiveRegionMode.Polite }) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (chosen == null) Text("Select an hour to see energy use", style = MaterialTheme.typography.bodySmall)
+                else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(energyHourRange(chosen.hour), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                        Text(chosen.energyWh?.let { hourlyKwh(it) + " kWh" }
+                            ?: if (nowEpochMillis < day.dayStartEpochMillis + chosen.hour * 3_600_000L) "Future" else "Unavailable",
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelLarge)
+                    }
+                    val points = day.points.filter { it.slotIndex / 12 == chosen.hour }
+                    val anomalous = points.count { it.quality == ObservationQuality.ANOMALOUS }
+                    val unknown = points.count { it.energyValue != null && it.recordedUnit == null && it.quality != ObservationQuality.ANOMALOUS }
+                    Text("${chosen.usable}/${chosen.expected} elapsed samples" +
+                        (if (chosen.energyWh != null && (chosen.usable < chosen.expected || chosen.expected < 12)) " · partial hour" else "") +
+                        (if (anomalous > 0) " · $anomalous anomalous" else "") +
+                        (if (unknown > 0) " · $unknown unknown unit" else ""), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Text("Outlined bars: partial hours. Blank hours: no reading.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (groups.any { (it.energyWh ?: 0.0) > 1000.0 }) {
+            Text("Bars above 1 kWh are capped; select an hour for its full value.", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** Small native vector markers; descriptions preserve midnight/noon meaning for screen readers. */
+@Composable
+private fun DayAxisIcon(noon: Boolean) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    val background = MaterialTheme.colorScheme.surface
+    Canvas(Modifier.size(12.dp).semantics { contentDescription = if (noon) "noon" else "midnight" }) {
+        val center = Offset(size.width / 2, size.height / 2)
+        val radius = size.minDimension * .25f
+        drawCircle(ink, radius, center, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+        if (noon) repeat(8) { index ->
+            val angle = index * kotlin.math.PI / 4
+            fun point(r: Float) = Offset(center.x + kotlin.math.cos(angle).toFloat() * r,
+                center.y + kotlin.math.sin(angle).toFloat() * r)
+            drawLine(ink, point(radius * 1.5f), point(radius * 2f), 1.dp.toPx())
+        } else {
+            drawCircle(ink, radius, center)
+            drawCircle(background, radius, center + Offset(radius * .65f, -radius * .4f))
+        }
     }
 }
 

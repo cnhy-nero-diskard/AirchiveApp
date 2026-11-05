@@ -140,7 +140,7 @@ The character is clear, compact and instrument-like. The signature reading is th
 
 ### Hierarchy
 
-- **Reading:** `InstrumentReading`, shared identically by set temperature and sampled-today energy. Tabular figures stabilize comparison as values change.
+- **Reading:** `InstrumentReading`, shared by set temperature and hour-to-date energy. Tabular figures stabilize comparison as values change.
 - **Headline:** Material `headlineLarge` with a semibold override for the production Home title; other route headings retain their own Material roles.
 - **Title:** Material `titleLarge` with a semibold override for the device name and “Today’s record”; `titleSmall` for Temperature and finalized energy; `titleMedium` for reading units.
 - **Body:** `bodyMedium` for readout labels and setup guidance; `bodySmall` for device/sample/sync age, measurement context and command outcomes.
@@ -172,7 +172,7 @@ Shared theme shapes are gently rounded: small controls use the small token, medi
 
 ### Shared instrument and readings
 
-One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The current setpoint stays identifiable when a local draft differs from the last observed value.
+One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. A separate “Target read from AC” reading (last-read wording for retained state) stays visible while editing, and the selected target explicitly asks for Apply when dirty. Room-sensor temperature is labeled unavailable because the current live-state contract does not expose it.
 
 ### Buttons and temperature controls
 
@@ -188,7 +188,9 @@ Each is a full-width native text-button row with a minimum 48dp height, no conte
 
 Coverage is informational, not an interactive filter chip. Incomplete or absent usable samples use amber text, wash and a 1dp border; complete coverage uses a quiet neutral surface. Badges use labelLarge text and the frontmatter padding. Readable coverage text accompanies color.
 
-The native chart groups five-minute source intervals into eight three-hour columns, labeled in Wh. Its Canvas is 76dp tall, with text values above and hours below. Filled cobalt bars are fully measured groups; dashed outlines mark partial groups, and explicit “Gap” text marks missing measured intervals. Future groups remain empty; measured zero is distinct from missing. A merged chart description states values and measured interval counts and directs users to Energy for five-minute detail. “Sampled today” is usable recorded energy in kWh, not instantaneous power; finalized LG totals remain separately labeled. Day boundaries use Asia/Manila.
+Home’s “Daily Cumulative Usage” section and Energy’s Day view share an hourly chart. Every local day retains 24 equal-width hour slots within the viewport, with no horizontal scrolling. Each graph has a bordered surface, a fixed 0–1 kWh y-axis with a 0.5 midpoint, and x-axis markers at midnight (moon), 6 AM, noon (sun), and 6 PM. Five-minute intervals are summed within each hour; filled cobalt bars indicate fully measured hours and outlined bars indicate partial hours. Missing and future readings leave blank slots, while recorded zero retains a baseline mark. Values above 1 kWh are visually capped with an explanation and remain exact in selection details.
+
+Tapping a thin bar overlays a vertical cobalt line and updates a separate rectangular surface below the graph. Its left side shows the AM/PM hour range, including correct noon and midnight transitions; the right shows energy in kWh or explicit unavailable/future status. Sample coverage and anomaly/unknown-unit counts remain available. Each hour exposes a button description and selected-state announcement for accessibility. Hour-to-date and daily subtotal readings use kWh, independently of instantaneous power; finalized LG totals remain separately labeled. Day boundaries use Asia/Manila.
 
 ### Navigation
 

@@ -122,6 +122,13 @@ class HomeInstrumentTest {
         }
     }
 
+    @Test fun hourlyRangeLabelsDistinguishMidnightNoonAndEndOfDay() {
+        assertEquals("12 AM – 1 AM", energyHourRange(0))
+        assertEquals("11 AM – 12 PM", energyHourRange(11))
+        assertEquals("12 PM – 1 PM", energyHourRange(12))
+        assertEquals("11 PM – 12 AM", energyHourRange(23))
+    }
+
     @Test fun chartKeepsPartialCoverageGapsAndMeasuredZeroAndFreshnessIgnoresTrailingGap() {
         val start = Instant.parse("2026-10-23T16:00:00Z").toEpochMilliseconds()
         fun sample(slot: Int, value: Double?) = Observation("$slot", start + slot * 300_000L,
