@@ -99,7 +99,7 @@ Evidence: `AirchiveTheme.kt`, `HomeInstrument.kt`, `ProductionAirchiveApp.kt`, `
 
 ## Colors
 
-The palette uses porcelain and slate as the reading field, cobalt for active meaning, and amber for incomplete coverage. Frontmatter values are authoritative; the native role mapping below explains their application.
+The palette uses porcelain and slate as the reading field, cobalt for active meaning, with neutral coverage explanations in the chart and disclosure details. Frontmatter values are authoritative; the native role mapping below explains their application.
 
 ### Primary
 
@@ -113,7 +113,7 @@ The palette uses porcelain and slate as the reading field, cobalt for active mea
 
 ### Tertiary
 
-- **Coverage Amber / Coverage Wash** (`coverage-amber`, `coverage-wash`): Material `tertiary`, `tertiaryContainer` and `onTertiaryContainer`, used for incomplete or absent usable coverage, including a visible border and text.
+- **Coverage Amber / Coverage Wash** (`coverage-amber`, `coverage-wash`): retained Material tertiary roles; Home and the Energy summary no longer render a coverage badge.
 - **Dark Coverage Amber / Wash**: the corresponding dark roles retain a readable warning label without turning the whole panel into an alert.
 
 ### Neutral
@@ -135,7 +135,7 @@ The character is clear, compact and instrument-like. The signature reading is th
 
 ### Hierarchy
 
-- **Reading:** `InstrumentReading`, shared by set temperature and hour-to-date energy. Tabular figures stabilize comparison as values change.
+- **Reading:** `InstrumentReading`, shared by set temperature and current-hour energy. Tabular figures stabilize comparison as values change.
 - **Headline:** Material `headlineLarge` with a semibold override for the production Home title; other route headings retain their own Material roles.
 - **Title:** Material `titleLarge` with a semibold override for the device name and “Today’s record”; `titleSmall` for Temperature and finalized energy; `titleMedium` for reading units.
 - **Body:** `bodyMedium` for readout labels and setup guidance; `bodySmall` for device/sample/sync age, measurement context and command outcomes.
@@ -171,7 +171,7 @@ One grouped native surface holds comfort and energy. Labels, numbers and units a
 
 ### Buttons and temperature controls
 
-Minus/plus are 48dp tonal icon buttons with simple Canvas strokes and explicit accessibility labels. They update the target immediately and send the final supported value after one second without another step. A new step restarts the timer; returning to the observed value cancels it. Pending sends cancel on navigation, owner/credential changes, profile changes, refresh, or loss of control readiness. Restored drafts never arm a send. Once dispatched, the graph-owned command completes independently of navigation, with no automatic retry on failed or ambiguous outcomes. There is no Apply button. Step boundaries and units follow the verified profile; native disabled/ripple/focus behavior remains in effect.
+Minus/plus are 48dp tonal icon buttons with simple Canvas strokes and explicit accessibility labels. They update the target immediately and send the final supported value after one second without another step. A new step restarts the timer; returning to the observed value cancels it. Pending sends cancel on navigation, owner/credential changes, profile changes, refresh, or loss of control readiness. Restored drafts never arm a send. A matching device observation clears the confirmed draft so later external setpoint changes remain visible in the single readout. Once dispatched, the graph-owned command completes independently of navigation, with no automatic retry on failed or ambiguous outcomes. There is no Apply button. Step boundaries and units follow the verified profile; native disabled/ripple/focus behavior remains in effect.
 
 Text buttons handle Energy, device-state retry, setup and history refresh. Native power is a real Switch with readable On/Off/Unknown context and an “AC power” description. Unsupported, stale, unverified or sending states disable commands; ambiguous outcomes never trigger automatic resend.
 
@@ -181,11 +181,11 @@ Each is a full-width native text-button row with a minimum 48dp height, no conte
 
 ### Coverage status and energy chart
 
-Coverage is informational, not an interactive filter chip. Incomplete or absent usable samples use amber text, wash and a 1dp border; complete coverage uses a quiet neutral surface. Badges use labelLarge text and the frontmatter padding. Readable coverage text accompanies color.
+Home and the Energy summary omit the yellow coverage badge. The chart explains outlined bars with “Data might be inaccurate or incomplete during this hour.” Exact sample counts, anomalous readings, unknown units and query coverage remain available in selection and disclosure details. Missing hours stay blank and are never rendered as zero.
 
 Home’s “Daily Cumulative Usage” section and Energy’s Day view share an hourly chart. Every local day retains 24 equal-width hour slots within the viewport, with no horizontal scrolling. Each graph has a bordered surface, a fixed 0–1 kWh y-axis in 0.2 kWh increments, and x-axis markers at midnight (moon), 6 AM, noon (sun), and 6 PM. Five-minute intervals are summed within each hour; slim cobalt bars with rounded tops indicate fully measured hours and outlined bars with the same shape indicate partial hours. Missing and future readings leave blank slots, while recorded zero retains a baseline mark. Values above 1 kWh are visually capped with an explanation and remain exact in selection details.
 
-Tapping a thin bar overlays a vertical cobalt line and updates a separate rectangular surface below the graph. Its left side shows the AM/PM hour range, including correct noon and midnight transitions; the right shows energy in kWh or explicit unavailable/future status. Sample coverage and anomaly/unknown-unit counts remain available. Each hour exposes a button description and selected-state announcement for accessibility. Hour-to-date and daily subtotal readings use kWh, independently of instantaneous power; finalized LG totals remain separately labeled. Day boundaries use Asia/Manila.
+Tapping a thin bar overlays a vertical cobalt line and updates a separate rectangular surface below the graph. Its left side shows the AM/PM hour range, including correct noon and midnight transitions; the right shows energy in kWh or explicit unavailable/future status. Sample coverage and anomaly/unknown-unit counts remain available. Each hour exposes a button description and selected-state announcement for accessibility. Home labels its current-hour sum “Current power consumption as of h:mm AM/PM”, with the AC’s current Manila time and kWh beside the value. The requested label still represents recorded interval energy, not an instantaneous watt measurement. “Today's net consumption” uses a prominent cobalt heading and daily kWh subtotal without a partial suffix. Finalized LG totals remain separately labeled. Day boundaries use Asia/Manila.
 
 ### Navigation
 
@@ -205,7 +205,7 @@ Secondary and access/setup surfaces use native Material cards, buttons, outlined
 
 ### Do:
 
-- **Do** keep comfort and energy readings equally prominent and apply the native stacking rule.
+- **Do** keep comfort and energy readings prominent and apply the native stacking rule.
 - **Do** preserve scalable text, readable status text, native semantics and at least 48dp interactive targets.
 - **Do** distinguish live device age, latest usable sample age and history-sync age wherever they affect a decision.
 - **Do** show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.

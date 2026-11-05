@@ -2,7 +2,6 @@ package cloud.airchive.shared
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -252,6 +251,11 @@ fun SharedInstrumentPanel(
     val selected = draftResolution.displayValue
         ?: fallbackSetpoint.value.takeIf { draft == null && observed == null }
     val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
+    LaunchedEffect(draftResolution.status) {
+        // Once observed, the selected value is no longer a draft. Later AC
+        // changes must appear in the single setpoint readout too.
+        if (draftResolution.status == TemperatureDraftStatus.MATCHES_OBSERVATION) updateDraft(null)
+    }
     val latestOnCommand by rememberUpdatedState(onCommand)
     val latestNow by rememberUpdatedState(nowEpochMillis)
     LaunchedEffect(pendingTemperature, enabled, draftResolution.status) {
@@ -350,10 +354,18 @@ fun SharedInstrumentPanel(
                 val usage: @Composable () -> Unit = {
                     val localHour = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).hour
                     val hour = currentHourEnergy(day, localHour, energy.queryCoverage.fullyQueried)
-                    Column {
-                        InstrumentReadout("Hour to date", hour.energyWh?.let { instrumentNumber(it / 1000) } ?: "\u2014", "kWh \u00b7 ${localHour.toString().padStart(2, '0')}:00\u2013now")
-                        Text(if (hour.energyWh == null) "Hour unavailable" else if (hour.partial) "Partial hour" else "Recorded this hour", style = MaterialTheme.typography.bodySmall)
-                        Text("Today so far: ${day.usableEnergyValueWh?.let { instrumentNumber(it / 1000) + " kWh" } ?: "unavailable"}${if (day.usableSlotCount < day.expectedSlotCount || !energy.queryCoverage.fullyQueried) " \u00b7 partial" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        InstrumentReadout(currentConsumptionLabel(nowEpochMillis),
+                            hour.energyWh?.let { instrumentNumber(it / 1000) } ?: "—", "kWh")
+                        if (hour.energyWh == null) Text("Hour unavailable", style = MaterialTheme.typography.bodySmall)
+                        Column(Modifier.padding(top = 8.dp).semantics(mergeDescendants = true) {},
+                            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Today's net consumption", style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text(day.usableEnergyValueWh?.let { "${instrumentNumber(it / 1000)} kWh" } ?: "Unavailable",
+                                style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
                 if (!showEnergy) target()
@@ -442,27 +454,10 @@ fun SharedInstrumentPanel(
                     Text("${day.usableSlotCount} of ${day.expectedSlotCount} elapsed intervals have usable energy. Gaps are not zero. Day boundary: $DEFAULT_DAY_TIME_ZONE.", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            val hasSamples = day.usableSlotCount > 0
-            val complete = hasSamples && day.usableSlotCount == day.expectedSlotCount && energy.queryCoverage.fullyQueried
             val latest = latestUsableEnergyPoint(day)
             val sampleAge = latest?.let { "Latest usable sample ${instrumentAge(nowEpochMillis - it.intervalEndEpochMillis)} ago" }
                 ?: "History appears after the first download."
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val coverageBadge: @Composable () -> Unit = { Surface(shape = RoundedCornerShape(8.dp),
-                color = if (complete) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = if (complete) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onTertiaryContainer,
-                border = if (complete) null else BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary)) {
-                Text(when { !hasSamples -> "No usable samples yet"; complete -> "Recorded coverage complete"; else -> "Incomplete coverage" },
-                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-            } }
-            if (maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { coverageBadge(); Text(sampleAge, style = MaterialTheme.typography.bodySmall) }
-            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.weight(1.4f)) { coverageBadge() }
-                Text(sampleAge, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            }
+            Text(sampleAge, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             finalized?.let {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -636,19 +631,24 @@ private fun ThermostatReadout(
     }
 }
 
+/** Home timestamps follow the configured AC's day boundary, including AM/PM. */
+internal fun currentConsumptionLabel(nowEpochMillis: Long): String {
+    val local = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(TimeZone.of(DEFAULT_DAY_TIME_ZONE))
+    val hour = (local.hour % 12).takeIf { it != 0 } ?: 12
+    val minute = local.minute.toString().padStart(2, '0')
+    val period = if (local.hour < 12) "AM" else "PM"
+    return "Current power consumption as of $hour:$minute $period"
+}
+
 @Composable
-private fun InstrumentReadout(label: String, value: String, unit: String, inlineUnit: Boolean = false) {
+private fun InstrumentReadout(label: String, value: String, unit: String) {
     Column(Modifier.semantics(mergeDescendants = true) {}) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (inlineUnit) {
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(value, style = InstrumentReading)
-                Text(unit, modifier = Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            Text(value, style = InstrumentReading)
-            Text(unit, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(value, style = InstrumentReading, modifier = Modifier.weight(1f, fill = false), maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 28.sp, maxFontSize = 76.sp))
+            Text(unit, modifier = Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

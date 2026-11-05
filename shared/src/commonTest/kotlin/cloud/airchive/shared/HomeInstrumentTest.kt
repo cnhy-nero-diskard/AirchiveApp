@@ -124,6 +124,13 @@ class HomeInstrumentTest {
         }
     }
 
+    @Test fun currentConsumptionLabelUsesManilaTimeWithPaddedMinutesAndAmPm() {
+        assertEquals("Current power consumption as of 12:00 AM", currentConsumptionLabel(Instant.parse("2026-11-04T16:00:00Z").toEpochMilliseconds()))
+        assertEquals("Current power consumption as of 12:05 PM", currentConsumptionLabel(Instant.parse("2026-11-05T04:05:00Z").toEpochMilliseconds()))
+        assertEquals("Current power consumption as of 11:59 PM", currentConsumptionLabel(Instant.parse("2026-11-05T15:59:00Z").toEpochMilliseconds()))
+        assertEquals("Current power consumption as of 1:09 AM", currentConsumptionLabel(Instant.parse("2026-11-04T17:09:00Z").toEpochMilliseconds()))
+    }
+
     @Test fun hourlyRangeLabelsDistinguishMidnightNoonAndEndOfDay() {
         assertEquals("12 AM – 1 AM", energyHourRange(0))
         assertEquals("11 AM – 12 PM", energyHourRange(11))

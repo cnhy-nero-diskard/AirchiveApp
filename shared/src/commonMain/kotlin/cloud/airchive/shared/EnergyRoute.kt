@@ -345,17 +345,6 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
         Text("Sampled energy", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(presentation.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—", style = InstrumentReading)
         Text("kWh · five-minute interval sum", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val usable = presentation.days.sumOf { it.usableSlotCount }
-        val expected = presentation.days.sumOf { it.expectedSlotCount }
-        val complete = expected > 0 && usable == expected && presentation.queryCoverage.fullyQueried
-        androidx.compose.material3.Surface(
-            color = if (complete) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = if (complete) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onTertiaryContainer,
-            shape = MaterialTheme.shapes.small, modifier = Modifier.padding(top = 8.dp),
-        ) {
-            Text(when { expected == 0 -> "No elapsed intervals"; usable == 0 -> "No usable samples"; complete -> "Recorded coverage complete"; else -> "Incomplete coverage · $usable of $expected intervals" },
-                style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-        }
     }
 }
 
@@ -494,7 +483,7 @@ internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
                                     val value = group.energyWh
                                     val future = nowEpochMillis < day.dayStartEpochMillis + group.hour * 3_600_000L
                                     val partial = group.usable < group.expected || group.expected < 12
-                                    val status = when { future -> "future"; value == null -> "unavailable"; partial -> "partial"; else -> "recorded" }
+                                    val status = when { future -> "future"; value == null -> "unavailable"; partial -> "data may be inaccurate or incomplete"; else -> "recorded" }
                                     val isSelected = selectedHour == group.hour
                                     Canvas(Modifier.weight(1f).height(144.dp)
                                         .clickable { selectedHour = group.hour }
@@ -563,13 +552,12 @@ internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
                     val anomalous = points.count { it.quality == ObservationQuality.ANOMALOUS }
                     val unknown = points.count { it.energyValue != null && it.recordedUnit == null && it.quality != ObservationQuality.ANOMALOUS }
                     Text("${chosen.usable}/${chosen.expected} elapsed samples" +
-                        (if (chosen.energyWh != null && (chosen.usable < chosen.expected || chosen.expected < 12)) " · partial hour" else "") +
                         (if (anomalous > 0) " · $anomalous anomalous" else "") +
                         (if (unknown > 0) " · $unknown unknown unit" else ""), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-        Text("Outlined bars: partial hours. Blank hours: no reading.", style = MaterialTheme.typography.bodySmall,
+        Text("Outlined bars: Data might be inaccurate or incomplete during this hour. Blank hours: no reading.", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (groups.any { (it.energyWh ?: 0.0) > 1000.0 }) {
             Text("Bars above 1 kWh are capped; select an hour for its full value.", style = MaterialTheme.typography.bodySmall)
@@ -879,7 +867,7 @@ private fun DaySummaryCard(day: EnergyDaySummary) {
 
 private fun dayHeading(day: EnergyDaySummary): String {
     val prefix = day.date.longDate()
-    return if (day.isCurrentDay) "$prefix · today (partial elapsed slots)" else prefix
+    return if (day.isCurrentDay) "$prefix · today" else prefix
 }
 
 private fun slotCountsText(day: EnergyDaySummary): String? = if (day.expectedSlotCount == 0) {

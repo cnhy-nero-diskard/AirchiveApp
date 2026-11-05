@@ -248,7 +248,9 @@ class SharedInstrumentShellFixture(context: Context) {
     }
 
     /** Starts a fake-only device read so timer cancellation can be tested without UI-idle delays. */
-    fun refreshThinQForTest() { scope.launch { baseBindings.onDeviceOpened() } }
+    fun refreshThinQForTest() {
+        scope.launch { thinQContext.liveStateController.refresh(thinQContext.contextKey.value) }
+    }
 
     /** Injects a synthetic LG read failure without constructing production HTTP. */
     fun setThinQReadFailure(failure: Throwable?) {

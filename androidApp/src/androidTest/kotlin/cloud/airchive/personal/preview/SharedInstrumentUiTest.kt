@@ -59,6 +59,30 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun thermostatAndConsumptionFeedbackLayouts() {
+        val scale = instrumentation.targetContext.resources.configuration.fontScale
+        for (dark in listOf(false, true)) {
+            launch(dark = dark).use {
+                awaitVisibleNode { it.text?.toString() == "28.5 °C" }
+                saveCapture("feedback-thermostat-${if (dark) "dark" else "light"}-scale-$scale")
+                awaitVisibleNode { it.text?.toString()?.startsWith("Current power consumption as of ") == true }
+                awaitVisibleNode { it.text?.toString() == "Today's net consumption" }
+                val unit = awaitVisibleNode { it.text?.toString() == "kWh" }
+                val unitBounds = Rect().also(unit::getBoundsInScreen)
+                assertTrue("the inline unit remains within the viewport", unitBounds.right <= uiDevice.displayWidth)
+                val tree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+                assertFalse(tree.contains("Hour to date"))
+                assertFalse(tree.contains("Partial hour"))
+                assertFalse(tree.contains("Today so far:"))
+                assertFalse(tree.contains("Incomplete coverage"))
+                assertFalse(tree.contains("Target read from AC"))
+                saveCapture("feedback-consumption-${if (dark) "dark" else "light"}-scale-$scale")
+                awaitVisibleNode { it.text?.toString()?.startsWith("Outlined bars: Data might be inaccurate or incomplete during this hour.") == true }
+                saveCapture("feedback-chart-${if (dark) "dark" else "light"}-scale-$scale")
+            }
+        }
+    }
+
     @Test fun hourlyChartsKeepAllHoursOnScreenAndShowSelectedRangeBelowPlot() {
         listOf(false, true).forEach { dark ->
         listOf(0, 2).forEach { route ->
@@ -440,21 +464,11 @@ class SharedInstrumentUiTest {
             // fresh tree queries may wait for accessibility-idle on animated screens.
             val increase = Rect().also(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }::getBoundsInScreen)
             val decrease = Rect().also(awaitNode { it.contentDescription?.toString() == "Decrease target temperature" }::getBoundsInScreen)
-            fun tap(bounds: Rect) {
-                val down = SystemClock.uptimeMillis()
-                listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP).forEach { action ->
-                    val event = android.view.MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
-                        bounds.centerX().toFloat(), bounds.centerY().toFloat(), 0)
-                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-                    assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
-                    event.recycle()
-                }
-            }
-            tap(increase)
+            injectTap(increase)
             SystemClock.sleep(250)
-            tap(increase)
+            injectTap(increase)
             SystemClock.sleep(250)
-            tap(decrease)
+            injectTap(decrease)
             SystemClock.sleep(500)
             scene.onActivity { assertEquals("rapid taps reset the one-second delay", 0, it.submittedCommands) }
             awaitTrue("one command sends the final selection") {
@@ -510,8 +524,8 @@ class SharedInstrumentUiTest {
             val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!); it.shellFixture!!.thinQGate.hold() }
-            assertTrue(increase.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            scene.onActivity { it.shellFixture!!.refreshThinQForTest() }
+            injectTap(Rect().also(increase::getBoundsInScreen))
+            instrumentation.runOnMainSync { fixture.get().refreshThinQForTest() }
             SystemClock.sleep(1_200)
             assertEquals("refresh cancels the unsent edit", 0, fixture.get().counters.thinQCommandSubmissions.get())
             fixture.get().thinQGate.release()
@@ -968,7 +982,7 @@ class SharedInstrumentUiTest {
         for (dark in listOf(false, true)) {
         systemTheme(if (dark) "yes" else "no")
         launch(dark).use {
-            awaitNode { it.text?.toString() == "Hour to date" }
+            awaitNode { it.text?.toString()?.startsWith("Current power consumption as of ") == true }
             instrumentation.waitForIdleSync()
             instrumentation.uiAutomation.waitForIdle(250, 5_000)
             val bitmap = instrumentation.uiAutomation.takeScreenshot()
@@ -1175,7 +1189,7 @@ class SharedInstrumentUiTest {
         clearFixturePreferences()
     }
 
-    @Test fun energySummaryAndCoverageBadgeAreIdenticalInSimpleAndDetailed() {
+    @Test fun energySummaryIsIdenticalInSimpleAndDetailed() {
         clearFixturePreferences()
         launchShell().use { scene ->
             clickText("Continue with Google")
@@ -1250,7 +1264,7 @@ class SharedInstrumentUiTest {
 
             listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
             assertTextPresent("Set temperature")
-            assertTextPresent("Hour to date")
+            assertTrue(accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).contains("Current power consumption as of "))
             assertTextAbsent("Adjust target temperature")
             assertTextAbsent("Apply")
             assertTextPresent("Mode")
@@ -1261,7 +1275,7 @@ class SharedInstrumentUiTest {
             fixture.get().setThinQReadFailure(IllegalStateException("synthetic fake read failure"))
             clickText("Device")
             awaitNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
-            assertTextAbsent("Hour to date")
+            assertFalse(accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).contains("Current power consumption as of "))
             assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
 
             fixture.get().setThinQReadFailure(null)
@@ -1560,13 +1574,13 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Airchive" }
             val homeTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
             assertTrue("Home exposes the temperature reading: $homeTree", homeTree.contains("Set temperature"))
-            assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Hour to date"))
+            assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Current power consumption as of "))
             assertTrue("the long sampled value stays complete: $homeTree", homeTree.contains("15.11"))
 
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val temperature = find(root) { it.text?.toString()?.contains("Set temperature") == true }
                 ?: throw AssertionError("Temperature reading semantics were unavailable: $homeTree")
-            val sampled = find(root) { it.text?.toString()?.contains("Hour to date") == true }
+            val sampled = find(root) { it.text?.toString()?.contains("Current power consumption as of ") == true }
                 ?: throw AssertionError("Sampled reading semantics were unavailable: $homeTree")
             val temperatureBounds = Rect().also(temperature::getBoundsInScreen)
             val sampledBounds = Rect().also(sampled::getBoundsInScreen)
@@ -1642,7 +1656,7 @@ class SharedInstrumentUiTest {
             clickTab("Home")
             awaitVisibleNode { it.text?.toString() == "Airchive" }
             assertTrue("Home remains the selected landscape route", selectedDestination("Home"))
-            awaitVisibleNode { it.text?.toString() == "Hour to date" }
+            awaitVisibleNode { it.text?.toString()?.startsWith("Current power consumption as of ") == true }
             saveCapture("synthetic-home-phone-landscape-scale-1.0")
 
             val navigationTop = if (usesLandscapeRail()) instrumentation.targetContext.resources.displayMetrics.heightPixels
@@ -1652,30 +1666,13 @@ class SharedInstrumentUiTest {
                 val headingBounds = Rect().also(awaitVisibleNode { it.text?.toString() == "Airchive" }::getBoundsInScreen)
                 assertTrue("landscape navigation sits beside the content", homeBounds.right < headingBounds.left)
             }
-            var temperatureUnit: AccessibilityNodeInfo? = null
-            var energyUnit: AccessibilityNodeInfo? = null
-            var unitScrolls = 0
-            while ((temperatureUnit == null || energyUnit == null) && unitScrolls < 5) {
-                val root = instrumentation.uiAutomation.rootInActiveWindow
-                temperatureUnit = find(root) { it.isVisibleToUser && it.text?.toString() == "°C" }
-                energyUnit = find(root) { it.isVisibleToUser && it.text?.toString()?.startsWith("kWh · ") == true }
-                if (temperatureUnit != null && energyUnit != null) {
-                    val temperatureBounds = Rect().also(temperatureUnit::getBoundsInScreen)
-                    val energyBounds = Rect().also(energyUnit::getBoundsInScreen)
-                    if (temperatureBounds.bottom > navigationTop || energyBounds.bottom > navigationTop) {
-                        temperatureUnit = null
-                        energyUnit = null
-                    }
-                }
-                if (temperatureUnit == null || energyUnit == null) scrollForward()
-                unitScrolls++
-            }
-            assertTrue("landscape scrolling exposes the complete temperature and energy units",
-                temperatureUnit != null && energyUnit != null)
-            val temperatureUnitBounds = Rect().also(requireNotNull(temperatureUnit)::getBoundsInScreen)
-            val energyUnitBounds = Rect().also(requireNotNull(energyUnit)::getBoundsInScreen)
-            assertTrue("the landscape readout units remain above the fixed navigation without overlap",
-                temperatureUnitBounds.bottom <= navigationTop && energyUnitBounds.bottom <= navigationTop)
+            val temperatureUnit = awaitVisibleNode { it.text?.toString() == "°C" }
+            val temperatureUnitBounds = Rect().also(temperatureUnit::getBoundsInScreen)
+            assertTrue("landscape scrolling exposes the thermostat unit", temperatureUnitBounds.bottom <= navigationTop)
+            saveCapture("synthetic-thermostat-phone-landscape-scale-1.0")
+            val energyUnit = awaitVisibleNode { it.text?.toString() == "kWh" }
+            val energyUnitBounds = Rect().also(energyUnit::getBoundsInScreen)
+            assertTrue("landscape scrolling exposes the consumption unit", energyUnitBounds.bottom <= navigationTop)
             saveCapture("synthetic-home-readings-phone-landscape-scale-1.0")
 
             var action: AccessibilityNodeInfo? = null
@@ -1791,7 +1788,7 @@ class SharedInstrumentUiTest {
                             saveCapture("synthetic-shell-${detail.lowercase()}-$route-${if (dark) "dark" else "light"}-scale-$scaleLabel")
                             if (route == "Home" && fontScale > 1.2f) {
                                 scrollForward()
-                                awaitVisibleNode { it.text?.toString() == "1829" }
+                                awaitVisibleNode { it.text?.toString() == "Today's net consumption" }
                                 saveCapture(
                                     "synthetic-shell-${detail.lowercase()}-Home-energy-labels-" +
                                         "${if (dark) "dark" else "light"}-scale-$scaleLabel",
@@ -1889,6 +1886,18 @@ class SharedInstrumentUiTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
         }
         bitmap.recycle()
+    }
+
+    /** Inject without accessibility-idle waits so one-second interaction windows remain real. */
+    private fun injectTap(bounds: Rect) {
+        val down = SystemClock.uptimeMillis()
+        listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP).forEach { action ->
+            val event = android.view.MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                bounds.centerX().toFloat(), bounds.centerY().toFloat(), 0)
+            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
     }
 
     private fun clickNode(node: AccessibilityNodeInfo) {
@@ -2322,15 +2331,10 @@ class SharedInstrumentUiTest {
         val lines = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).lineSequence().toList()
         val labelIndex = lines.indexOf("Sampled energy")
         assertTrue("the summary label is in the accessibility tree", labelIndex >= 0 && labelIndex + 2 < lines.size)
-        val coverage = lines.firstOrNull { line ->
-            line.startsWith("No elapsed intervals") || line.startsWith("No usable samples") ||
-                line.startsWith("Recorded coverage complete") || line.startsWith("Incomplete coverage")
-        } ?: throw AssertionError("The Energy coverage badge is not exposed")
         return listOf(
             lines[labelIndex],
             lines[labelIndex + 1],
             lines[labelIndex + 2],
-            coverage,
         )
     }
 
