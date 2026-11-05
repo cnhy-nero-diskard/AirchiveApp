@@ -353,6 +353,8 @@ class KtorThinQClientTest {
         assertEquals("/devices/ac-device-1/state", requests[1].url.encodedPath)
         assertTrue(state.powerOn)
         assertEquals(25.0, state.targetTemperature, "F block (77°F) is normalized into the profile's °C")
+        assertEquals(24.0, state.currentTemperature,
+            "the preferred Celsius sensor reading stays independent from the target")
         assertEquals(AcOperatingMode.COOL, state.mode)
         assertEquals(FanSpeed.MEDIUM, state.fanSpeed)
         assertEquals(fixedNow, state.observedAtEpochMillis)

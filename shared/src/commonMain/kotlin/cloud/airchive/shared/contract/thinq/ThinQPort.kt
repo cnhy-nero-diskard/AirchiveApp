@@ -136,6 +136,8 @@ data class ThinQLiveState(
     val targetTemperature: Double? = null,
     val mode: AcOperatingMode? = null,
     val fanSpeed: FanSpeed? = null,
+    /** Read-only AC sensor reading, normalized to the profile's temperature unit. */
+    val currentTemperature: Double? = null,
 )
 
 /** The four permitted command types, one-at-a-time per device. */

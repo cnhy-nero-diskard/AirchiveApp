@@ -172,7 +172,14 @@ internal object ThinQPayloads {
             deviceId = deviceId,
             observedAtEpochMillis = observedAtEpochMillis,
             powerOn = powerOn,
-            targetTemperature = targetTemperature(
+            targetTemperature = temperatureReading(
+                property = "targetTemperature",
+                legacyNode = root["temperatureInUnits"],
+                currentNode = root["temperature"],
+                preferredUnit = preferredUnit,
+            ),
+            currentTemperature = temperatureReading(
+                property = "currentTemperature",
                 legacyNode = root["temperatureInUnits"],
                 currentNode = root["temperature"],
                 preferredUnit = preferredUnit,
@@ -253,8 +260,9 @@ internal object ThinQPayloads {
     private fun effectiveTemperatureStep(profileStep: Double, override: Double?): Double =
         override?.takeIf { it.isFinite() && it >= profileStep } ?: profileStep
 
-    /** Numeric target temperature (in its block's unit) converted to [preferredUnit]. */
-    private fun targetTemperature(
+    /** Each reading is selected independently and normalized to [preferredUnit]. */
+    private fun temperatureReading(
+        property: String,
         legacyNode: JsonElement?,
         currentNode: JsonElement?,
         preferredUnit: TemperatureUnit,
@@ -266,19 +274,19 @@ internal object ThinQPayloads {
         }
         val symbol = preferredUnit.symbol()
         val preferred = blocks.firstOrNull {
-            it.string("unit")?.trim()?.uppercase() == symbol && number(it, "targetTemperature") != null
+            it.string("unit")?.trim()?.uppercase() == symbol && number(it, property)?.isFinite() == true
         }
-        val chosen = preferred ?: blocks.firstOrNull { number(it, "targetTemperature") != null }
+        val chosen = preferred ?: blocks.firstOrNull { number(it, property)?.isFinite() == true && unitFromSymbol(it.string("unit")) != null }
         if (chosen != null) {
-            val raw = number(chosen, "targetTemperature") ?: return null
+            val raw = number(chosen, property)?.takeIf { it.isFinite() } ?: return null
             val blockUnit = unitFromSymbol(chosen.string("unit")) ?: return null
-            return if (blockUnit == preferredUnit) raw else convertTemperature(raw, blockUnit, preferredUnit)
+            return (if (blockUnit == preferredUnit) raw else convertTemperature(raw, blockUnit, preferredUnit)).takeIf { it.isFinite() }
         }
 
         val temperature = currentNode as? JsonObject ?: return null
-        val raw = number(temperature, "targetTemperature") ?: return null
+        val raw = number(temperature, property)?.takeIf { it.isFinite() } ?: return null
         val unit = temperatureUnit(temperature["unit"]) ?: return null
-        return if (unit == preferredUnit) raw else convertTemperature(raw, unit, preferredUnit)
+        return (if (unit == preferredUnit) raw else convertTemperature(raw, unit, preferredUnit)).takeIf { it.isFinite() }
     }
 
     private fun temperatureUnit(node: JsonElement?): TemperatureUnit? = when (node) {
