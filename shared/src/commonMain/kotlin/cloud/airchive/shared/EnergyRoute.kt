@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -473,7 +474,7 @@ internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Column(Modifier.height(144.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                        listOf("1", "0.5", "0").forEach {
+                        listOf("1", "0.8", "0.6", "0.4", "0.2", "0").forEach {
                             Text(it, style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -481,7 +482,8 @@ internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.fillMaxWidth().height(144.dp)) {
                             Canvas(Modifier.matchParentSize().clearAndSetSemantics {}) {
-                                listOf(0f, .5f, 1f).forEach { fraction ->
+                                (0..5).forEach { tick ->
+                                    val fraction = tick / 5f
                                     val y = (size.height * fraction).coerceIn(.5f, size.height - .5f)
                                     drawLine(grid, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
                                 }
@@ -502,14 +504,26 @@ internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
                                             stateDescription = if (isSelected) "Selected" else "Not selected"
                                             contentDescription = "${energyHourRange(group.hour)}, ${value?.let { hourlyKwh(it) + " kWh" } ?: status}, $status, ${group.usable} of ${group.expected} intervals measured"
                                         }) {
-                                        val inset = size.width * .18f
+                                        val inset = size.width * .23f
                                         val barWidth = size.width - 2 * inset
                                         if (value != null) {
                                             val barHeight = (value / 1000.0).coerceIn(0.0, 1.0).toFloat() * size.height
-                                            if (barHeight > 0f) drawRect(color,
-                                                Offset(inset, size.height - barHeight), Size(barWidth, barHeight),
-                                                style = if (partial) androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
-                                            else drawLine(color, Offset(inset, size.height - 1.dp.toPx()),
+                                            if (barHeight > 0f) {
+                                                val top = size.height - barHeight
+                                                val right = size.width - inset
+                                                val radius = minOf(barWidth / 2, barHeight)
+                                                val bar = Path().apply {
+                                                    moveTo(inset, size.height)
+                                                    lineTo(inset, top + radius)
+                                                    quadraticBezierTo(inset, top, inset + radius, top)
+                                                    lineTo(right - radius, top)
+                                                    quadraticBezierTo(right, top, right, top + radius)
+                                                    lineTo(right, size.height)
+                                                    close()
+                                                }
+                                                drawPath(bar, color,
+                                                    style = if (partial) androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
+                                            } else drawLine(color, Offset(inset, size.height - 1.dp.toPx()),
                                                 Offset(size.width - inset, size.height - 1.dp.toPx()), 2.dp.toPx())
                                         }
                                         if (isSelected) drawLine(color, Offset(size.width / 2, 0f),
