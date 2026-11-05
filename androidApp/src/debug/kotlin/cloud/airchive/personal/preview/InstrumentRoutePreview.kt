@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /** Real route composables over isolated in-memory ports. Never creates the production graph. */
 @Composable
 internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: Long, onHome: () -> Unit, onSettings: () -> Unit) {
-    val providers = remember { FakeProviders(now, "preview-ac") }
+    val providers = remember { FakeProviders(now, "preview-ac").also { (it.thinQ as cloud.airchive.shared.fakes.FakeThinQClient).setCurrentTemperature(28.5) } }
     val session by providers.ownerIdentity.observeSession().collectAsState(initial = null)
     // Synthetic owner partition for this preview; its device/profile
     // publication uses the same key shape as the production bindings.

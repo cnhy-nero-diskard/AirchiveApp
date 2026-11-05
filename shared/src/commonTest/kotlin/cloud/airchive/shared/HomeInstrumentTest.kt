@@ -21,10 +21,12 @@ class HomeInstrumentTest {
     )
 
     @Test fun refreshKeepsAllStatusReadingsAndPowerUntilTheNextResult() {
-        val observed = state.copy(mode = AcOperatingMode.COOL, fanSpeed = FanSpeed.AUTO)
+        val observed = state.copy(mode = AcOperatingMode.COOL, fanSpeed = FanSpeed.AUTO, currentTemperature = 28.5)
         val current = ThinQLiveRefreshState.Current(observed, true)
         val loading = ThinQLiveRefreshState.Loading(current)
         assertEquals(observed, loading.knownLiveState())
+        assertEquals(28.5, ThinQLiveRefreshState.Stale(observed, ThinQRefreshFailureKind.NETWORK, 101)
+            .knownLiveState()?.currentTemperature)
         assertEquals("On", instrumentPowerLabel(loading))
         assertFalse(homeControlsEnabled(loading, profile, AcCommandUiState.Idle))
         assertEquals("Off", instrumentPowerLabel(ThinQLiveRefreshState.Loading(

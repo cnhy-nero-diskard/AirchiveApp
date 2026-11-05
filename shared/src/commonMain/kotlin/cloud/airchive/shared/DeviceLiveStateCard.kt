@@ -165,8 +165,13 @@ private fun ThinQLiveState.summary(unit: TemperatureUnit): String = buildString 
     append("Power ")
     append(if (powerOn) "on" else "off")
     targetTemperature?.let { value ->
-        append(" · ")
+        append(" · target ")
         append(value)
+        append(if (unit == TemperatureUnit.CELSIUS) " °C" else " °F")
+    }
+    currentTemperature?.takeIf { it.isFinite() }?.let { value ->
+        append(" · room temperature (AC sensor) ")
+        append(formatTemperature(value))
         append(if (unit == TemperatureUnit.CELSIUS) " °C" else " °F")
     }
     mode?.let { append(" · "); append(it.name.lowercase().replace('_', ' ')) }

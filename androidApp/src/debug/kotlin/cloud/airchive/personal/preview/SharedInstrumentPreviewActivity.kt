@@ -63,7 +63,7 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
                 true, TemperatureCapability(18.0, 30.0, 1.0, TemperatureUnit.CELSIUS),
                 listOf(AcOperatingMode.FAN, AcOperatingMode.DRY), listOf(FanSpeed.LOW, FanSpeed.HIGH),
             )) }
-            var state by remember { mutableStateOf(ThinQLiveState("preview-ac", now - 20_000, true, 25.0, AcOperatingMode.FAN, FanSpeed.HIGH)) }
+            var state by remember { mutableStateOf(ThinQLiveState("preview-ac", now - 20_000, true, 25.0, AcOperatingMode.FAN, FanSpeed.HIGH, currentTemperature = 28.5)) }
             val stale = intent.getBooleanExtra("stale", false)
             AirchiveTheme(dark = intent.getBooleanExtra("dark", false)) {
                 var route by remember { mutableStateOf(intent.getIntExtra("route", 0)) }

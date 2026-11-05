@@ -76,6 +76,11 @@ class FakeThinQClient(
         live = live.copy(targetTemperature = value)
     }
 
+    /** Synthetic sensor input; commands never change the measured temperature. */
+    fun setCurrentTemperature(value: Double?) {
+        live = live.copy(currentTemperature = value)
+    }
+
     private var profile = ThinQDeviceProfile(
         deviceId = deviceId,
         modelName = "Fake AC-27TK",

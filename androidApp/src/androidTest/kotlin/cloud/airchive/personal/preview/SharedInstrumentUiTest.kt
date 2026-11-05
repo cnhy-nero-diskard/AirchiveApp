@@ -35,6 +35,31 @@ class SharedInstrumentUiTest {
             .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route).apply { if (detail != null) putExtra("detail", detail) },
     )
 
+    @Test fun sensorTemperatureIsSeparateFromTargetOnHomeAndDevice() {
+        listOf(0, 1).forEach { route ->
+            launch(route = route).use {
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Room temperature · AC sensor" }
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Target read from AC" }
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "25 °C" }
+                saveCapture("sensor-temperature-route-$route")
+                if (route == 0) {
+                    val increase = awaitAccessibilityNode("temperature increase control") {
+                        it.contentDescription?.toString() == "Increase target temperature"
+                    }
+                    assertTrue(increase.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Target selected · tap Apply to send" }
+                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
+                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "25 °C" }
+                }
+            }
+        }
+        launch(stale = true).use {
+            awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Last room temperature · AC sensor" }
+            awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
+        }
+    }
+
     @Test fun hourlyChartsKeepAllHoursOnScreenAndShowSelectedRangeBelowPlot() {
         listOf(false, true).forEach { dark ->
         listOf(0, 2).forEach { route ->

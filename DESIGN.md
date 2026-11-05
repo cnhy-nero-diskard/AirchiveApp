@@ -172,7 +172,7 @@ Shared theme shapes are gently rounded: small controls use the small token, medi
 
 ### Shared instrument and readings
 
-One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. A separate “Target read from AC” reading (last-read wording for retained state) stays visible while editing, and the selected target explicitly asks for Apply when dirty. Room-sensor temperature is labeled unavailable because the current live-state contract does not expose it.
+One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. A separate “Target read from AC” reading (last-read wording for retained state) stays visible while editing, and the selected target explicitly asks for Apply when dirty. A separate “Room temperature · AC sensor” reading displays ThinQ’s currentTemperature in the profile’s temperature unit. Missing readings stay unavailable; retained readings use “Last room temperature” wording. Sensor measurements remain independent of editable and observed targets and share the device-read freshness timestamp.
 
 ### Buttons and temperature controls
 

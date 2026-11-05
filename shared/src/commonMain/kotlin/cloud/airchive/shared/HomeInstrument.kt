@@ -304,8 +304,12 @@ fun SharedInstrumentPanel(
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(observed?.let { "${formatTemperature(it)} ${(capability?.unit ?: fallbackSetpoint.unit).symbol()}" } ?: "Unavailable",
                             style = MaterialTheme.typography.titleLarge)
-                        Text("Room sensor: unavailable", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(if (live is ThinQLiveRefreshState.Current) "Room temperature · AC sensor" else "Last room temperature · AC sensor",
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(known?.currentTemperature?.takeIf { it.isFinite() }?.let {
+                            "${formatTemperature(it)} ${(profile?.controls?.temperatureUnit ?: fallbackSetpoint.unit).symbol()}"
+                        } ?: "Unavailable", style = MaterialTheme.typography.titleLarge)
                     }
                 }
                 val usage: @Composable () -> Unit = {
