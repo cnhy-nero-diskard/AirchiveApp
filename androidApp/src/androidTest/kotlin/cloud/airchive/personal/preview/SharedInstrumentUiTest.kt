@@ -38,24 +38,23 @@ class SharedInstrumentUiTest {
     @Test fun sensorTemperatureIsSeparateFromTargetOnHomeAndDevice() {
         listOf(0, 1).forEach { route ->
             launch(route = route).use {
-                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Room temperature · AC sensor" }
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Room temperature" }
                 awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
-                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Target read from AC" }
-                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "25 °C" }
+                assertTextAbsent("Target read from AC")
+                awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "25" }
                 saveCapture("sensor-temperature-route-$route")
                 if (route == 0) {
                     val increase = awaitAccessibilityNode("temperature increase control") {
                         it.contentDescription?.toString() == "Increase target temperature"
                     }
                     assertTrue(increase.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Target selected · tap Apply to send" }
                     awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
-                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "25 °C" }
+                    awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "26" }
                 }
             }
         }
         launch(stale = true).use {
-            awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Last room temperature · AC sensor" }
+            awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "Last room temperature" }
             awaitAccessibilityNode("sensor and target readings") { it.text?.toString() == "28.5 °C" }
         }
     }
@@ -65,7 +64,7 @@ class SharedInstrumentUiTest {
         listOf(0, 2).forEach { route ->
             launch(route = route, dark = dark).use {
                 if (route == 0) {
-                    awaitVisibleNode { it.text?.toString()?.contains("Target read from AC") == true }
+                    awaitVisibleNode { it.text?.toString() == "Set temperature" }
                     saveCapture("usage-home-temperature-$dark")
                 }
                 awaitVisibleNode { it.text?.toString() == "Energy (kWh)" }
@@ -435,217 +434,92 @@ class SharedInstrumentUiTest {
         }
     }
 
-    @Test fun temperatureIsOnlySentOnApplyAndStaleStateDisablesControls() {
+    @Test fun temperatureSendsFinalValueAfterOneSecondAndStaleStateDisablesControls() {
         launch().use { scene ->
-            awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            awaitNode { it.text?.toString() == "25 °C" }
-            scene.onActivity { assertEquals(0, it.submittedCommands) }
-            var apply = awaitNode { it.text?.toString() == "Apply" }
-            while (!apply.isClickable && apply.parent != null) apply = apply.parent
-            assertTrue(apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitNode { it.text?.toString() == "26 °C" }
-            scene.onActivity { assertEquals(1, it.submittedCommands) }
-        }
-        launch(stale = true).use { scene ->
-            val step = awaitNode { it.contentDescription?.toString() == "Increase target temperature" }
-            assertFalse(step.isEnabled)
-            scene.onActivity { assertEquals(0, it.submittedCommands) }
-        }
-    }
-
-    @Test fun temperatureDraftSurvivesHomeDeviceSettingsAndDetailRoundTrips() {
-        clearFixturePreferences()
-        launchShell().use { scene ->
-            clickText("Continue with Google")
-            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            clickText("Settings")
-            clickText("Set up ThinQ PAT")
-            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
-            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
-            clickText("Verify and save securely")
-            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
-
-            clickTab("Home")
-            awaitNode { it.text?.toString() == "Device read 0 sec ago" }
-            awaitNode { it.text?.toString() == "25" }
-            awaitVisibleNode { it.text?.toString() == "Adjust target temperature" }
-            val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
-            clickNode(increase)
-            awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
-            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
-
-            // The shell owns the draft, so Settings and its immediate display
-            // preference changes cannot dispose it or submit a command.
-            clickText("Settings")
-            val operationsBeforeSelection = AtomicReference<List<Int>>()
-            scene.onActivity { operationsBeforeSelection.set(operationSnapshot(it.shellFixture!!)) }
-            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
-            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
-            scene.onActivity {
-                assertEquals(operationsBeforeSelection.get(), operationSnapshot(it.shellFixture!!))
+            // Resolve accessibility bounds before starting the one-second clock;
+            // fresh tree queries may wait for accessibility-idle on animated screens.
+            val increase = Rect().also(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }::getBoundsInScreen)
+            val decrease = Rect().also(awaitNode { it.contentDescription?.toString() == "Decrease target temperature" }::getBoundsInScreen)
+            fun tap(bounds: Rect) {
+                val down = SystemClock.uptimeMillis()
+                listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP).forEach { action ->
+                    val event = android.view.MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                        bounds.centerX().toFloat(), bounds.centerY().toFloat(), 0)
+                    event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true))
+                    event.recycle()
+                }
             }
-            val homeEntryReadsBefore = AtomicInteger()
-            scene.onActivity { homeEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickTab("Home")
-            awaitTrue("Home's normal route-entry read remains eligible after preference selection") {
-                var reads = 0
-                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
-                reads > homeEntryReadsBefore.get()
-            }
-            awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
-            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
-
-            val deviceEntryReadsBefore = AtomicInteger()
-            scene.onActivity { deviceEntryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickTab("Device")
-            awaitTrue("Device's normal route-entry read remains attributable to navigation") {
-                var reads = 0
-                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
-                reads > deviceEntryReadsBefore.get()
-            }
-            awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
-            val deviceDetailsReadsBefore = AtomicInteger()
-            scene.onActivity { deviceDetailsReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickDisclosure("Device details")
-            awaitNode { it.text?.toString()?.startsWith("Device ID:") == true }
-            clickDisclosure("Device details")
-            scene.onActivity {
-                assertEquals(deviceDetailsReadsBefore.get(), it.shellFixture!!.counters.thinQLiveStateReads.get())
-            }
-            clickText("Settings")
-            val deviceReentryReadsBefore = AtomicInteger()
-            scene.onActivity { deviceReentryReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
-            clickTab("Device")
-            awaitTrue("returning to Device may run its normal route-entry read") {
-                var reads = 0
-                scene.onActivity { reads = it.shellFixture!!.counters.thinQLiveStateReads.get() }
-                reads > deviceReentryReadsBefore.get()
-            }
-            awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
-            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
-
-            clickTab("Home")
-            awaitNode { it.text?.toString() == "26" }
-            var apply = awaitNode { it.text?.toString() == "Apply" }
-            while (!apply.isClickable && apply.parent != null) apply = apply.parent
-            assertTrue("the explicit Apply action remains available", apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitTrue("only the explicit Apply submits a command") {
+            tap(increase)
+            SystemClock.sleep(250)
+            tap(increase)
+            SystemClock.sleep(250)
+            tap(decrease)
+            SystemClock.sleep(500)
+            scene.onActivity { assertEquals("rapid taps reset the one-second delay", 0, it.submittedCommands) }
+            awaitTrue("one command sends the final selection") {
                 var count = 0
-                scene.onActivity { count = it.shellFixture!!.counters.thinQCommandSubmissions.get() }
+                scene.onActivity { count = it.submittedCommands }
                 count == 1
             }
+            SystemClock.sleep(1_200)
+            scene.onActivity {
+                assertEquals("confirmation never resends a draft", 1, it.submittedCommands)
+                assertEquals(26.0, (it.lastSubmittedCommand as cloud.airchive.shared.contract.thinq.AcCommand.SetTargetTemperature).value, 0.0)
+            }
+            assertTextAbsent("Apply")
+            assertTextAbsent("Target read from AC")
+            assertTextAbsent("Adjust target temperature")
+        }
+        launch(stale = true).use { scene ->
+            assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
+            SystemClock.sleep(1_100)
+            scene.onActivity { assertEquals(0, it.submittedCommands) }
         }
     }
 
-    @Test fun sameContextProfileRefreshKeepsSupportedDraftAndDisablesUnsupportedValues() {
+    @Test fun navigationCancelsUnsentTemperatureAndReturningDoesNotRearmIt() {
         clearFixturePreferences()
         launchShell().use { scene ->
-            clickText("Continue with Google")
-            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            clickText("Settings")
-            awaitShellSettled(scene)
-            clickText("Set up ThinQ PAT")
-            awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
-            setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
-            clickText("Verify and save securely")
-            awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+            prepareConfiguredShell(scene)
+            val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
+            val settings = awaitNode { it.text?.toString() == "Settings" }
+            assertTrue(increase.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            clickNode(settings)
+            SystemClock.sleep(1_100)
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+            selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             clickTab("Home")
-            awaitNode { it.text?.toString() == "25" }
-            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
-
-            val fixture = AtomicReference<SharedInstrumentShellFixture>()
-            scene.onActivity { fixture.set(it.shellFixture!!) }
-            val startingKey = fixture.get().thinQContext.contextKey.value
-            val baseProfile = requireNotNull(fixture.get().thinQContext.deviceProfile.value?.profile)
-            val baseCapability = requireNotNull(baseProfile.controls.targetTemperature)
-            val profileReadsBeforeRouteEntry = fixture.get().counters.thinQProfileReads.get()
-            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
-
-            // Simulate a new same-owner observation after the AC temperature
-            // changes independently; the unsent 26 °C draft must remain distinct.
-            fixture.get().setThinQTargetTemperatureForTest(27.0)
+            SystemClock.sleep(1_100)
+            scene.onActivity { assertEquals("restoring a draft does not send it", 0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
             clickTab("Device")
-            awaitNode { it.text?.toString() == "27 °C" }
             awaitNode { it.text?.toString() == "26" }
-            assertTrue(buttonNode("Apply").isEnabled)
-            assertEquals("same-context route entry remains profile-cache-only",
-                profileReadsBeforeRouteEntry, fixture.get().counters.thinQProfileReads.get())
-            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
+            SystemClock.sleep(1_100)
+            scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+        }
+        clearFixturePreferences()
+    }
 
-            // A half-degree same-context profile refresh retains the supported
-            // dirty draft and publishes the changed observation without a command.
-            val halfStepProfile = baseProfile.copy(
-                controls = baseProfile.controls.copy(targetTemperature = baseCapability.copy(step = 0.5)),
-            )
-            fixture.get().setThinQProfileForTest(halfStepProfile)
-            val profileReadsBeforeHalfStepRefresh = fixture.get().counters.thinQProfileReads.get()
-            clickText("Refresh device state")
-            awaitTrue("explicit device refresh fetches the updated same-context profile") {
-                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeHalfStepRefresh &&
-                    fixture.get().thinQContext.deviceProfile.value?.profile == halfStepProfile
+    @Test fun deviceRefreshCancelsUnsentTemperature() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShell(scene)
+            clickTab("Device")
+            val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!); it.shellFixture!!.thinQGate.hold() }
+            assertTrue(increase.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            scene.onActivity { it.shellFixture!!.refreshThinQForTest() }
+            SystemClock.sleep(1_200)
+            assertEquals("refresh cancels the unsent edit", 0, fixture.get().counters.thinQCommandSubmissions.get())
+            fixture.get().thinQGate.release()
+            awaitTrue("refresh finishes") {
+                fixture.get().thinQContext.liveStateController.state.value is cloud.airchive.shared.data.thinq.ThinQLiveRefreshState.Current
             }
-            awaitNode { it.text?.toString() == "27 °C" }
-            awaitNode { it.text?.toString() == "26" }
-            assertTrue("a still-supported draft remains applicable", buttonNode("Apply").isEnabled)
-            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
-
-            // Narrowing bounds invalidates the draft visibly instead of
-            // clamping/submitting it; an explicit supported edit can recover.
-            val narrowProfile = baseProfile.copy(
-                controls = baseProfile.controls.copy(
-                    targetTemperature = baseCapability.copy(max = 25.0, step = 1.0),
-                ),
-            )
-            fixture.get().setThinQProfileForTest(narrowProfile)
-            fixture.get().setThinQTargetTemperatureForTest(24.0)
-            val profileReadsBeforeNarrowRefresh = fixture.get().counters.thinQProfileReads.get()
-            clickText("Refresh device state")
-            awaitTrue("explicit refresh publishes narrower same-context bounds") {
-                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeNarrowRefresh &&
-                    fixture.get().thinQContext.deviceProfile.value?.profile == narrowProfile
-            }
-            awaitNode { it.text?.toString()?.contains("26 °C is no longer supported") == true }
-            assertFalse("an out-of-bounds draft cannot be applied", buttonNode("Apply").isEnabled)
-            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
-            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
-
-            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
-            awaitNode { it.text?.toString() == "25" }
-            assertTrue("a deliberate valid adjustment restores Apply", buttonNode("Apply").isEnabled)
-
-            // A unit change also invalidates a draft in its old unit; the new
-            // observation and unit remain identifiable and no conversion is
-            // silently submitted on the owner's behalf.
-            val fahrenheitProfile = baseProfile.copy(
-                controls = baseProfile.controls.copy(
-                    targetTemperature = cloud.airchive.shared.contract.thinq.TemperatureCapability(
-                        min = 60.0,
-                        max = 86.0,
-                        step = 1.0,
-                        unit = cloud.airchive.shared.contract.thinq.TemperatureUnit.FAHRENHEIT,
-                    ),
-                    temperatureUnit = cloud.airchive.shared.contract.thinq.TemperatureUnit.FAHRENHEIT,
-                ),
-            )
-            fixture.get().setThinQProfileForTest(fahrenheitProfile)
-            fixture.get().setThinQTargetTemperatureForTest(77.0)
-            val profileReadsBeforeUnitRefresh = fixture.get().counters.thinQProfileReads.get()
-            clickText("Refresh device state")
-            awaitTrue("explicit refresh publishes the changed same-context unit") {
-                fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeUnitRefresh &&
-                    fixture.get().thinQContext.deviceProfile.value?.profile == fahrenheitProfile
-            }
-            awaitNode { it.text?.toString() == "77 °F" }
-            awaitNode { it.text?.toString()?.contains("25 °C is no longer supported") == true }
-            assertFalse("a draft in the previous unit cannot be applied", buttonNode("Apply").isEnabled)
-            assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
-            assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+            SystemClock.sleep(1_100)
+            assertEquals("a refreshed observation never queues an old edit", 0, fixture.get().counters.thinQCommandSubmissions.get())
         }
         clearFixturePreferences()
     }
@@ -708,9 +582,6 @@ class SharedInstrumentUiTest {
                 fixture.set(it.shellFixture!!)
                 fixture.get().thinQGate.hold()
             }
-            var apply = awaitNode { it.text?.toString() == "Apply" }
-            while (!apply.isClickable && apply.parent != null) apply = apply.parent
-            assertTrue(apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             awaitTrue("the fake command reaches its deferred gate") {
                 fixture.get().counters.thinQCommandSubmissions.get() == 1
             }
@@ -775,16 +646,16 @@ class SharedInstrumentUiTest {
     @Test fun acceptedCommandRemainsUnconfirmedWithoutAutomaticRetry() {
         clearFixturePreferences()
         launchShell().use { scene ->
-            prepareConfiguredShellWithTemperatureDraft(scene)
+            prepareConfiguredShell(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
             fixture.get().setThinQAcceptedWithoutConfirmationForTest()
-            clickNode(buttonNode("Apply"))
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitTrue("the synthetic port reports accepted without confirming") {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Accepted
             }
-            awaitNode { it.text?.toString()?.contains("current state is not confirmed") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("current state is not confirmed") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
             SystemClock.sleep(300)
             assertEquals("accepted status does not trigger an automatic retry", 1,
@@ -796,18 +667,18 @@ class SharedInstrumentUiTest {
     @Test fun failedCommandShowsStableFeedbackWithoutRetry() {
         clearFixturePreferences()
         launchShell().use { scene ->
-            prepareConfiguredShellWithTemperatureDraft(scene)
+            prepareConfiguredShell(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
             fixture.get().setThinQCommandFailureForTest(
                 cloud.airchive.shared.contract.thinq.CommandFailure.RATE_LIMITED,
             )
-            clickNode(buttonNode("Apply"))
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitTrue("the synthetic port reports a definite command failure") {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Failed
             }
-            awaitNode { it.text?.toString()?.contains("LG is rate-limiting commands") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("LG is rate-limiting commands") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
             SystemClock.sleep(300)
             assertEquals("failed command feedback does not trigger a retry", 1,
@@ -819,16 +690,16 @@ class SharedInstrumentUiTest {
     @Test fun unconfirmedCommandOffersRefreshAndNeverResends() {
         clearFixturePreferences()
         launchShell().use { scene ->
-            prepareConfiguredShellWithTemperatureDraft(scene)
+            prepareConfiguredShell(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
             fixture.get().setThinQUnconfirmedForTest()
-            clickNode(buttonNode("Apply"))
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitTrue("the synthetic port reports an ambiguous command result") {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Unconfirmed
             }
-            awaitNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
 
             clickTab("Device")
@@ -838,7 +709,7 @@ class SharedInstrumentUiTest {
             awaitTrue("the owner can explicitly refresh after an unconfirmed command") {
                 fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeRefresh
             }
-            awaitNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
             assertEquals("the explicit recovery action reads state but never resubmits", 1,
                 fixture.get().counters.thinQCommandSubmissions.get())
         }
@@ -863,7 +734,6 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "25" }
             clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { it.shellFixture!!.setNextOwner("temperature-draft-owner-b") }
 
             clickText("Settings")
@@ -1381,8 +1251,8 @@ class SharedInstrumentUiTest {
             listOf("Home", "Device", "Energy", "History", "Settings").forEach(::assertTextPresent)
             assertTextPresent("Set temperature")
             assertTextPresent("Hour to date")
-            assertTextPresent("Adjust target temperature")
-            assertTextPresent("Apply")
+            assertTextAbsent("Adjust target temperature")
+            assertTextAbsent("Apply")
             assertTextPresent("Mode")
             assertTextPresent("Fan speed")
 
@@ -1403,7 +1273,7 @@ class SharedInstrumentUiTest {
             }
             assertTextAbsent("The device read failed. Check the connection and retry.")
             assertTextPresent("Set temperature")
-            assertTextPresent("Apply")
+            assertTextAbsent("Apply")
             assertTextPresent("Mode")
             assertTextPresent("Fan speed")
 
@@ -1898,7 +1768,7 @@ class SharedInstrumentUiTest {
 
                         for ((route, anchor) in listOf(
                             "Home" to "Airchive",
-                            "Device" to "Adjust target temperature",
+                            "Device" to "Set temperature",
                             "Energy" to "Sampled energy",
                             "History" to "History",
                         )) {
@@ -2340,7 +2210,7 @@ class SharedInstrumentUiTest {
             "Period summary", "Sampled energy", "Sampled five-minute interval energy", "Retry history loading",
             "History access", "History and storage", "Connection details", "Account actions",
             "Sync and collector health", "Sample status guide", "Recorded hours (newest first)",
-            "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Apply",
+            "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Room temperature",
             "Refresh history", "Refreshing history…", "Retry history sync",
         )
         return allNodes(instrumentation.uiAutomation.rootInActiveWindow)
@@ -2603,16 +2473,6 @@ class SharedInstrumentUiTest {
             cloud.airchive.shared.data.thinq.ThinQLiveRefreshState.Current
             ?: throw AssertionError("the synthetic device-read state is not current")
         return current.state.observedAtEpochMillis
-    }
-
-    private fun prepareConfiguredShellWithTemperatureDraft(
-        scene: ActivityScenario<SharedInstrumentPreviewActivity>,
-    ) {
-        prepareConfiguredShell(scene)
-        clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
-        awaitNode { it.text?.toString() == "26" }
-        awaitNode { it.text?.toString() == "25 °C" }
-        scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
     }
 
     private fun prepareConfiguredShell(scene: ActivityScenario<SharedInstrumentPreviewActivity>) {

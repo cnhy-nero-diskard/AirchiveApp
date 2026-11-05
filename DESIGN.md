@@ -55,11 +55,6 @@ components:
     textColor: "{colors.slate-ink}"
     rounded: "{rounded.large}"
     padding: "16dp 20dp"
-  apply:
-    backgroundColor: "{colors.cobalt}"
-    textColor: "{colors.on-cobalt}"
-    rounded: "{rounded.small}"
-    height: "48dp minimum"
   temperature-step:
     rounded: "{rounded.small}"
     size: "48dp"
@@ -146,15 +141,15 @@ The character is clear, compact and instrument-like. The signature reading is th
 - **Body:** `bodyMedium` for readout labels and setup guidance; `bodySmall` for device/sample/sync age, measurement context and command outcomes.
 - **Label:** Material label roles for controls, navigation, coverage and chart values. Chart values use `labelSmall` and one line; no special uppercase or eyebrow system is introduced.
 
-**The Equal Reading Rule.** Temperature and energy use the same reading style and equal-width columns when space allows; enlarged text stacks them instead of shrinking their hierarchy.
+**The Reading Rule.** Temperature and energy retain large tabular figures. The thermostat has its own full-width field on phones; the two fields can share a row only with at least 600dp inside the panel and standard text scale.
 
 ## Layout
 
 Production Home is a vertically scrollable column, centered with a maximum width of 640dp, horizontal padding of 16dp, vertical padding of 12dp and 12dp between major children. The Scaffold reserves space for the persistent native bottom navigation. The compact header precedes the grouped panel; separate history-sync context follows it. Access/setup guidance appears when the actual state requires it.
 
-The panel uses 20dp horizontal and 16dp vertical padding with 8dp vertical spacing. Its 3dp cobalt index band follows the clipped panel edge. The device header and power sit above the paired readings. Readings use equal weights with 12dp separation and a 132dp vertical divider. Temperature steps and Apply follow, then separate mode/fan rows, recorded-energy chart, coverage/freshness and, when present, yesterday's finalized LG total.
+The panel uses 20dp horizontal and 16dp vertical padding with 8dp vertical spacing. Its 3dp cobalt index band follows the clipped panel edge. The device header and power sit above a centered thermostat with a profile-scaled arc, tick marks and a selected-target marker. The large target and the separate room sensor reading sit inside the arc; 48dp minus/plus controls sit at its open base. Energy, separate mode/fan rows, recorded-energy chart, freshness and, when present, yesterday's finalized LG total follow.
 
-**The Stack Before Shrink Rule.** Within the panel, available width below 360dp **or** font scale above 1.2 stacks both readouts and the coverage/freshness row. The 360dp production threshold keeps a normal five-character 76sp energy value such as `15.11` on one line in the paired Home layout; it is intentionally wider than the required <300dp narrow-width floor. The readout divider becomes horizontal. At captured 1.3 text scale, lower energy content requires scrolling; native navigation remains accessible.
+**The Stack Before Shrink Rule.** Available panel width below 600dp or font scale above 1.2 stacks the thermostat and energy fields. The thermostat grows with text rather than imposing a fixed height; native navigation stays outside the scroll container.
 
 Production secondary routes use the shared `InstrumentPage` maximum of 640dp, 16dp horizontal/12dp vertical page padding and 12dp major-child rhythm. History uses the same 16dp horizontal gutter with a virtualized `LazyColumn`; instrument panels retain their 20dp horizontal inset and 16dp vertical padding. The 24dp/20dp/16dp secondary-screen token is legacy-demo-only, not the production route layout. No new tablet composition is documented.
 
@@ -172,11 +167,11 @@ Shared theme shapes are gently rounded: small controls use the small token, medi
 
 ### Shared instrument and readings
 
-One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. A separate “Target read from AC” reading (last-read wording for retained state) stays visible while editing, and the selected target explicitly asks for Apply when dirty. A separate “Room temperature · AC sensor” reading displays ThinQ’s currentTemperature in the profile’s temperature unit. Missing readings stay unavailable; retained readings use “Last room temperature” wording. Sensor measurements remain independent of editable and observed targets and share the device-read freshness timestamp.
+One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. “Room temperature” appears within the thermostat below the setpoint and displays ThinQ’s currentTemperature in the profile’s sensor unit. Missing readings stay unavailable; retained readings use “Last room temperature” wording. The sensor remains independent of the editable target and shares the device-read freshness timestamp. The redundant observed-target section is removed.
 
 ### Buttons and temperature controls
 
-Apply is a native filled Material button using the shared small shape and a minimum 48dp height. It expands into the remaining temperature-row width. Minus/plus are 48dp tonal icon buttons with simple Canvas strokes and explicit accessibility labels. They change a local draft; only Apply submits the temperature command. Apply is disabled until the draft differs and live/profile gating permits a command. Step boundaries follow the supported device profile. Native disabled/ripple/focus behavior remains in effect; no web hover rules are invented.
+Minus/plus are 48dp tonal icon buttons with simple Canvas strokes and explicit accessibility labels. They update the target immediately and send the final supported value after one second without another step. A new step restarts the timer; returning to the observed value cancels it. Pending sends cancel on navigation, owner/credential changes, profile changes, refresh, or loss of control readiness. Restored drafts never arm a send. Once dispatched, the graph-owned command completes independently of navigation, with no automatic retry on failed or ambiguous outcomes. There is no Apply button. Step boundaries and units follow the verified profile; native disabled/ripple/focus behavior remains in effect.
 
 Text buttons handle Energy, device-state retry, setup and history refresh. Native power is a real Switch with readable On/Off/Unknown context and an “AC power” description. Unsupported, stale, unverified or sending states disable commands; ambiguous outcomes never trigger automatic resend.
 
@@ -214,7 +209,7 @@ Secondary and access/setup surfaces use native Material cards, buttons, outlined
 - **Do** preserve scalable text, readable status text, native semantics and at least 48dp interactive targets.
 - **Do** distinguish live device age, latest usable sample age and history-sync age wherever they affect a decision.
 - **Do** show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.
-- **Do** preserve local temperature drafts, explicit Apply and supported/current-state command gating.
+- **Do** preserve local temperature drafts, the one-second idle send delay and supported/current-state command gating.
 - **Do** reuse production Material roles in both implemented themes and keep native control states visible.
 - **Do** preserve Simple/Detailed essential-content parity, presentation-only selection, and the informational/action/recovery disclosure rules.
 

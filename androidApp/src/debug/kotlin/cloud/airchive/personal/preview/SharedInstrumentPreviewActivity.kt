@@ -31,6 +31,9 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
     var submittedCommands = 0
         private set
 
+    var lastSubmittedCommand: AcCommand? = null
+        private set
+
     /** Non-null only for the `shell` intent extra: production shell over fake ports. */
     var shellFixture: SharedInstrumentShellFixture? = null
         private set
@@ -83,6 +86,7 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
                             profile = profile,
                             onCommand = { request ->
                                 submittedCommands++
+                                lastSubmittedCommand = request
                                 state = when(request) {
                                     is AcCommand.SetPower -> state.copy(powerOn = request.powerOn)
                                     is AcCommand.SetTargetTemperature -> state.copy(targetTemperature = request.value)

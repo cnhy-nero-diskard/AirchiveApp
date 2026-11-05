@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -35,6 +36,9 @@ import cloud.airchive.shared.data.energy.*
 import cloud.airchive.shared.data.telemetry.DEFAULT_DAY_TIME_ZONE
 import cloud.airchive.shared.data.thinq.*
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.roundToLong
 import kotlin.math.roundToInt
@@ -147,6 +151,7 @@ internal fun ProductionHomeInstrument(
         refreshing = reading,
         commandSlotOccupied = commandSlotOccupied,
         neutralCommandBusy = neutralCommandBusy,
+        temperatureContextKey = contextKey,
         temperatureDraft = temperatureDraft,
         onTemperatureDraftChange = onTemperatureDraftChange,
         setupMessage = when {
@@ -215,6 +220,7 @@ fun SharedInstrumentPanel(
     neutralCommandBusy: Boolean = false,
     temperatureDraft: TemperatureDraft? = null,
     onTemperatureDraftChange: ((TemperatureDraft?) -> Unit)? = null,
+    temperatureContextKey: ThinQContextKey? = null,
 ) {
     var showConfirmation by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
@@ -232,7 +238,11 @@ fun SharedInstrumentPanel(
     val capability = profile?.controls?.targetTemperature
     val allowed = remember(capability) { capability?.allowedValues().orEmpty() }
     val observed = known?.targetTemperature?.takeIf { it.isFinite() }
-    var localDraft by remember { mutableStateOf<TemperatureDraft?>(null) }
+    var localDraft by remember(snapshot.partition, temperatureContextKey) { mutableStateOf<TemperatureDraft?>(null) }
+    // Only a deliberate step arms a send. Restoring a draft never does.
+    var pendingTemperature by remember(snapshot.partition, temperatureContextKey, capability) {
+        mutableStateOf<TemperatureDraft?>(null)
+    }
     val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
     val draftResolution = resolveTemperatureDraft(draft, observed, capability)
     val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
@@ -242,6 +252,33 @@ fun SharedInstrumentPanel(
     val selected = draftResolution.displayValue
         ?: fallbackSetpoint.value.takeIf { draft == null && observed == null }
     val enabled = homeControlsEnabled(live, profile, commandState, commandSlotOccupied) && onCommand != null
+    val latestOnCommand by rememberUpdatedState(onCommand)
+    val latestNow by rememberUpdatedState(nowEpochMillis)
+    LaunchedEffect(pendingTemperature, enabled, draftResolution.status) {
+        val pending = pendingTemperature ?: return@LaunchedEffect
+        if (!enabled || !draftResolution.canApply) {
+            pendingTemperature = null
+            return@LaunchedEffect
+        }
+        delay(1_000)
+        // Consume before dispatch: failure, ambiguous acceptance, and subsequent
+        // state reads must never re-arm this request or retry it automatically.
+        pendingTemperature = null
+        latestOnCommand?.invoke(AcCommand.SetTargetTemperature(latestNow, pending.value, pending.unit))
+    }
+    fun stepTemperature(increase: Boolean) {
+        val base = selected?.takeIf { it in allowed }
+            ?: observed?.takeIf { it in allowed }
+            ?: fallbackSetpoint.value.takeIf { it in allowed }
+            ?: allowed.firstOrNull() ?: return
+        val next = allowed.getOrNull(allowed.indexOf(base) + if (increase) 1 else -1) ?: return
+        val nextDraft = TemperatureDraft(next, capability!!.unit)
+        updateDraft(nextDraft)
+        pendingTemperature = nextDraft
+    }
+    val controlBase = selected?.takeIf { it in allowed } ?: observed?.takeIf { it in allowed }
+        ?: fallbackSetpoint.value.takeIf { it in allowed } ?: allowed.firstOrNull()
+    val controlIndex = allowed.indexOf(controlBase)
     val yesterday = today.minus(1, DateTimeUnit.DAY).toString()
     val finalized = snapshot.dailyTotals.firstOrNull {
         it.localDate == yesterday && it.source == DailyTotalSource.LG_FINALIZED && it.finalized &&
@@ -285,31 +322,29 @@ fun SharedInstrumentPanel(
             }
             setupMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                // At this width, the two 76sp readouts can wrap a normal
-                // five-character energy value (for example 15.11) even
-                // though the measurement field is still above the semantic
-                // narrow-width floor. Stack before either reading splits.
-                val stack = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f
+                val stack = maxWidth < 600.dp || LocalDensity.current.fontScale > 1.2f
                 val target: @Composable () -> Unit = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
-                            (draftResolution.displayUnit ?: capability?.unit ?: fallbackSetpoint.unit).symbol(), inlineUnit = true)
-                        Text(when {
-                            draftResolution.canApply -> "Target selected · tap Apply to send"
-                            observed == null -> "Suggested target · not read from AC"
-                            else -> "Target setting"
-                        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        Text(if (live is ThinQLiveRefreshState.Current) "Target read from AC" else "Last target read from AC",
-                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(observed?.let { "${formatTemperature(it)} ${(capability?.unit ?: fallbackSetpoint.unit).symbol()}" } ?: "Unavailable",
-                            style = MaterialTheme.typography.titleLarge)
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        Text(if (live is ThinQLiveRefreshState.Current) "Room temperature · AC sensor" else "Last room temperature · AC sensor",
-                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(known?.currentTemperature?.takeIf { it.isFinite() }?.let {
-                            "${formatTemperature(it)} ${(profile?.controls?.temperatureUnit ?: fallbackSetpoint.unit).symbol()}"
-                        } ?: "Unavailable", style = MaterialTheme.typography.titleLarge)
+                    ThermostatReadout(
+                        selected = selected,
+                        unit = draftResolution.displayUnit ?: capability?.unit ?: fallbackSetpoint.unit,
+                        roomTemperature = known?.currentTemperature?.takeIf { it.isFinite() },
+                        roomUnit = profile?.controls?.temperatureUnit ?: fallbackSetpoint.unit,
+                        current = live is ThinQLiveRefreshState.Current,
+                        capability = capability,
+                        canDecrease = enabled && controlIndex > 0,
+                        canIncrease = enabled && controlIndex >= 0 && controlIndex < allowed.lastIndex,
+                        onStep = ::stepTemperature,
+                    )
+                    val targetStatus = when {
+                        pendingTemperature != null -> "Sending in 1 second…"
+                        draftResolution.canApply -> "Selected target · not confirmed"
+                        observed == null -> "Suggested target · not read from AC"
+                        live !is ThinQLiveRefreshState.Current -> "Last observed target"
+                        else -> null
+                    }
+                    targetStatus?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
                 }
                 val usage: @Composable () -> Unit = {
@@ -324,7 +359,7 @@ fun SharedInstrumentPanel(
                 if (!showEnergy) target()
                 else if (stack) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { target(); HorizontalDivider(); usage() }
                 else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.weight(1f)) { target() }
+                    Column(Modifier.weight(1f)) { target() }
                     VerticalDivider(modifier = Modifier.height(132.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     Box(Modifier.weight(1f)) { usage() }
                 }
@@ -340,28 +375,7 @@ fun SharedInstrumentPanel(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Text("Adjust target temperature", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val controlBase = selected?.takeIf { it in allowed }
-                            ?: observed?.takeIf { it in allowed }
-                            ?: fallbackSetpoint.value.takeIf { it in allowed }
-                            ?: allowed.first()
-                        val index = allowed.indexOf(controlBase)
-                        StepControl(false, enabled && index > 0) {
-                            updateDraft(TemperatureDraft(allowed[index - 1], capability!!.unit))
-                        }
-                        StepControl(true, enabled && index < allowed.lastIndex) {
-                            updateDraft(TemperatureDraft(allowed[index + 1], capability!!.unit))
-                        }
-                        Button(onClick = {
-                            draft?.takeIf { draftResolution.canApply }?.let {
-                                onCommand?.invoke(AcCommand.SetTargetTemperature(nowEpochMillis, it.value, it.unit))
-                            }
-                        },
-                            enabled = enabled && draftResolution.canApply,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Apply") }
-                    }
+
                 } else {
                     draftResolution.unsupportedDraft?.let { unsupported ->
                         Text(
@@ -553,6 +567,74 @@ internal fun defaultTemperatureSetpoint(capability: TemperatureCapability?): Tem
 /** True only when the one device-global command slot belongs to another context. */
 internal fun commandSlotIsNeutralBusy(slot: AcCommandSlotState, currentKey: ThinQContextKey?): Boolean =
     slot is AcCommandSlotState.Occupied && slot.contextKey != currentKey
+
+/** A profile-scaled thermostat arc frames the target and its independent room sensor. */
+@Composable
+private fun ThermostatReadout(
+    selected: Double?,
+    unit: TemperatureUnit,
+    roomTemperature: Double?,
+    roomUnit: TemperatureUnit,
+    current: Boolean,
+    capability: TemperatureCapability?,
+    canDecrease: Boolean,
+    canIncrease: Boolean,
+    onStep: (Boolean) -> Unit,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val outline = MaterialTheme.colorScheme.outlineVariant
+    val range = capability?.let { it.max - it.min } ?: 0.0
+    val fraction = if (selected != null && capability != null && range > 0) {
+        ((selected - capability.min) / range).coerceIn(0.0, 1.0).toFloat()
+    } else null
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
+            Canvas(Modifier.matchParentSize()) {
+                val inset = 12.dp.toPx()
+                val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+                val origin = Offset(inset, inset)
+                drawArc(outline, 150f, 240f, false, origin, arcSize, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                fun point(angle: Float, insetBy: Float = 0f): Offset {
+                    val radians = angle * PI / 180
+                    return Offset(size.width / 2 + cos(radians).toFloat() * (arcSize.width / 2 - insetBy),
+                        size.height / 2 + sin(radians).toFloat() * (arcSize.height / 2 - insetBy))
+                }
+                for (tick in 0..24) {
+                    val angle = 150f + tick * 10f
+                    drawLine(outline, point(angle, 5.dp.toPx()), point(angle, if (tick % 4 == 0) 13.dp.toPx() else 9.dp.toPx()), 1.dp.toPx())
+                }
+                fraction?.let {
+                    drawArc(primary, 150f, 240f * it, false, origin, arcSize, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+                    drawCircle(primary, 5.dp.toPx(), point(150f + 240f * it))
+                }
+            }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp).padding(top = 36.dp, bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.semantics(mergeDescendants = true) {}) {
+                    Text("Set temperature", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(selected?.let(::formatTemperature) ?: "—", style = InstrumentReading,
+                            modifier = Modifier.weight(1f, fill = false), maxLines = 1,
+                            autoSize = TextAutoSize.StepBased(minFontSize = 28.sp, maxFontSize = 76.sp))
+                        Text(unit.symbol(), modifier = Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.semantics(mergeDescendants = true) {}) {
+                    Text(if (current) "Room temperature" else "Last room temperature",
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center)
+                    Text(roomTemperature?.let { "${formatTemperature(it)} ${roomUnit.symbol()}" } ?: "Unavailable",
+                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    StepControl(false, canDecrease) { onStep(false) }
+                    StepControl(true, canIncrease) { onStep(true) }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun InstrumentReadout(label: String, value: String, unit: String, inlineUnit: Boolean = false) {
