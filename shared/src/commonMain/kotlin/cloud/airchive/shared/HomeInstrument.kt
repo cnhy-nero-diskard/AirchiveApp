@@ -291,8 +291,22 @@ fun SharedInstrumentPanel(
                 // narrow-width floor. Stack before either reading splits.
                 val stack = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f
                 val target: @Composable () -> Unit = {
-                    InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
-                        (draftResolution.displayUnit ?: capability?.unit ?: fallbackSetpoint.unit).symbol())
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        InstrumentReadout("Set temperature", selected?.let(::formatTemperature) ?: "—",
+                            (draftResolution.displayUnit ?: capability?.unit ?: fallbackSetpoint.unit).symbol(), inlineUnit = true)
+                        Text(when {
+                            draftResolution.canApply -> "Target selected · tap Apply to send"
+                            observed == null -> "Suggested target · not read from AC"
+                            else -> "Target setting"
+                        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(if (live is ThinQLiveRefreshState.Current) "Target read from AC" else "Last target read from AC",
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(observed?.let { "${formatTemperature(it)} ${(capability?.unit ?: fallbackSetpoint.unit).symbol()}" } ?: "Unavailable",
+                            style = MaterialTheme.typography.titleLarge)
+                        Text("Room sensor: unavailable", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 val usage: @Composable () -> Unit = {
                     val localHour = Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(zone).hour
@@ -315,11 +329,6 @@ fun SharedInstrumentPanel(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (profile != null) {
                 if (allowed.isNotEmpty()) {
-                    if (draft != null) Text(
-                        "${if (live is ThinQLiveRefreshState.Current) "Currently" else "Last confirmed"} " +
-                            "${observed?.let(::formatTemperature) ?: "unknown"} ${capability?.unit?.symbol().orEmpty()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                     draftResolution.unsupportedDraft?.let { unsupported ->
                         Text(
                             "${formatTemperature(unsupported.value)} ${unsupported.unit.symbol()} is no longer supported. " +
@@ -327,7 +336,7 @@ fun SharedInstrumentPanel(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Text("Temperature", style = MaterialTheme.typography.titleSmall)
+                    Text("Adjust target temperature", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         val controlBase = selected?.takeIf { it in allowed }
                             ?: observed?.takeIf { it in allowed }
@@ -403,7 +412,7 @@ fun SharedInstrumentPanel(
             if (showEnergy) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Today’s record", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                Text("Daily Cumulative Usage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).semantics { heading() })
                 TextButton(onClick = onEnergy) { Text("Energy") }
             }
@@ -542,11 +551,19 @@ internal fun commandSlotIsNeutralBusy(slot: AcCommandSlotState, currentKey: Thin
     slot is AcCommandSlotState.Occupied && slot.contextKey != currentKey
 
 @Composable
-private fun InstrumentReadout(label: String, value: String, unit: String) {
+private fun InstrumentReadout(label: String, value: String, unit: String, inlineUnit: Boolean = false) {
     Column(Modifier.semantics(mergeDescendants = true) {}) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = InstrumentReading)
-        Text(unit, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (inlineUnit) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(value, style = InstrumentReading)
+                Text(unit, modifier = Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Text(value, style = InstrumentReading)
+            Text(unit, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

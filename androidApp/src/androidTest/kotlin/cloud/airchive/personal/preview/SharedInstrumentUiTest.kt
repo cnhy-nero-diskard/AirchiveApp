@@ -376,12 +376,12 @@ class SharedInstrumentUiTest {
     @Test fun temperatureIsOnlySentOnApplyAndStaleStateDisablesControls() {
         launch().use { scene ->
             awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { assertEquals(0, it.submittedCommands) }
             var apply = awaitNode { it.text?.toString() == "Apply" }
             while (!apply.isClickable && apply.parent != null) apply = apply.parent
             assertTrue(apply.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitNode { it.text?.toString()?.contains("Currently 26") == true }
+            awaitNode { it.text?.toString() == "26 °C" }
             scene.onActivity { assertEquals(1, it.submittedCommands) }
         }
         launch(stale = true).use { scene ->
@@ -410,7 +410,7 @@ class SharedInstrumentUiTest {
             val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
             clickNode(increase)
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
 
             // The shell owns the draft, so Settings and its immediate display
@@ -432,7 +432,7 @@ class SharedInstrumentUiTest {
                 reads > homeEntryReadsBefore.get()
             }
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
 
             val deviceEntryReadsBefore = AtomicInteger()
@@ -444,7 +444,7 @@ class SharedInstrumentUiTest {
                 reads > deviceEntryReadsBefore.get()
             }
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             val deviceDetailsReadsBefore = AtomicInteger()
             scene.onActivity { deviceDetailsReadsBefore.set(it.shellFixture!!.counters.thinQLiveStateReads.get()) }
             clickDisclosure("Device details")
@@ -463,7 +463,7 @@ class SharedInstrumentUiTest {
                 reads > deviceReentryReadsBefore.get()
             }
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
 
             clickTab("Home")
@@ -495,7 +495,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "25" }
             clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
@@ -509,7 +509,7 @@ class SharedInstrumentUiTest {
             // changes independently; the unsent 26 °C draft must remain distinct.
             fixture.get().setThinQTargetTemperatureForTest(27.0)
             clickTab("Device")
-            awaitNode { it.text?.toString()?.contains("Currently 27") == true }
+            awaitNode { it.text?.toString() == "27 °C" }
             awaitNode { it.text?.toString() == "26" }
             assertTrue(buttonNode("Apply").isEnabled)
             assertEquals("same-context route entry remains profile-cache-only",
@@ -528,7 +528,7 @@ class SharedInstrumentUiTest {
                 fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeHalfStepRefresh &&
                     fixture.get().thinQContext.deviceProfile.value?.profile == halfStepProfile
             }
-            awaitNode { it.text?.toString()?.contains("Currently 27") == true }
+            awaitNode { it.text?.toString() == "27 °C" }
             awaitNode { it.text?.toString() == "26" }
             assertTrue("a still-supported draft remains applicable", buttonNode("Apply").isEnabled)
             assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
@@ -579,7 +579,7 @@ class SharedInstrumentUiTest {
                 fixture.get().counters.thinQProfileReads.get() > profileReadsBeforeUnitRefresh &&
                     fixture.get().thinQContext.deviceProfile.value?.profile == fahrenheitProfile
             }
-            awaitNode { it.text?.toString()?.contains("Currently 77") == true }
+            awaitNode { it.text?.toString() == "77 °F" }
             awaitNode { it.text?.toString()?.contains("25 °C is no longer supported") == true }
             assertFalse("a draft in the previous unit cannot be applied", buttonNode("Apply").isEnabled)
             assertEquals(startingKey, fixture.get().thinQContext.contextKey.value)
@@ -801,7 +801,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "25" }
             clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
             awaitNode { it.text?.toString() == "26" }
-            awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+            awaitNode { it.text?.toString() == "25 °C" }
             scene.onActivity { it.shellFixture!!.setNextOwner("temperature-draft-owner-b") }
 
             clickText("Settings")
@@ -817,7 +817,7 @@ class SharedInstrumentUiTest {
             clickTab("Home")
             awaitTrue("the new synthetic owner must not inherit the old setpoint draft") {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
-                find(root) { it.text?.toString()?.contains("Currently 25") == true } == null &&
+                find(root) { it.text?.toString() == "25 °C" } == null &&
                     find(root) { it.text?.toString() == "26" } == null
             }
             scene.onActivity {
@@ -2549,7 +2549,7 @@ class SharedInstrumentUiTest {
         prepareConfiguredShell(scene)
         clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
         awaitNode { it.text?.toString() == "26" }
-        awaitNode { it.text?.toString()?.contains("Currently 25") == true }
+        awaitNode { it.text?.toString() == "25 °C" }
         scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
     }
 
