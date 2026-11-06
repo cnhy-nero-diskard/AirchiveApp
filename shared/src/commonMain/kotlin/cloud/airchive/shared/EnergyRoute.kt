@@ -589,7 +589,7 @@ private fun DayAxisIcon(noon: Boolean) {
     }
 }
 
-private data class EnergyLegendColors(val scheme: ColorScheme) {
+internal data class EnergyLegendColors(val scheme: ColorScheme) {
     val usable: Color = scheme.primary
     val gap: Color = scheme.surfaceVariant
     val anomalous: Color = scheme.tertiary
@@ -607,29 +607,21 @@ private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
         ) {
             Text(
                 if (presentation.periodType == EnergyPeriodType.DAY) {
-                    "Hourly recorded energy (kWh)"
+                    "Recorded interval energy"
                 } else {
                     "Daily energy measures"
                 },
                 modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
-            val colors = EnergyLegendColors(MaterialTheme.colorScheme)
-            if (presentation.periodType != EnergyPeriodType.DAY) EnergyLegend(colors = colors, intervalDay = false)
-            when (presentation.periodType) {
-                EnergyPeriodType.DAY -> {
-                    val day = presentation.days.firstOrNull()
-                    if (day != null) HourlyEnergyChart(day, presentation.nowEpochMillis)
-                }
-                EnergyPeriodType.WEEK, EnergyPeriodType.MONTH -> DayBars(days = presentation.days, colors = colors)
-            }
+            GranularEnergyChart(presentation)
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EnergyLegend(colors: EnergyLegendColors, intervalDay: Boolean) {
+internal fun EnergyLegend(colors: EnergyLegendColors, intervalDay: Boolean) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -710,7 +702,7 @@ private fun EnergyIntervalPoint.statusColor(colors: EnergyLegendColors): Color =
 
 /** Grouped per-day bars keep interval sums and stored daily measure sources distinct. */
 @Composable
-private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
+internal fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
     val barsByDay = days.map { day ->
         buildList {
             day.usableEnergyValueWh?.takeIf { it.isFinite() }?.let { value ->
@@ -736,7 +728,7 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
             .semantics(mergeDescendants = true) {
                 role = Role.Image
                 contentDescription =
-                    "Daily energy chart for ${days.size} days. Grouped bars show sampled five-minute sums, " +
+                    "Daily energy chart for ${days.size} days. Bars or smooth lines show sampled five-minute sums, " +
                         "finalized LG daily totals, or local interval sums in Wh on one relative scale. " +
                         "Each source is separately named in the legend, with exact units, coverage, and values " +
                         "in the day details below."
@@ -747,6 +739,22 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
         val barWidth = groupWidth / (maxBarsPerGroup + 1)
         for ((index, day) in days.withIndex()) {
             for ((barIndex, bar) in barsByDay[index].withIndex()) {
+                if (groupWidth < 24.dp.toPx()) {
+                    val current = Offset((index + .5f) * groupWidth,
+                        size.height * (1 - bar.valueWh / maxWh.coerceAtLeast(1.0)).toFloat())
+                    val previous = barsByDay.getOrNull(index - 1)?.firstOrNull { it.color == bar.color }
+                    if (previous != null) {
+                        val from = Offset((index - .5f) * groupWidth,
+                            size.height * (1 - previous.valueWh / maxWh.coerceAtLeast(1.0)).toFloat())
+                        val mid = (from.x + current.x) / 2
+                        drawPath(Path().apply {
+                            moveTo(from.x, from.y)
+                            cubicTo(mid, from.y, mid, current.y, current.x, current.y)
+                        }, bar.color, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                    }
+                    drawCircle(bar.color, 2.dp.toPx(), current)
+                    continue
+                }
                 val barHeight = if (maxWh > 0.0) (bar.valueWh / maxWh * size.height).toFloat() else 0f
                 drawRect(
                     color = bar.color,
@@ -772,7 +780,7 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
         }
     }
     Text(
-        "Bar height is relative usable energy normalized to Wh; bar color names the distinct source. " +
+        "Height is energy normalized to Wh. Dense data uses smooth lines; each color names a distinct source. Missing readings remain gaps. " +
             "Coverage and missing/anomalous slots are listed in each day summary below; sources are never merged.",
         style = MaterialTheme.typography.bodySmall,
     )

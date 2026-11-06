@@ -35,6 +35,33 @@ class SharedInstrumentUiTest {
             .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route).apply { if (detail != null) putExtra("detail", detail) },
     )
 
+    @Test fun energyGranularitySwitchesBetweenHourlyBarsAndDenseLine() {
+        for (dark in listOf(false, true)) {
+            launch(route = 2, dark = dark).use {
+                val slider = awaitVisibleNode { it.contentDescription?.toString() == "Energy chart time bucket size" }
+                val range = allNodes(slider).firstOrNull { it.rangeInfo != null }
+                    ?: awaitNode { it.rangeInfo?.max == 3f }
+                assertTrue(range.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, Bundle().apply {
+                    putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 0f)
+                }))
+                awaitVisibleNode { it.text?.toString() == "Granularity · 5 minutes" }
+                val graph = awaitVisibleNode { it.contentDescription?.toString()?.startsWith("Smooth line chart, 288 time buckets") == true }
+                tapNodeCenter(graph)
+                awaitVisibleNode { it.text?.toString()?.contains("elapsed intervals measured") == true }
+                saveCapture("feedback-granularity-line-$dark")
+                val reset = awaitVisibleNode { it.contentDescription?.toString() == "Energy chart time bucket size" }
+                val resetRange = allNodes(reset).firstOrNull { it.rangeInfo != null }
+                    ?: awaitNode { it.rangeInfo?.max == 3f }
+                assertTrue(resetRange.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, Bundle().apply {
+                    putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 3f)
+                }))
+                awaitVisibleNode { it.text?.toString() == "Granularity · 1 hour" }
+                awaitVisibleNode { it.text?.toString() == "Energy (kWh)" }
+                saveCapture("feedback-granularity-hourly-$dark")
+            }
+        }
+    }
+
     @Test fun sensorTemperatureIsSeparateFromTargetOnHomeAndDevice() {
         listOf(0, 1).forEach { route ->
             launch(route = route).use {
