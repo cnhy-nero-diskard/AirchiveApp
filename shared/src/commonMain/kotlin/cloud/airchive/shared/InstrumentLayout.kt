@@ -14,10 +14,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 
 internal val LocalInstrumentGrouping = staticCompositionLocalOf { false }
+
+/** True inside an expanded [InstrumentDisclosure], where content sits under a row title and must rank below it. */
+internal val LocalInstrumentNested = staticCompositionLocalOf { false }
 
 /** Shared phone reading field; the shell owns navigation and system insets. */
 @Composable
@@ -127,7 +131,9 @@ fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpand
             }
             InstrumentChevron(expanded, Modifier.padding(start = 12.dp))
         }
-        if (expanded) CompositionLocalProvider(LocalInstrumentGrouping provides true) { Column(content = content) }
+        if (expanded) CompositionLocalProvider(LocalInstrumentGrouping provides true, LocalInstrumentNested provides true) {
+            Column(content = content)
+        }
         if (showDivider) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
@@ -141,6 +147,20 @@ internal fun InstrumentChevron(expanded: Boolean, modifier: Modifier = Modifier,
         val edge = if (expanded) .65f else .35f
         drawLine(ink, Offset(size.width * .2f, size.height * edge), Offset(size.width * .5f, size.height * middle), 2.dp.toPx(), StrokeCap.Round)
         drawLine(ink, Offset(size.width * .5f, size.height * middle), Offset(size.width * .8f, size.height * edge), 2.dp.toPx(), StrokeCap.Round)
+    }
+}
+
+/**
+ * Compact label/value line for reference data. Label and value are announced as one item; a value
+ * that outgrows its half of the line (long identifiers, large text) wraps rather than truncating.
+ */
+@Composable
+internal fun InstrumentFact(label: String, value: String, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+        Text(label, Modifier.weight(.42f), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, Modifier.weight(.58f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End)
     }
 }
 
