@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
@@ -81,16 +82,22 @@ fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpand
                 summary?.takeIf { detail == InterfaceDetail.DETAILED }?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            val ink = MaterialTheme.colorScheme.primary
-            Canvas(Modifier.padding(start = 12.dp).size(18.dp).clearAndSetSemantics {}) {
-                val middle = if (expanded) .35f else .65f
-                val edge = if (expanded) .65f else .35f
-                drawLine(ink, Offset(size.width * .2f, size.height * edge), Offset(size.width * .5f, size.height * middle), 2.dp.toPx(), StrokeCap.Round)
-                drawLine(ink, Offset(size.width * .5f, size.height * middle), Offset(size.width * .8f, size.height * edge), 2.dp.toPx(), StrokeCap.Round)
-            }
+            InstrumentChevron(expanded, Modifier.padding(start = 12.dp))
         }
         if (expanded) CompositionLocalProvider(LocalInstrumentGrouping provides true) { Column(content = content) }
         if (showDivider) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/** Decorative disclosure glyph: points down when collapsed and up when expanded. */
+@Composable
+internal fun InstrumentChevron(expanded: Boolean, modifier: Modifier = Modifier,
+                               ink: Color = MaterialTheme.colorScheme.primary) {
+    Canvas(modifier.size(18.dp).clearAndSetSemantics {}) {
+        val middle = if (expanded) .35f else .65f
+        val edge = if (expanded) .65f else .35f
+        drawLine(ink, Offset(size.width * .2f, size.height * edge), Offset(size.width * .5f, size.height * middle), 2.dp.toPx(), StrokeCap.Round)
+        drawLine(ink, Offset(size.width * .5f, size.height * middle), Offset(size.width * .8f, size.height * edge), 2.dp.toPx(), StrokeCap.Round)
     }
 }
 
