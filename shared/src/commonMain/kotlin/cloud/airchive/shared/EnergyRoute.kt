@@ -374,10 +374,8 @@ private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
             }
 
             presentation.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W — sampled energy ÷ elapsed time. " +
-                        "This is an average over elapsed slots, never instantaneous wattage.",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Sampled energy ÷ elapsed hours. An average over elapsed slots, never instantaneous wattage.")
             }
 
             // ---- Query-cache coverage (explicitly distinct from measured). ----
@@ -394,10 +392,8 @@ private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
                     val tenths = queriedTenths.coerceAtMost(999)
                     "${tenths / 10}.${tenths % 10}%"
                 }
-                Text(
-                    "Queried into the local cache: $queriedPercent of this period's elapsed time · " +
-                        "fully queried: ${if (presentation.queryCoverage.fullyQueried) "yes" else "no"}.",
-                )
+                InstrumentDetail("Elapsed range cached", queriedPercent,
+                    if (presentation.queryCoverage.fullyQueried) "Fully queried" else "Some elapsed range remains unfetched")
                 if (!presentation.queryCoverage.fullyQueried) {
                     Text("Some elapsed range remains unfetched — use the Load button below.")
                 }
@@ -832,19 +828,15 @@ private fun DayDetailCard(day: EnergyDaySummary) {
                 InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh", "Five-minute intervals with recognized units only.")
             }
             day.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W — sampled energy ÷ elapsed time " +
-                        "(an average, never instantaneous wattage).",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Sampled energy ÷ elapsed hours; never instantaneous wattage.")
             }
             peakIntervalAverageWatts(day)?.let { watts ->
-                Text(
-                    "Peak sampled interval-average power: ${watts.toTrimmedString()} W (a five-minute average, " +
-                        "not instantaneous).",
-                )
+                InstrumentDetail("Peak interval-average power", "${watts.toTrimmedString()} W",
+                    "Highest five-minute average; never instantaneous wattage.")
             }
 
-            unitLabels(day)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            EnergyUnitDetails(day)
 
             DailyMeasuresSection(day = day)
         }
@@ -865,12 +857,10 @@ private fun DaySummaryCard(day: EnergyDaySummary) {
                 InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh")
             }
             day.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W (average over elapsed slots, " +
-                        "never instantaneous wattage).",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Average over elapsed slots; never instantaneous wattage.")
             }
-            unitLabels(day)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            EnergyUnitDetails(day)
             DaySummaryMeasures(day = day)
         }
     }
@@ -897,17 +887,12 @@ private fun slotCountsText(day: EnergyDaySummary): String? = if (day.expectedSlo
     }
 }
 
-private fun unitLabels(day: EnergyDaySummary): String? = buildList {
-    if (day.recordedUnits.isNotEmpty()) {
-        add("Recognized unit(s): ${day.recordedUnits.joinToString { it.energyUnitLabel() }}")
-    }
-    if (day.unitTexts.isNotEmpty()) {
-        add("Source unit text: ${day.unitTexts.joinToString { "\"$it\"" }}")
-    }
-    if (day.unitSourceTexts.isNotEmpty()) {
-        add("Unit provenance: ${day.unitSourceTexts.joinToString()}")
-    }
-}.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+@Composable
+private fun EnergyUnitDetails(day: EnergyDaySummary) {
+    if (day.recordedUnits.isNotEmpty()) InstrumentDetail("Recognized units", day.recordedUnits.joinToString { it.energyUnitLabel() })
+    if (day.unitTexts.isNotEmpty()) InstrumentDetail("Source unit text", day.unitTexts.joinToString { "\"$it\"" })
+    if (day.unitSourceTexts.isNotEmpty()) InstrumentDetail("Unit provenance", day.unitSourceTexts.joinToString())
+}
 
 /** Peak single-interval average power for the day (uses [intervalAveragePowerWatts]). */
 private fun peakIntervalAverageWatts(day: EnergyDaySummary): Double? {

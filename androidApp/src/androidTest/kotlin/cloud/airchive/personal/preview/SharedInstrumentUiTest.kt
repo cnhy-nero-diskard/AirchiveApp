@@ -35,6 +35,41 @@ class SharedInstrumentUiTest {
             .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route).apply { if (detail != null) putExtra("detail", detail) },
     )
 
+    @Test fun homePullRefreshFetchesAgainAndDetailsRemainReadable() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            clickText("Continue with Google")
+            awaitShellSettled(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val before = fixture.get().counters.telemetryReads.get()
+            assertTrue(uiDevice.swipe(uiDevice.displayWidth / 2, uiDevice.displayHeight / 6,
+                uiDevice.displayWidth / 2, uiDevice.displayHeight * 2 / 3, 30))
+            awaitTrue("Pull-to-refresh fetches history again") { fixture.get().counters.telemetryReads.get() > before }
+            awaitShellSettled(scene)
+            assertTextAbsent("Refresh history")
+            scene.onActivity { it.shellFixture!!.interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.DETAILED) }
+            clickTab("Device")
+            awaitVisibleNode { it.text?.toString() == "Device ID" }
+            scrollForward()
+            saveCapture("feedback-device-detail-fields")
+            clickTab("History")
+            awaitVisibleNode { it.text?.toString() == "Collector health" }
+            scrollForward()
+            saveCapture("feedback-history-health-fields")
+            awaitVisibleNode { it.text?.toString() == "No anomaly flagged" }
+            saveCapture("feedback-history-status-guide")
+            clickTab("Energy")
+            awaitVisibleNode { it.text?.toString() == "Measured coverage" }
+            saveCapture("feedback-energy-coverage-fields")
+            awaitVisibleNode { it.text?.toString() == "Measured intervals" }
+            repeat(2) { scrollForward() }
+            saveCapture("feedback-energy-daily-fields")
+            awaitVisibleNode { it.text?.toString() == "1 kWh = 1,000 Wh" }
+            saveCapture("feedback-energy-unit-fields")
+        }
+    }
+
     @Test fun energyGranularitySwitchesBetweenHourlyBarsAndDenseLine() {
         for (dark in listOf(false, true)) {
             launch(route = 2, dark = dark).use {
@@ -1087,7 +1122,7 @@ class SharedInstrumentUiTest {
             // Simple keeps all optional information and action sections closed.
             clickTab("Device")
             assertDisclosureState("Device details", "Collapsed")
-            assertTextAbsent("Device ID:")
+            assertTextAbsent("Device ID")
 
             clickTab("Energy")
             assertDisclosureState("Coverage and measurement details", "Collapsed")
@@ -1177,7 +1212,7 @@ class SharedInstrumentUiTest {
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             clickTab("Device")
             assertDisclosureState("Device details", "Expanded")
-            assertTextPresent("Device ID:")
+            assertTextPresent("Device ID")
 
             clickTab("Energy")
             awaitVisibleNode { it.text?.toString() == "Sampled five-minute interval energy" }

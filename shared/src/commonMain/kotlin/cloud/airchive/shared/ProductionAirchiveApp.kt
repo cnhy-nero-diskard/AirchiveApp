@@ -459,7 +459,6 @@ private fun ProductionConfiguredAcCard(
     identity: DeviceIdentity?,
 ) {
     SummaryCard(productionConfiguredAcTitle()) {
-        Text(productionConfiguredAcTitle(), style = MaterialTheme.typography.titleMedium)
         InstrumentDetail("Device ID", configuredDeviceId)
         productionSampledIdentityLines(identity).forEach { line ->
             InstrumentDetailLine(line)
