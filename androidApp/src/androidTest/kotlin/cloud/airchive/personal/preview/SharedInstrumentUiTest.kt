@@ -375,7 +375,7 @@ class SharedInstrumentUiTest {
 
             // The real production account confirmation path clears the
             // protected fake store and changes the lifecycle owner partition.
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             clickText("Switch Google account")
             awaitNode { it.text?.toString() == "Switch Google account?" }
             clickText("Confirm")
@@ -505,7 +505,7 @@ class SharedInstrumentUiTest {
             }
             assertEquals(0, fixture.get().counters.credentialSaves.get())
 
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             clickText("Switch Google account")
             awaitNode { it.text?.toString() == "Switch Google account?" }
             clickText("Confirm")
@@ -865,8 +865,8 @@ class SharedInstrumentUiTest {
             scene.onActivity { it.shellFixture!!.setNextOwner("temperature-draft-owner-b") }
 
             clickText("Settings")
-            clickDisclosure("Account actions")
-            assertDisclosureState("Account actions", "Expanded")
+            clickDisclosure("Google account")
+            assertDisclosureState("Google account", "Expanded")
             clickVisibleText(
                 "Switch Google account",
                 awaitVisibleNode { it.text?.toString() == "Switch Google account" },
@@ -960,7 +960,7 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitShellSettled(scene)
             clickTab("Settings")
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             clickText("Sign out of Google")
             awaitNode { it.text?.toString() == "Sign out of Google?" }
             scene.onActivity {
@@ -1131,7 +1131,7 @@ class SharedInstrumentUiTest {
             clickText("Close")
         }
         launch(route = 4).use {
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             clickText("Clear local history cache")
             awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
             clickText("Cancel")
@@ -1202,7 +1202,7 @@ class SharedInstrumentUiTest {
             awaitVisibleNode { it.text?.toString() == "Local diagnostics · nonsecret" }
             scrollBackward()
             assertDisclosureState("History access", "Expanded")
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("Google account", "Collapsed")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             scene.onActivity {
                 assertEquals(cloud.airchive.shared.InterfaceDetail.SIMPLE,
@@ -1210,46 +1210,46 @@ class SharedInstrumentUiTest {
             }
             assertDisclosureState("History and storage", "Collapsed")
             assertTextAbsent("Local diagnostics · nonsecret")
-            assertDisclosureState("Connection details", "Collapsed")
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("AC connection", "Collapsed")
+            assertDisclosureState("Google account", "Collapsed")
             assertTextAbsent("LG client ID:")
             assertTextAbsent("Switch Google account")
 
             // Manual expansion is visible until a mode change; changing modes
             // resets informational sections to their defaults.
-            clickDisclosure("Connection details")
-            assertDisclosureState("Connection details", "Expanded")
+            clickDisclosure("AC connection")
+            assertDisclosureState("AC connection", "Expanded")
             awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
             scrollToTop()
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
-            assertDisclosureState("Connection details", "Expanded")
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("AC connection", "Expanded")
+            assertDisclosureState("Google account", "Collapsed")
             awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
             assertTextAbsent("Switch Google account")
 
-            clickDisclosure("Connection details")
-            assertDisclosureState("Connection details", "Collapsed")
+            clickDisclosure("AC connection")
+            assertDisclosureState("AC connection", "Collapsed")
             scrollToTop()
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
-            assertDisclosureState("Connection details", "Collapsed")
+            assertDisclosureState("AC connection", "Collapsed")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
-            assertDisclosureState("Connection details", "Expanded")
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("AC connection", "Expanded")
+            assertDisclosureState("Google account", "Collapsed")
 
             // The action section never follows Detailed's informational-open rule.
-            clickDisclosure("Account actions")
-            assertDisclosureState("Account actions", "Expanded")
+            clickDisclosure("Google account")
+            assertDisclosureState("Google account", "Expanded")
             assertTextPresent("Switch Google account")
             scrollToTop()
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("Google account", "Collapsed")
             assertTextAbsent("Switch Google account")
             scrollToTop()
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
-            assertDisclosureState("Account actions", "Collapsed")
+            assertDisclosureState("Google account", "Collapsed")
 
             // Settings/cache confirmation is outside the resetting disclosure.
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             scene.onActivity { it.shellFixture!!.accountController.requestClearCache() }
             awaitNode { it.text?.toString() == "Clear local Airchive cache?" }
             scene.onActivity {
@@ -1422,11 +1422,11 @@ class SharedInstrumentUiTest {
 
             clickText("Settings")
             awaitNode { it.text?.toString() == "Interface detail" }
+            assertTextPresent("Connections")
             assertTextPresent("AC connection")
-            assertTextPresent("Connection details")
             assertTextPresent("History access")
             assertTextPresent("History and storage")
-            assertTextPresent("Account actions")
+            assertTextPresent("Google account")
             assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
         }
         clearFixturePreferences()
@@ -1615,7 +1615,7 @@ class SharedInstrumentUiTest {
                 systemTheme(if (dark) "yes" else "no")
                 for ((route, name) in listOf(1 to "device", 2 to "energy", 3 to "history", 4 to "settings")) {
                     launch(dark = dark, route = route).use {
-                        awaitNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Net daily power consumed"; 3 -> "Sample status guide"; else -> "Account actions" } }
+                        awaitNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Net daily power consumed"; 3 -> "Sample status guide"; else -> "Google account" } }
                         if (route == 1) awaitNode { it.text?.toString() == "25" }
                         instrumentation.waitForIdleSync()
                         instrumentation.uiAutomation.waitForIdle(250, 5_000)
@@ -1661,7 +1661,7 @@ class SharedInstrumentUiTest {
                 systemTheme(if (dark) "yes" else "no")
                 for (detail in listOf("simple", "detailed")) {
                     launch(dark = dark, route = 4, detail = detail).use {
-                        awaitNode { it.text?.toString() == "Account actions" }
+                        awaitNode { it.text?.toString() == "Google account" }
                         instrumentation.uiAutomation.waitForIdle(250, 5_000)
                         saveCapture("interface-$detail-${if (dark) "dark" else "light"}-$scale")
                     }
@@ -1730,9 +1730,9 @@ class SharedInstrumentUiTest {
             assertEquals("Back leaves the Settings form in place", 2, awaitEditableFields().size)
             clickText("Cancel")
 
-            clickDisclosure("Account actions")
+            clickDisclosure("Google account")
             var disclosure = find(instrumentation.uiAutomation.rootInActiveWindow) {
-                it.text?.toString() == "Account actions"
+                it.text?.toString() == "Google account"
             } ?: throw AssertionError("The expanded Account actions disclosure is unavailable")
             while ((disclosure.stateDescription == null || (!disclosure.isClickable && disclosure.actionList.none {
                     it.id == AccessibilityNodeInfo.ACTION_CLICK
@@ -1830,6 +1830,52 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun groupedSettingsShowLocalStatusAndKeepAccountActionsCollapsed() {
+        val scale = java.lang.String.format(java.util.Locale.ROOT, "%.1f",
+            instrumentation.targetContext.resources.configuration.fontScale)
+        val uiMode = instrumentation.targetContext.getSystemService(UiModeManager::class.java)
+        val previousNightMode = uiMode.nightMode
+        fun setTheme(mode: String) {
+            ParcelFileDescriptor.AutoCloseInputStream(
+                instrumentation.uiAutomation.executeShellCommand("cmd uimode night $mode"),
+            ).bufferedReader().use { it.readText() }
+        }
+        try {
+            for (dark in listOf(false, true)) {
+                setTheme(if (dark) "yes" else "no")
+                clearFixturePreferences()
+                launchShell().use { scene ->
+                    clickText("Continue with Google")
+                    awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+                    awaitShellSettled(scene)
+                    clickTab("Settings")
+                    val before = AtomicReference<List<Int>>()
+                    scene.onActivity { before.set(operationSnapshot(it.shellFixture!!)) }
+                    for (detail in cloud.airchive.shared.InterfaceDetail.entries) {
+                        selectShellDetail(scene, detail)
+                        assertDisclosureState("Google account", "Collapsed")
+                        assertTextAbsent("Switch Google account")
+                        assertTextAbsent("Sign out of Google")
+                        awaitNode { it.text?.toString() == "No ThinQ token saved" }
+                        awaitNode { it.text?.toString() == "Set up ThinQ PAT" }
+                        awaitNode { it.text?.toString() == "Connections" }
+                        saveCapture("settings-grouped-${detail.storedValue}-${if (dark) "dark" else "light"}-scale-$scale")
+                        scene.onActivity {
+                            assertEquals("settings presentation performs no port operations", before.get(), operationSnapshot(it.shellFixture!!))
+                        }
+                    }
+                }
+            }
+        } finally {
+            clearFixturePreferences()
+            setTheme(when (previousNightMode) {
+                UiModeManager.MODE_NIGHT_YES -> "yes"
+                UiModeManager.MODE_NIGHT_NO -> "no"
+                else -> "auto"
+            })
+        }
+    }
+
     @Test fun captureSyntheticProductionShellVisualMatrix() {
         val fontScale = instrumentation.targetContext.resources.configuration.fontScale
         assertTrue("run this matrix at the explicitly configured 1.0, 1.3, or maximum 2.0 text scale",
@@ -1869,9 +1915,9 @@ class SharedInstrumentUiTest {
                         }
                         if (detail == "Detailed") clickText("Detailed")
                         val description = if (detail == "Detailed") {
-                            "More explanations and technical details across the app."
+                            "Extra explanations open automatically across the app."
                         } else {
-                            "Essentials first. Open extra details when you need them."
+                            "Extra explanations stay collapsed. Tap any section to see more."
                         }
                         awaitVisibleNode { it.text?.toString() == description }
                         awaitVisibleNode { it.text?.toString() == "Interface detail" }
@@ -2331,7 +2377,7 @@ class SharedInstrumentUiTest {
             "Home", "Device", "Energy", "History", "Settings", "Day", "Week", "Month",
             "Coverage and measurement details", "Daily record", "Daily records", "Units and conversions",
             "Period summary", "Net daily power consumed", "Sampled five-minute interval energy", "Retry history loading",
-            "History access", "History and storage", "Connection details", "Account actions",
+            "History access", "History and storage", "AC connection", "Google account",
             "Sync and collector health", "Sample status guide", "Recorded hours (newest first)",
             "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Room temperature",
             "Refresh history", "Refreshing history…", "Retry history sync",
@@ -2666,9 +2712,9 @@ class SharedInstrumentUiTest {
         } != null
         if (selectorOnCurrentRoute) {
             val selectedCopy = if (detail == cloud.airchive.shared.InterfaceDetail.DETAILED) {
-                "More explanations and technical details across the app."
+                "Extra explanations open automatically across the app."
             } else {
-                "Essentials first. Open extra details when you need them."
+                "Extra explanations stay collapsed. Tap any section to see more."
             }
             awaitVisibleNode { it.text?.toString() == selectedCopy }
         } else {

@@ -66,6 +66,7 @@ internal fun InstrumentBlock(modifier: Modifier = Modifier, content: @Composable
 @Composable
 fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpanded: Boolean = false,
                          inset: Dp = 20.dp, showDivider: Boolean = true, informational: Boolean = false,
+                         alwaysShowSummary: Boolean = false,
                          content: @Composable ColumnScope.() -> Unit) {
     val detail = LocalInterfaceDetail.current
     val openByDefault = initiallyExpanded || (informational && detail == InterfaceDetail.DETAILED)
@@ -79,7 +80,7 @@ fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpand
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.Start) {
                 Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-                summary?.takeIf { detail == InterfaceDetail.DETAILED }?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                summary?.takeIf { alwaysShowSummary || detail == InterfaceDetail.DETAILED }?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             InstrumentChevron(expanded, Modifier.padding(start = 12.dp))

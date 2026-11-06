@@ -56,10 +56,8 @@ fun InterfaceDetailSelector() {
                     label = { Text(if (detail == InterfaceDetail.SIMPLE) "Simple" else "Detailed") })
             }
         }
-        Text(if (selected == InterfaceDetail.SIMPLE) "Essentials first. Open extra details when you need them."
-            else "More explanations and technical details across the app.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Warnings, measurement units and confirmations stay visible in both modes.",
+        Text(if (selected == InterfaceDetail.SIMPLE) "Extra explanations stay collapsed. Tap any section to see more."
+            else "Extra explanations open automatically across the app.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

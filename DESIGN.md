@@ -193,9 +193,11 @@ Native Material NavigationBar presents Home, Device, Energy, History and Setting
 
 ### Interface detail and disclosures
 
+Settings groups compact status rows under Connections, History and Preferences. Google account shows the active account and expands to account actions; AC connection shows credential presence and expands to protected-storage details. Status summaries remain visible in both interface modes. Credential setup/replacement, unlock recovery, active forms, feedback and confirmation dialogs sit outside resetting disclosures. History owns sync timestamps and diagnostics so the account row does not repeat sync information. Preferences contains the interface-detail selector.
+
 Settings exposes Simple and Detailed through 48dp-minimum native FilterChips. Simple is the default for absent or unrecognized stored values; the Android choice is an installation-wide nonsecret preference, independent of account/history/credential state. Selection changes presentation immediately and does not trigger reads or commands.
 
-Informational disclosures are collapsed in Simple and expanded in Detailed; action sections, including Account actions, stay collapsed in both modes. Mode changes reset manual overrides to those defaults. State-required recovery sections such as unverified History access override the normal default and stay expanded across mode changes while remaining manually controllable. Disclosure rows have a 56dp minimum height. Keep their expanded/collapsed semantics aligned with actual visible descendants, and keep PAT forms/confirmation dialogs independently placed so a disclosure reset does not discard active input or dialog state.
+Informational disclosures are collapsed in Simple and expanded in Detailed; action sections, including the Google account row, stay collapsed in both modes. Mode changes reset manual overrides to those defaults. State-required recovery sections such as unverified History access override the normal default and stay expanded across mode changes while remaining manually controllable. Disclosure rows have a 56dp minimum height. Keep their expanded/collapsed semantics aligned with actual visible descendants, and keep PAT forms/confirmation dialogs independently placed so a disclosure reset does not discard active input or dialog state.
 
 ### Existing cards and fields
 
