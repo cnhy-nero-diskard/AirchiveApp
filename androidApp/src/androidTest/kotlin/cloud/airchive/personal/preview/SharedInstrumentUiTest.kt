@@ -1212,19 +1212,19 @@ class SharedInstrumentUiTest {
             assertTextAbsent("Local diagnostics · nonsecret")
             assertDisclosureState("AC connection", "Collapsed")
             assertDisclosureState("Google account", "Collapsed")
-            assertTextAbsent("LG client ID:")
+            assertTextAbsent("LG client ID")
             assertTextAbsent("Switch Google account")
 
             // Manual expansion is visible until a mode change; changing modes
             // resets informational sections to their defaults.
             clickDisclosure("AC connection")
             assertDisclosureState("AC connection", "Expanded")
-            awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("LG client ID") == true }
             scrollToTop()
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             assertDisclosureState("AC connection", "Expanded")
             assertDisclosureState("Google account", "Collapsed")
-            awaitVisibleNode { it.text?.toString()?.startsWith("LG client ID:") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("LG client ID") == true }
             assertTextAbsent("Switch Google account")
 
             clickDisclosure("AC connection")
@@ -1873,6 +1873,59 @@ class SharedInstrumentUiTest {
                 UiModeManager.MODE_NIGHT_NO -> "no"
                 else -> "auto"
             })
+        }
+    }
+
+    @Test fun nestedSettingsDetailStaysReadableWithEveryRowOpen() {
+        val scale = java.lang.String.format(java.util.Locale.ROOT, "%.1f",
+            instrumentation.targetContext.resources.configuration.fontScale)
+        clearFixturePreferences()
+        try {
+            launchShell().use { scene ->
+                clickText("Continue with Google")
+                awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+                awaitShellSettled(scene)
+                clickTab("Settings")
+                selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
+                clickDisclosure("Google account")
+                awaitVisibleNode { it.text?.toString() == "Sign out of Google" }
+                assertEquals("a row title is not repeated as a heading inside its own detail", 1,
+                    allNodes(instrumentation.uiAutomation.rootInActiveWindow).count { it.text?.toString() == "History access" })
+                scrollToTop()
+                val expected = listOf("LG client ID", "Project ID", "Last successful sync", "Collector health")
+                val seen = mutableSetOf<String>()
+                // Large text lengthens the page, so scroll until every row has been on screen.
+                for (page in 1..10) {
+                    saveCapture("settings-nested-detailed-scale-$scale-$page")
+                    for (label in expected) {
+                        if (find(instrumentation.uiAutomation.rootInActiveWindow) {
+                                it.isVisibleToUser && it.text?.toString()?.contains(label) == true
+                            } != null) seen += label
+                    }
+                    if (seen.size == expected.size) break
+                    scrollForward()
+                }
+                assertEquals("every nested detail row is reachable by scrolling", expected.toSet(), seen)
+
+                // The credential form lives beside, not inside, the AC connection row. The page is several
+                // screens long, so return to its top by swiping rather than assume two swipes suffice.
+                repeat(8) { scrollBackward() }
+                clickText("Set up ThinQ PAT")
+                fun verifyVisible() = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.isVisibleToUser && it.text?.toString() == "Verify and save securely"
+                } != null
+                repeat(4) { if (!verifyVisible()) scrollForward() }
+                awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
+                saveCapture("settings-nested-token-form-scale-$scale")
+                clickText("Cancel")
+                awaitTrue("Cancel closes the credential form") {
+                    find(instrumentation.uiAutomation.rootInActiveWindow) {
+                        it.text?.toString() == "Verify and save securely"
+                    } == null
+                }
+            }
+        } finally {
+            clearFixturePreferences()
         }
     }
 
