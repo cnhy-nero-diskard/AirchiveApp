@@ -22,6 +22,25 @@ class EnergyChartViewportTest {
         }
     }
 
+    @Test fun autoFocusIncludesFourNeighborsAndClampsAtDayEdges() {
+        for (total in listOf(48, 96, 288)) {
+            val full = EnergyViewport(0f, total.toFloat())
+            assertEquals(EnergyViewport(16f, 9f), full.autoFocus(total, 20, null))
+            assertEquals(EnergyViewport(0f, 9f), full.autoFocus(total, 0, null))
+            assertEquals(EnergyViewport(total - 9f, 9f), full.autoFocus(total, total - 1, null))
+        }
+    }
+
+    @Test fun tappingSelectedPointTogglesFullRangeAndAnotherPointRefocuses() {
+        for (total in listOf(48, 96, 288)) {
+            val full = EnergyViewport(0f, total.toFloat())
+            val focused = full.autoFocus(total, 20, null)
+            assertEquals(full, focused.autoFocus(total, 20, 20))
+            assertEquals(focused, full.autoFocus(total, 20, 20))
+            assertEquals(EnergyViewport(17f, 9f), focused.autoFocus(total, 21, 20))
+        }
+    }
+
     @Test fun timeTicksBecomeMoreFrequentAsZoomIncreases() {
         assertEquals(72, energyTimeTickStride(288f, 4))
         assertEquals(18, energyTimeTickStride(72f, 4))

@@ -73,6 +73,10 @@ internal data class EnergyViewport(val start: Float, val count: Float) {
         return EnergyViewport(start.coerceIn(0f, (total - visible).coerceAtLeast(0f)), visible)
     }
 
+    fun autoFocus(total: Int, index: Int, selectedIndex: Int?): EnergyViewport =
+        if (index == selectedIndex && count < total) EnergyViewport(0f, total.toFloat())
+        else EnergyViewport(index - 4f, 9f).constrained(total)
+
     fun transform(total: Int, anchor: Float, zoom: Float, panFraction: Float): EnergyViewport {
         val nextCount = (count / zoom.coerceAtLeast(.01f)).coerceIn(minOf(5, total).toFloat(), total.toFloat())
         return EnergyViewport(start + anchor * (count - nextCount) - panFraction * nextCount, nextCount).constrained(total)
@@ -104,7 +108,7 @@ internal fun GranularEnergyChart(presentation: EnergyHistoryPresentation) {
     val axisStep = energyAxisStep(maxWh)
     val axisMax = axisStep * 4
     val zoomEnabled = minutes in listOf(5, 15, 30)
-    var autoZoom by remember { mutableStateOf(false) }
+    var autoZoom by remember { mutableStateOf(true) }
     var viewport by remember(presentation.period, presentation.days, minutes) {
         mutableStateOf(EnergyViewport(0f, buckets.size.coerceAtLeast(1).toFloat()))
     }
@@ -114,10 +118,10 @@ internal fun GranularEnergyChart(presentation: EnergyHistoryPresentation) {
     val currentVisible by rememberUpdatedState(visible)
     val currentViewport by rememberUpdatedState(viewport)
     fun select(index: Int) {
-        selected = index
         if (zoomEnabled && autoZoom) {
-            viewport = EnergyViewport(index - 2f, 5f).constrained(buckets.size)
+            viewport = viewport.autoFocus(buckets.size, index, selected)
         }
+        selected = index
     }
     val measurer = rememberTextMeasurer()
     val axisStyle = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
