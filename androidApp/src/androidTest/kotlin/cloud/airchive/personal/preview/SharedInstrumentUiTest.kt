@@ -107,6 +107,10 @@ class SharedInstrumentUiTest {
                     putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, progress)
                 }))
                 awaitNode { it.text?.toString() == "Granularity · $minutes minutes" }
+                val defaultZoom = awaitNode { it.contentDescription?.toString()?.startsWith("Auto zoom. Off") == true }
+                assertTrue("Auto zoom is enabled by default", allNodes(defaultZoom).any { it.isChecked })
+                clickNode(defaultZoom)
+                awaitNode { it.contentDescription?.toString()?.startsWith("Auto zoom. Off") == true && allNodes(it).none { node -> node.isChecked } }
                 scrollForward()
                 fun graph() = awaitNode { it.contentDescription?.toString()?.startsWith("Energy chart, $total time buckets") == true }
                 fun showing(count: Int) = awaitNode { it.stateDescription?.toString()?.startsWith("Showing $count of $total") == true }
@@ -132,9 +136,13 @@ class SharedInstrumentUiTest {
                 awaitNode { it.contentDescription?.toString()?.startsWith("Auto zoom. Off") == true && allNodes(it).any { node -> node.isChecked } }
                 scrollForward()
                 tapNodeCenter(graph())
-                showing(5)
+                showing(9)
                 awaitNode { it.text?.toString()?.contains("elapsed intervals measured") == true }
                 saveCapture("energy-auto-zoom-$minutes")
+                tapNodeCenter(graph())
+                showing(total)
+                tapNodeCenter(graph())
+                showing(9)
                 clickNode(awaitNode { it.text?.toString() == "Reset zoom" })
                 showing(total)
             }
