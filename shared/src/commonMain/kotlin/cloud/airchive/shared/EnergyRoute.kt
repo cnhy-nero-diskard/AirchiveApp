@@ -175,8 +175,11 @@ fun EnergyRoute(
                 EnergyDailySections(presentation, showDayDetail = periodType == EnergyPeriodType.DAY)
             }
             InstrumentDisclosure("Units and conversions", informational = true) {
-                Text("Interval values retain their recorded units. Recognized Wh and kWh values are normalized to Wh; unknown units are never guessed. Energy divided by time is interval-average power, never instantaneous wattage.",
-                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp))
+                Column(Modifier.padding(20.dp)) {
+                    InstrumentDetail("Energy units", "1 kWh = 1,000 Wh", "Recorded units are preserved; recognized values are normalized to Wh for comparison.")
+                    InstrumentDetail("Unknown units", "Kept as recorded", "No conversion is guessed. These values are excluded from usable energy sums.")
+                    InstrumentDetail("Interval-average power", "Watts = Wh ÷ hours", "An average over the measured interval, never instantaneous wattage.")
+                }
             }
         }
     }
@@ -363,7 +366,7 @@ private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
             val expected = presentation.days.sumOf { it.expectedSlotCount }
             val usableValue = presentation.usableEnergyValueWh
             if (usableValue != null) {
-                Text("Sampled interval sum: ${usableValue.toTrimmedString()} Wh (normalized to Wh only where the source unit was recognized).")
+                InstrumentDetail("Sampled interval sum", "${usableValue.toTrimmedString()} Wh", "Only recognized source units are converted.")
             } else if (unusableUnitSlots > 0) {
                 Text("Sampled interval sum: unavailable — interval values were recorded without a recognized unit and are kept raw (unit not recorded/unknown; never guessed).")
             } else {
@@ -415,7 +418,7 @@ private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
                 Text("No elapsed five-minute slots in this period yet.")
             } else {
                 val measuredPercent = (usable.toDouble() / expected * 100.0).roundToInt()
-                Text("Usable five-minute slots: $usable of $expected ($measuredPercent%).")
+                InstrumentDetail("Measured coverage", "$measuredPercent%", "$usable of $expected elapsed five-minute slots have usable energy.")
                 buildList {
                     if (gaps > 0) add("$gaps gap(s)")
                     if (anomalous > 0) add("$anomalous anomalous")
@@ -815,10 +818,10 @@ private fun DayDetailCard(day: EnergyDaySummary) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(dayHeading(day), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            slotCountsText(day)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            InstrumentDetail("Measured intervals", "${day.usableSlotCount} / ${day.expectedSlotCount}", slotCountsText(day))
 
             day.usableEnergyValueWh?.let { value ->
-                Text("Usable sampled five-minute energy: ${value.toTrimmedString()} Wh (recognized units only).")
+                InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh", "Five-minute intervals with recognized units only.")
             }
             day.averagePowerWatts?.let { averageWatts ->
                 Text(
@@ -849,9 +852,9 @@ private fun DaySummaryCard(day: EnergyDaySummary) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(dayHeading(day), style = MaterialTheme.typography.titleSmall)
-            slotCountsText(day)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            InstrumentDetail("Measured intervals", "${day.usableSlotCount} / ${day.expectedSlotCount}", slotCountsText(day))
             day.usableEnergyValueWh?.let { value ->
-                Text("Usable sampled five-minute energy: ${value.toTrimmedString()} Wh.")
+                InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh")
             }
             day.averagePowerWatts?.let { averageWatts ->
                 Text(
@@ -957,7 +960,7 @@ private fun DailyMeasureRow(measure: EnergyDailyMeasure) {
     val normalized = measure.energyValueWh ?: normalizeToWh(total.energyValue, recorded)
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("${total.source.sourceLabel()} · ${if (total.finalized) "finalized" else "not finalized"}")
-        Text("${total.energyValue.toTrimmedString()} ${measureUnitLabel(measure)}")
+        InstrumentDetail("Recorded total", "${total.energyValue.toTrimmedString()} ${measureUnitLabel(measure)}")
         when {
             recorded == null && total.unitText.isNullOrBlank() ->
                 Text("Unit not recorded/unknown — no Wh conversion is shown (never guessed).")
@@ -965,7 +968,7 @@ private fun DailyMeasureRow(measure: EnergyDailyMeasure) {
                 Text("Raw source unit text: \"${total.unitText}\"")
         }
         normalized?.let { value ->
-            Text("≈ ${value.toTrimmedString()} Wh (normalized from the recorded unit).")
+            InstrumentDetail("Converted energy", "${value.toTrimmedString()} Wh", "Normalized from the recorded unit.")
         }
     }
 }
