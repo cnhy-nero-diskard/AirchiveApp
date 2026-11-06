@@ -2,6 +2,7 @@ package cloud.airchive.shared
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -155,41 +156,70 @@ private fun SettingsHeaderCard() {
 
 @Composable
 internal fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState, showHeading: Boolean = true) {
-    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
+    SettingsDetailBlock {
+        if (showHeading) SettingsDetailHeading("History access")
+        // Only fixed copy per state: the reason, error code, and session
+        // identity details of the sealed state are deliberately never
+        // interpolated into UI strings.
+        Text(
+            when (ownerAccessState) {
+                OwnerAccessState.SignedOut ->
+                    "Status: signed out of Google. Sign in from the setup card on Home to start."
+                is OwnerAccessState.SignInFailed ->
+                    "Status: Google sign-in did not complete. You can retry it from the setup card on Home."
+                is OwnerAccessState.AccessPending ->
+                    "Status: signed in, but history access is pending or not yet granted for this account. " +
+                        "Have the operator enroll this account's UID, then retry the access check."
+                is OwnerAccessState.AccessCheckFailed ->
+                    "Status: history access could not be verified for the signed-in account. Stay signed in " +
+                        "and retry the access check when ready."
+                is OwnerAccessState.Authorized ->
+                    "Status: history access is authorized for this account and device."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "Firebase sign-in and Airchive authorization are separate matters: a Google session alone " +
+                "never grants Airchive history access.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Expanded under a disclosure row the detail is a borderless, flush block (the row already supplies the
+ * divider); standalone it keeps the original padded, divided block.
+ */
+@Composable
+private fun SettingsDetailBlock(content: @Composable ColumnScope.() -> Unit) {
+    if (LocalInstrumentNested.current) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (showHeading) {
-                Text("History access", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            }
-            // Only fixed copy per state: the reason, error code, and session
-            // identity details of the sealed state are deliberately never
-            // interpolated into UI strings.
-            Text(
-                when (ownerAccessState) {
-                    OwnerAccessState.SignedOut ->
-                        "Status: signed out of Google. Sign in from the setup card on Home to start."
-                    is OwnerAccessState.SignInFailed ->
-                        "Status: Google sign-in did not complete. You can retry it from the setup card on Home."
-                    is OwnerAccessState.AccessPending ->
-                        "Status: signed in, but history access is pending or not yet granted for this account. " +
-                            "Have the operator enroll this account's UID, then retry the access check."
-                    is OwnerAccessState.AccessCheckFailed ->
-                        "Status: history access could not be verified for the signed-in account. Stay signed in " +
-                            "and retry the access check when ready."
-                    is OwnerAccessState.Authorized ->
-                        "Status: history access is authorized for this account and device."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "Firebase sign-in and Airchive authorization are separate matters: a Google session alone " +
-                    "never grants Airchive history access.",
-                style = MaterialTheme.typography.bodySmall,
+            content = content,
+        )
+    } else {
+        InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
             )
         }
     }
+}
+
+/** Under a row title the heading must rank below it; standalone it keeps the card-title size. */
+@Composable
+private fun SettingsDetailHeading(text: String, modifier: Modifier = Modifier) {
+    val nested = LocalInstrumentNested.current
+    Text(
+        text,
+        modifier = modifier.semantics { heading() },
+        style = if (nested) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+        color = if (nested) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -204,59 +234,53 @@ internal fun SyncStatusCard(
     onManualRefresh: (() -> Unit)?,
     isHistorySyncing: Boolean,
 ) {
-    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Sync status", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            // One polite live region, limited to sync-status changes the
-            // presentation flags as worth announcing (denied/offline/remote
-            // failure transitions), so the screen never over-announces.
-            Text(
-                if (isHistorySyncing) {
-                    "Syncing Airchive history… Cached rows remain available. ${presentation.message}"
-                } else {
-                    presentation.message
-                },
-                modifier = if (isHistorySyncing || presentation.shouldAnnounceUpdate) {
-                    Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                } else {
-                    Modifier
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    SettingsDetailBlock {
+        SettingsDetailHeading("Sync status")
+        // One polite live region, limited to sync-status changes the
+        // presentation flags as worth announcing (denied/offline/remote
+        // failure transitions), so the screen never over-announces.
+        Text(
+            if (isHistorySyncing) {
+                "Syncing Airchive history… Cached rows remain available. ${presentation.message}"
+            } else {
+                presentation.message
+            },
+            modifier = if (isHistorySyncing || presentation.shouldAnnounceUpdate) {
+                Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+            } else {
+                Modifier
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
-            val lastSuccess = sync?.lastSuccessfulSyncEpochMillis
-            Text(
-                if (lastSuccess != null) {
-                    "Last successful sync: ${syncInstantLabel(lastSuccess, nowEpochMillis)}."
-                } else {
-                    "Last successful sync: not yet."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
+        val lastSuccess = sync?.lastSuccessfulSyncEpochMillis
+        InstrumentFact(
+            "Last successful sync",
+            lastSuccess?.let { syncInstantLabel(it, nowEpochMillis) } ?: "Not yet",
+        )
 
-            val lastErrorCode = sync?.lastError
+        val lastErrorCode = sync?.lastError
+        InstrumentFact(
+            "Last sync error",
             if (lastErrorCode != null) {
                 val whenText = sync.lastErrorEpochMillis?.let {
                     " (${ageFrom(it, nowEpochMillis).ageLabel()} ago)"
                 } ?: ""
-                Text("Last sync error: ${lastErrorCode.syncErrorLabel()}$whenText.")
+                "${lastErrorCode.syncErrorLabel()}$whenText"
             } else {
-                Text("No recorded sync errors.")
-            }
+                "None recorded"
+            },
+        )
 
-            onManualRefresh?.let { refresh ->
-                Button(
-                    enabled = !isHistorySyncing,
-                    onClick = refresh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                ) {
-                    Text(if (isHistorySyncing) "Syncing history…" else presentation.retryLabel)
-                }
+        onManualRefresh?.let { refresh ->
+            Button(
+                enabled = !isHistorySyncing,
+                onClick = refresh,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+            ) {
+                Text(if (isHistorySyncing) "Syncing history…" else presentation.retryLabel)
             }
         }
     }
@@ -283,72 +307,59 @@ internal fun LocalDiagnosticsCard(
     nowEpochMillis: Long,
     thinQStatusLabel: String? = null,
 ) {
-    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Local diagnostics · nonsecret", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            // Nonsecret configuration only; the owner UID is deliberately never
-            // shown here.
+    SettingsDetailBlock {
+        SettingsDetailHeading("Local diagnostics · nonsecret")
+        // Nonsecret configuration only; the owner UID is deliberately never
+        // shown here.
+        InstrumentFact("Project ID", partition.firebaseProjectId)
+        InstrumentFact("Device ID", partition.deviceId)
+        InstrumentFact(
+            "Cached history",
+            "${countLabel(history.observations.size, "observation")} · " +
+                "${countLabel(history.dailyTotals.size, "daily total")} · " +
+                countLabel(history.coveredRanges.size, "covered range"),
+        )
+        InstrumentFact(
+            "ThinQ credential",
+            thinQStatusLabel ?: if (credentialIsVisible) credentialState.safeCredentialPresenceLabel()
+            else "Hidden while signed out",
+        )
+
+        Text("Collector health", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 8.dp))
+        val health = history.collectorHealth
+        if (health == null) {
             Text(
-                "Project ID: ${partition.firebaseProjectId} · Device ID: ${partition.deviceId}",
+                "No collector health record is cached for this device yet.",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Text(
-                "Cached: ${history.observations.size} observation(s) · ${history.dailyTotals.size} daily " +
-                    "total(s) · ${history.coveredRanges.size} covered range(s).",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
-            Text("ThinQ credential", style = MaterialTheme.typography.labelLarge)
-            if (thinQStatusLabel != null) {
-                Text(thinQStatusLabel, style = MaterialTheme.typography.bodyMedium)
-            } else {
-                Text(
-                    if (credentialIsVisible) credentialState.safeCredentialPresenceLabel()
-                    else "ThinQ credential status is hidden while signed out.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+        } else {
+            InstrumentFact("Status", health.status.safeLabel())
+            InstrumentFact("Last poll", health.lastPollEpochMillis?.let { "${ageFrom(it, nowEpochMillis).ageLabel()} ago" }
+                ?: "Not recorded")
+            InstrumentFact("Last success", health.lastSuccessEpochMillis?.let { "${ageFrom(it, nowEpochMillis).ageLabel()} ago" }
+                ?: "Not recorded")
+            InstrumentFact("Last failure", health.lastFailureEpochMillis?.let { "${ageFrom(it, nowEpochMillis).ageLabel()} ago" }
+                ?: "None recorded")
+            health.lastErrorClass?.takeIf { it.isNotBlank() }?.let { clazz ->
+                InstrumentFact("Failure class", clazz.boundedLabel())
             }
-
-            Text("Collector health", style = MaterialTheme.typography.labelLarge)
-            val health = history.collectorHealth
-            if (health == null) {
-                Text(
-                    "No collector health record is cached for this device yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else {
-                Text("Status: ${health.status.safeLabel()}.", style = MaterialTheme.typography.bodyMedium)
-                health.lastPollEpochMillis?.let {
-                    Text("Last poll: ${ageFrom(it, nowEpochMillis).ageLabel()} ago.")
-                } ?: Text("Last poll: not recorded.")
-                health.lastSuccessEpochMillis?.let {
-                    Text("Last success: ${ageFrom(it, nowEpochMillis).ageLabel()} ago.")
-                } ?: Text("Last success: not recorded.")
-                health.lastFailureEpochMillis?.let {
-                    Text("Last failure: ${ageFrom(it, nowEpochMillis).ageLabel()} ago.")
-                } ?: Text("No recorded failure.")
-                health.lastErrorClass?.takeIf { it.isNotBlank() }?.let { clazz ->
-                    Text("Last failure class: ${clazz.boundedLabel()}.")
-                }
-                (health.consecutiveFailures ?: 0).takeIf { it > 0 }?.let { failures ->
-                    Text("$failures consecutive failure(s).")
-                }
-                (health.consecutiveRateLimits ?: 0).takeIf { it > 0 }?.let { limits ->
-                    Text("$limits consecutive rate-limited attempt(s).")
-                }
-                (health.collectorVersion?.takeIf { it.isNotBlank() })?.let { version ->
-                    Text("Collector version: ${version.boundedLabel()}.")
-                }
+            (health.consecutiveFailures ?: 0).takeIf { it > 0 }?.let { failures ->
+                InstrumentFact("Consecutive failures", "$failures")
             }
-
-            Text(
-                "Diagnostics include no raw PAT, exception text, or telemetry payload; the account card shows only a masked token.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            (health.consecutiveRateLimits ?: 0).takeIf { it > 0 }?.let { limits ->
+                InstrumentFact("Consecutive rate limits", "$limits")
+            }
+            (health.collectorVersion?.takeIf { it.isNotBlank() })?.let { version ->
+                InstrumentFact("Collector version", version.boundedLabel())
+            }
         }
+
+        Text(
+            "Diagnostics include no raw PAT, exception text, or telemetry payload; the account card shows only a masked token.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

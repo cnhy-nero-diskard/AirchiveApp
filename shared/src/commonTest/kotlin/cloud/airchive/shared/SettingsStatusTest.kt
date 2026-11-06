@@ -51,4 +51,10 @@ class SettingsStatusTest {
         assertEquals("288 cached observations · synced 12 minutes ago", historyStorageSummary(true, 288, 12 * 60_000L))
         assertEquals("2 cached observations · synced less than a minute ago", historyStorageSummary(true, 2, 5_000L))
     }
+
+    @Test fun countLabelNamesSingularAndPluralCounts() {
+        assertEquals("0 observations", countLabel(0, "observation"))
+        assertEquals("1 daily total", countLabel(1, "daily total"))
+        assertEquals("12 covered ranges", countLabel(12, "covered range"))
+    }
 }

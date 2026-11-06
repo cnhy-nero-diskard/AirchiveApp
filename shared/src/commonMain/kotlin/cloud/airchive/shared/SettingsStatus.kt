@@ -42,6 +42,9 @@ internal fun historyStorageSummary(
     lastSuccessfulAgeMillis: Long?,
 ): String {
     if (!hasCachedHistory) return "No history cached yet"
-    val stored = if (observationCount == 1) "1 cached observation" else "$observationCount cached observations"
+    val stored = countLabel(observationCount, "cached observation")
     return lastSuccessfulAgeMillis?.let { "$stored · synced ${productionAgeLabel(it)} ago" } ?: stored
 }
+
+/** "1 range" / "3 ranges": names a count without the "(s)" hedge. */
+internal fun countLabel(count: Int, singular: String): String = if (count == 1) "1 $singular" else "$count ${singular}s"
