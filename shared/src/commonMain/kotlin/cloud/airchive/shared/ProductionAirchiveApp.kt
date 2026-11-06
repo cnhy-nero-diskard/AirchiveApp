@@ -1327,7 +1327,7 @@ private fun String.productionBoundLabel(maxChars: Int = 120): String {
     return if (flattened.length <= maxChars) flattened else flattened.take(maxChars - 1) + "…"
 }
 
-private fun productionAgeLabel(ageMillis: Long): String = when {
+internal fun productionAgeLabel(ageMillis: Long): String = when {
     ageMillis < 60_000L -> "less than a minute"
     ageMillis < 60 * 60_000L -> "${ageMillis / 60_000L} minutes"
     ageMillis < 24 * 60 * 60_000L -> "${ageMillis / (60 * 60_000L)} hours"
