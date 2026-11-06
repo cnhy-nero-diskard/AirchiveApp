@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 
@@ -151,16 +150,18 @@ internal fun InstrumentChevron(expanded: Boolean, modifier: Modifier = Modifier,
 }
 
 /**
- * Compact label/value line for reference data. Label and value are announced as one item; a value
- * that outgrows its half of the line (long identifiers, large text) wraps rather than truncating.
+ * Compact label/value line for reference data. Label and value are announced as one item. A short value
+ * sits at the line end beside its label; one that does not fit there (long identifiers, timestamps, large
+ * text) drops under the label at the start edge instead of wrapping into a narrow right-aligned column.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun InstrumentFact(label: String, value: String, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
-        Text(label, Modifier.weight(.42f), style = MaterialTheme.typography.bodyMedium,
+    FlowRow(modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, Modifier.padding(end = 16.dp), style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, Modifier.weight(.58f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
