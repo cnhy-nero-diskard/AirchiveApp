@@ -398,12 +398,7 @@ private const val MAX_BOUNDED_LABEL_CHARS = 80
 private fun ageFrom(eventEpochMillis: Long, nowEpochMillis: Long): Long =
     (nowEpochMillis - eventEpochMillis).coerceAtLeast(0L)
 
-private fun Long.ageLabel(): String = when {
-    this < 60_000L -> "less than a minute"
-    this < 60 * 60_000L -> "${this / 60_000L} minutes"
-    this < 24 * 60 * 60_000L -> "${this / (60 * 60_000L)} hours"
-    else -> "${this / (24 * 60 * 60_000L)} days"
-}
+private fun Long.ageLabel(): String = productionAgeLabel(this)
 
 private fun syncInstantLabel(epochMillis: Long, nowEpochMillis: Long): String {
     val zone = safeZone(DEFAULT_DAY_TIME_ZONE)

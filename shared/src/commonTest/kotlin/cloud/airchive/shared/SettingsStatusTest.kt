@@ -57,4 +57,14 @@ class SettingsStatusTest {
         assertEquals("1 daily total", countLabel(1, "daily total"))
         assertEquals("12 covered ranges", countLabel(12, "covered range"))
     }
+
+    @Test fun ageLabelUsesSingularForOneUnit() {
+        assertEquals("less than a minute", productionAgeLabel(59_999L))
+        assertEquals("1 minute", productionAgeLabel(60_000L))
+        assertEquals("59 minutes", productionAgeLabel(59 * 60_000L))
+        assertEquals("1 hour", productionAgeLabel(60 * 60_000L))
+        assertEquals("23 hours", productionAgeLabel(23 * 60 * 60_000L))
+        assertEquals("1 day", productionAgeLabel(24 * 60 * 60_000L))
+        assertEquals("3 days", productionAgeLabel(3 * 24 * 60 * 60_000L))
+    }
 }
