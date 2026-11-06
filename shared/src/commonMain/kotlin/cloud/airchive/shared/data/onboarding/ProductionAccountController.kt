@@ -43,6 +43,14 @@ import kotlinx.coroutines.flow.first
  *   concurrent sync runs (default: no locking, used by tests and simple graphs).
  * @param credentialStore optional protected ThinQ PAT store cleared on account
  *   change/sign-out; cache-only deletion leaves it untouched.
+ * @param beforeOwnerTransition synchronous lifecycle invalidation called after
+ *   confirmation is checked but before local history, protected credentials, or
+ *   the identity session is changed. Production uses it to stop exposing old
+ *   ThinQ state before asynchronous owner observers receive the new session.
+ * @param afterOwnerTransition synchronizes lifecycle ownership with the resulting
+ *   identity after cleanup/sign-in completes. A failed cleanup may leave the
+ *   original owner signed in; the caller can reactivate that partition only
+ *   after the old presentation has been invalidated.
  */
 class ProductionAccountController(
     private val identity: OwnerIdentityPort,
@@ -51,6 +59,8 @@ class ProductionAccountController(
     private val configuredDeviceId: String,
     private val serializedAction: suspend (suspend () -> OwnerSettingsActionResult) -> OwnerSettingsActionResult = { action -> action() },
     private val credentialStore: ThinQCredentialStore? = null,
+    private val beforeOwnerTransition: suspend () -> Unit = {},
+    private val afterOwnerTransition: suspend (OwnerSession?) -> Unit = {},
 ) {
 
     private val _state = MutableStateFlow(ProductionAccountState(session = identity.currentSession))
@@ -90,6 +100,19 @@ class ProductionAccountController(
 
     /** Re-emits the current session and partition cache; call whenever Settings is shown. */
     suspend fun refresh() {
+        // A confirmation belongs to the UID that opened it. An external
+        // identity switch can arrive while Settings is still composed; discard
+        // that dialog/result before the new owner's snapshot is published.
+        if (_state.value.session?.uid != identity.currentSession?.uid ||
+            (confirmationOwnerUid != null && confirmationOwnerUid != identity.currentSession?.uid) ||
+            (confirmationOwnerUid == null && _state.value.confirmStep != ProductionAccountConfirmStep.NONE)
+        ) {
+            confirmationOwnerUid = null
+            _state.value = _state.value.copy(
+                confirmStep = ProductionAccountConfirmStep.NONE,
+                lastActionResult = null,
+            )
+        }
         _state.value = snapshot()
     }
 
@@ -103,6 +126,7 @@ class ProductionAccountController(
      */
     suspend fun signOutConfirmed(): OwnerSettingsActionResult = serializedAction {
         checkConfirmStep(ProductionAccountConfirmStep.SIGN_OUT)
+        beforeOwnerTransition()
         val session = identity.currentSession
         val cleanupFailure = clearOwnerDataSafely(partitionFor(session))
         val result: OwnerSettingsActionResult = if (cleanupFailure != null) {
@@ -112,6 +136,7 @@ class ProductionAccountController(
                 ?.let { OwnerSettingsActionResult.Failure(it) }
                 ?: OwnerSettingsActionResult.Success(session = null)
         }
+        afterOwnerTransition(identity.currentSession)
         publishAfter(result)
         result
     }
@@ -142,6 +167,7 @@ class ProductionAccountController(
      */
     suspend fun changeAccountConfirmed(): OwnerSettingsActionResult = serializedAction {
         checkConfirmStep(ProductionAccountConfirmStep.CHANGE_ACCOUNT)
+        beforeOwnerTransition()
         val priorSession = identity.currentSession
         val cleanupFailure = clearOwnerDataSafely(partitionFor(priorSession))
         val result: OwnerSettingsActionResult = if (cleanupFailure != null) {
@@ -159,6 +185,7 @@ class ProductionAccountController(
                 }
             }
         }
+        afterOwnerTransition(identity.currentSession)
         publishAfter(result)
         result
     }

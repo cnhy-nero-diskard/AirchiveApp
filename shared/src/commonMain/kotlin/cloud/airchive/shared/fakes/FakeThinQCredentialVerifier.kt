@@ -1,6 +1,10 @@
 package cloud.airchive.shared.fakes
 
 import cloud.airchive.shared.contract.thinq.AcControls
+import cloud.airchive.shared.contract.thinq.AcOperatingMode
+import cloud.airchive.shared.contract.thinq.FanSpeed
+import cloud.airchive.shared.contract.thinq.TemperatureCapability
+import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQCredentialVerificationRequest
 import cloud.airchive.shared.contract.thinq.ThinQCredentialVerifier
 import cloud.airchive.shared.contract.thinq.ThinQDevice
@@ -36,7 +40,23 @@ class FakeThinQCredentialVerifier(
                 profile = ThinQDeviceProfile(
                     deviceId = deviceId,
                     modelName = "Demo Air Conditioner",
-                    controls = AcControls(powerWritable = true),
+                    controls = AcControls(
+                        powerWritable = true,
+                        targetTemperature = TemperatureCapability(
+                            min = 18.0,
+                            max = 30.0,
+                            step = 1.0,
+                            unit = TemperatureUnit.CELSIUS,
+                        ),
+                        allowedModes = listOf(
+                            AcOperatingMode.COOL,
+                            AcOperatingMode.DRY,
+                            AcOperatingMode.FAN,
+                            AcOperatingMode.AUTO,
+                        ),
+                        allowedFanSpeeds = listOf(FanSpeed.LOW, FanSpeed.MEDIUM, FanSpeed.HIGH, FanSpeed.AUTO),
+                        temperatureUnit = TemperatureUnit.CELSIUS,
+                    ),
                 ),
             )
         } else {

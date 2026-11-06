@@ -23,6 +23,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -43,6 +45,7 @@ import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.data.thinq.AcCommandController
 import cloud.airchive.shared.data.thinq.AcCommandSubmitResult
 import cloud.airchive.shared.data.thinq.AcCommandUiState
+import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
@@ -50,6 +53,7 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 import kotlin.time.Clock
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /**
  * Profile-derived quick controls for the configured AC (OpenSpec task 5.2).
@@ -106,7 +110,11 @@ fun DeviceControlsCard(
     val liveState by liveStateController.state.collectAsState()
     val commandUiState by commandController.state.collectAsState()
     val scope = rememberCoroutineScope()
-
+    var showConfirmation by remember { mutableStateOf(false) }
+    LaunchedEffect(commandUiState) {
+        showConfirmation = commandUiState is AcCommandUiState.Confirmed
+        if (showConfirmation) { delay(3000); showConfirmation = false }
+    }
     val isSending = commandUiState is AcCommandUiState.Sending
     val currentSnapshot = liveState as? ThinQLiveRefreshState.Current
     val liveIsCurrent = currentSnapshot != null
@@ -162,7 +170,7 @@ fun DeviceControlsCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            commandUiState.feedbackText(simulated)?.let { feedback ->
+            commandUiState.feedbackText(simulated)?.takeIf { commandUiState !is AcCommandUiState.Confirmed || showConfirmation }?.let { feedback ->
                 Text(
                     feedback,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -206,6 +214,8 @@ fun DeviceControlsCard(
                 currentMode = known?.mode,
                 liveIsCurrent = liveIsCurrent,
                 enabled = controlsEnabled,
+                commandState = commandUiState,
+                showConfirmation = showConfirmation,
                 onSelect = { mode ->
                     issueCommand(AcCommand.SetMode(requestedAtEpochMillis = nowEpochMillis(), mode = mode))
                 },
@@ -216,6 +226,8 @@ fun DeviceControlsCard(
                 currentSpeed = known?.fanSpeed,
                 liveIsCurrent = liveIsCurrent,
                 enabled = controlsEnabled,
+                commandState = commandUiState,
+                showConfirmation = showConfirmation,
                 onSelect = { speed ->
                     issueCommand(AcCommand.SetFanSpeed(requestedAtEpochMillis = nowEpochMillis(), speed = speed))
                 },
@@ -232,6 +244,7 @@ private fun PowerControl(
     enabled: Boolean,
     onPowerToggle: (powerOn: Boolean) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     SectionTitle("Power")
     if (!controls.powerWritable) {
         Text(
@@ -250,7 +263,11 @@ private fun PowerControl(
     )
     Button(
         enabled = enabled && powerIsOn != null,
-        onClick = { onPowerToggle(powerIsOn != true) },
+        onClick = {
+            val turningOn = powerIsOn != true
+            haptic.performHapticFeedback(if (turningOn) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
+            onPowerToggle(turningOn)
+        },
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp),
@@ -274,6 +291,7 @@ private fun TemperatureControl(
     enabled: Boolean,
     onSubmit: (value: Double, unit: TemperatureUnit) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     SectionTitle("Target temperature")
     if (capability == null) {
         Text(
@@ -292,13 +310,21 @@ private fun TemperatureControl(
     }
 
     val safeLiveTemperature = liveTemperature?.takeIf { it.isFinite() }
+    val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
     var index by remember(capability, allowed) {
-        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: allowed.first()))
+        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: fallbackSetpoint.value))
+    }
+    var lastHapticIndex by remember(capability, allowed) {
+        mutableStateOf(allowed.nearestIndex(safeLiveTemperature ?: fallbackSetpoint.value))
     }
     // Re-sync the pending selection to the freshest allowed live value after a
     // fresh read; the selection is never sent unless Apply is tapped.
     LaunchedEffect(liveTemperature) {
-        safeLiveTemperature?.let { index = allowed.nearestIndex(it) }
+        safeLiveTemperature?.let {
+            val refreshedIndex = allowed.nearestIndex(it)
+            index = refreshedIndex
+            lastHapticIndex = refreshedIndex
+        }
     }
     val selected = allowed[index.coerceIn(allowed.indices)]
 
@@ -329,7 +355,14 @@ private fun TemperatureControl(
         val rangeEnd = capability.max.toFloat()
         Slider(
             value = selected.toFloat().coerceIn(rangeStart, rangeEnd),
-            onValueChange = { raw -> index = allowed.nearestIndex(raw.toDouble()) },
+            onValueChange = { raw ->
+                val nextIndex = allowed.nearestIndex(raw.toDouble())
+                if (enabled && nextIndex != lastHapticIndex) {
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    lastHapticIndex = nextIndex
+                }
+                index = nextIndex
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics {
@@ -348,7 +381,12 @@ private fun TemperatureControl(
     ) {
         TextButton(
             enabled = enabled && index > 0,
-            onClick = { index -= 1 },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                val nextIndex = index - 1
+                index = nextIndex
+                lastHapticIndex = nextIndex
+            },
             modifier = Modifier
                 .widthIn(min = 48.dp)
                 .heightIn(min = 48.dp)
@@ -367,7 +405,12 @@ private fun TemperatureControl(
         }
         TextButton(
             enabled = enabled && index < allowed.lastIndex,
-            onClick = { index += 1 },
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                val nextIndex = index + 1
+                index = nextIndex
+                lastHapticIndex = nextIndex
+            },
             modifier = Modifier
                 .widthIn(min = 48.dp)
                 .heightIn(min = 48.dp)
@@ -384,6 +427,8 @@ private fun ModeControl(
     currentMode: AcOperatingMode?,
     liveIsCurrent: Boolean,
     enabled: Boolean,
+    commandState: AcCommandUiState,
+    showConfirmation: Boolean,
     onSelect: (mode: AcOperatingMode) -> Unit,
 ) {
     SectionTitle("Operating mode")
@@ -394,13 +439,14 @@ private fun ModeControl(
         )
         return
     }
-    OptionRow(
-        options = allowedModes,
+    SteppedChoice(
+        title = "Mode", options = allowedModes,
         current = currentMode,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
         label = { it.displayLabel() },
         onSelect = onSelect,
+        status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetMode },
     )
 }
 
@@ -410,6 +456,8 @@ private fun FanControl(
     currentSpeed: FanSpeed?,
     liveIsCurrent: Boolean,
     enabled: Boolean,
+    commandState: AcCommandUiState,
+    showConfirmation: Boolean,
     onSelect: (speed: FanSpeed) -> Unit,
 ) {
     SectionTitle("Fan strength")
@@ -420,46 +468,15 @@ private fun FanControl(
         )
         return
     }
-    OptionRow(
-        options = allowedSpeeds,
+    SteppedChoice(
+        title = "Fan speed", options = allowedSpeeds,
         current = currentSpeed,
         liveIsCurrent = liveIsCurrent,
         enabled = enabled,
-        label = { it.displayLabel() },
+        label = { it.selectorLabel() },
         onSelect = onSelect,
+        status = commandState.selectorControlStatus(showConfirmation) { it is AcCommand.SetFanSpeed },
     )
-}
-
-@Composable
-private fun <T> OptionRow(
-    options: List<T>,
-    current: T?,
-    liveIsCurrent: Boolean,
-    enabled: Boolean,
-    label: (T) -> String,
-    onSelect: (T) -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEach { option ->
-            val isCurrent = option == current
-            Button(
-                enabled = enabled && !isCurrent,
-                onClick = { onSelect(option) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) {
-                Text(
-                    when {
-                        isCurrent && liveIsCurrent -> "${label(option)} · current"
-                        isCurrent -> "${label(option)} · last observed (old)"
-                        else -> "Set ${label(option)}"
-                    },
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -523,7 +540,7 @@ private fun ThinQRefreshFailureKind.gateDetail(): String = when (this) {
  * [AcCommandUiState] outcome `message`, any exception text, and tokens are
  * never displayed.
  */
-private fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (this) {
+internal fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (this) {
     AcCommandUiState.Idle -> null
     is AcCommandUiState.Sending -> if (simulated) {
         "Sending simulated ${command.commandLabel()}…"
@@ -536,7 +553,7 @@ private fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (t
             "but current state is not confirmed. Refresh live state before acting again."
 
     is AcCommandUiState.Confirmed ->
-        "${if (simulated) "Demo state confirms" else "Confirmed: AC currently reports"} ${outcome.command.commandLabel()}."
+        "${outcome.command.commandLabel()} confirmed${if (simulated) " (demo)" else ""}."
 
     is AcCommandUiState.Failed -> failureText(outcome.failure, simulated)
     is AcCommandUiState.Unconfirmed -> failureText(outcome.failure, simulated)
@@ -579,7 +596,7 @@ private fun failureText(failure: CommandFailure?, simulated: Boolean): String {
 // ------------------------------------------------------------------- helpers
 
 /** Last known live state across every snapshot, so controls can label stale values honestly. */
-private fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this) {
+internal fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this) {
     is ThinQLiveRefreshState.Current -> state
     is ThinQLiveRefreshState.Stale -> lastKnownState
     is ThinQLiveRefreshState.Loading -> previous?.knownLiveState()
@@ -589,6 +606,26 @@ private fun ThinQLiveRefreshState.knownLiveState(): ThinQLiveState? = when (this
 
 private fun nowEpochMillis(): Long = Clock.System.now().toEpochMilliseconds()
 
+/** Reuse the bounded adapter confirmation for Home just as Device does; never resend. */
+internal suspend fun submitAndPresentCommand(
+    command: AcCommand,
+    commands: AcCommandController,
+    live: ThinQLiveStateController,
+    contextKey: ThinQContextKey? = null,
+) {
+    // The same context captured at tap time fences the dispatch and every
+    // publication: a command scheduled under a context that ended before it
+    // ran is never sent, and a late outcome never becomes live state for a
+    // replacement context.
+    if (commands.submit(command, contextKey) !is AcCommandSubmitResult.Submitted) return
+    when (val result = commands.state.value) {
+        is AcCommandUiState.Accepted -> live.acceptCommandOutcome(result.outcome, contextKey)
+        is AcCommandUiState.Confirmed -> live.acceptCommandOutcome(result.outcome, contextKey)
+        is AcCommandUiState.Unconfirmed -> live.acceptCommandOutcome(result.outcome, contextKey)
+        else -> Unit
+    }
+}
+
 private fun AcCommand.commandLabel(): String = when (this) {
     is AcCommand.SetPower -> if (powerOn) "power on" else "power off"
     is AcCommand.SetTargetTemperature -> "target temperature ${temperatureLabel(value, unit)}"
@@ -596,13 +633,21 @@ private fun AcCommand.commandLabel(): String = when (this) {
     is AcCommand.SetFanSpeed -> "fan ${speed.displayLabel()}"
 }
 
-private fun AcOperatingMode.displayLabel(): String =
+internal fun AcOperatingMode.displayLabel(): String =
     name.lowercase().split('_').joinToString(" ")
 
-private fun FanSpeed.displayLabel(): String =
+internal fun FanSpeed.displayLabel(): String =
     name.lowercase().split('_').joinToString(" ")
 
-private fun TemperatureCapability.allowedValues(): List<Double> {
+internal fun FanSpeed.selectorLabel(): String = when (this) {
+    FanSpeed.AUTO -> "AUTO"
+    FanSpeed.LOW -> "LOW"
+    FanSpeed.MEDIUM -> "MID"
+    FanSpeed.HIGH -> "HIGH"
+    FanSpeed.TURBO -> "TURBO"
+}
+
+internal fun TemperatureCapability.allowedValues(): List<Double> {
     if (!min.isFinite() || !max.isFinite() || !step.isFinite() || step <= 0.0) return emptyList()
     if (max < min) return emptyList()
     val intervalCount = (max - min) / step
@@ -628,12 +673,12 @@ private fun TemperatureCapability.rangeLabel(): String =
 private fun temperatureLabel(value: Double, unit: TemperatureUnit): String =
     "${formatTemperature(value)} ${unit.symbol()}"
 
-private fun TemperatureUnit.symbol(): String = when (this) {
+internal fun TemperatureUnit.symbol(): String = when (this) {
     TemperatureUnit.CELSIUS -> "°C"
     TemperatureUnit.FAHRENHEIT -> "°F"
 }
 
-private fun formatTemperature(value: Double): String =
+internal fun formatTemperature(value: Double): String =
     when {
         !value.isFinite() -> "—"
         abs(value - value.roundToLong()) < 1e-9 -> value.roundToLong().toString()

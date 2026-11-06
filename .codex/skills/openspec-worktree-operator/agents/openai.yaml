@@ -1,0 +1,7 @@
+interface:
+  display_name: "OpenSpec Worktree Operator"
+  short_description: "Safely manage isolated OpenSpec worktrees"
+  default_prompt: "Use $openspec-worktree-operator to manage this OpenSpec worktree safely."
+
+policy:
+  allow_implicit_invocation: true

@@ -69,12 +69,41 @@ private val TWO_LETTER_COUNTRY = Regex("[a-zA-Z]{2}")
  *    and `observe` reflects `unlockFailed` so the owner is routed back through
  *    setup without exposing ciphertext.
  */
-class AndroidEncryptedThinQCredentialStore(
-    context: Context,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+class AndroidEncryptedThinQCredentialStore private constructor(
+    private val dispatcher: CoroutineDispatcher,
+    private val storageDir: File,
+    private val keyAlias: String,
 ) : ThinQCredentialStore {
 
-    private val storageDir: File = File(context.noBackupFilesDir, STORAGE_SUBDIR)
+    constructor(
+        context: Context,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) : this(
+        dispatcher = dispatcher,
+        storageDir = File(context.noBackupFilesDir, STORAGE_SUBDIR),
+        keyAlias = KEY_ALIAS,
+    )
+
+    /** Test-only factory: every test uses its own no-backup directory and Keystore alias. */
+    internal companion object TestFactory {
+        fun forTesting(
+            context: Context,
+            storageSubdirectory: String,
+            testKeyAlias: String,
+            dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        ): AndroidEncryptedThinQCredentialStore {
+            require(storageSubdirectory.isNotBlank() && File(storageSubdirectory).name == storageSubdirectory) {
+                "Test credential storage must be a simple subdirectory name."
+            }
+            require(testKeyAlias.isNotBlank()) { "A dedicated test Keystore alias is required." }
+            return AndroidEncryptedThinQCredentialStore(
+                dispatcher = dispatcher,
+                storageDir = File(context.noBackupFilesDir, storageSubdirectory),
+                keyAlias = testKeyAlias,
+            )
+        }
+    }
+
     private val credentialFile: File = File(storageDir, CREDENTIAL_FILE_NAME)
     private val clientIdFile: File = File(storageDir, CLIENT_ID_FILE_NAME)
     private val mutex = Mutex()
@@ -203,7 +232,7 @@ class AndroidEncryptedThinQCredentialStore(
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
         generator.init(
             KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -216,7 +245,7 @@ class AndroidEncryptedThinQCredentialStore(
 
     private fun getExistingKeyOrNull(): SecretKey? = try {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+        keyStore.getKey(keyAlias, null) as? SecretKey
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: GeneralSecurityException) {

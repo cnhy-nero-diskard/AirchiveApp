@@ -166,6 +166,17 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Keep the development build installable beside the privately signed
+            // production package, whose signing key is not available on every machine.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            buildConfigField(
+                "String",
+                "AIRCHIVE_FIREBASE_APPLICATION_ID",
+                buildConfigStringLiteral(airchiveConfigValueOrBlank("firebase.debugApplicationId")),
+            )
+        }
         getByName("release") {
             isMinifyEnabled = false
             if (hasPrivateReleaseSigning) {
@@ -182,6 +193,9 @@ kotlin {
 }
 
 dependencies {
+    // Native debug-only scene for isolated Home layout and interaction verification.
+    add("debugImplementation", libs.compose.foundation)
+    add("debugImplementation", libs.compose.material3)
     implementation(project(":shared"))
     implementation(libs.room.runtime)
     implementation(libs.activity.compose)
@@ -198,4 +212,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.kotlinx.datetime)
 }

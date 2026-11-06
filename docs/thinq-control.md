@@ -12,8 +12,15 @@ nonsecret client ID, not the store's raw-token read method. Sign-out and
 account change clear both the active owner's Room partition and the PAT; a
 cache-only clear preserves the PAT.
 
-Opening Device performs an explicit ThinQ device/profile check and a live-state
-read. Controls are offered only when the configured device profile permits the
+The first Home or Device entry in an owner/credential context verifies the
+ThinQ device/profile and reads live state. Switching between tabs reuses that
+context's existing readings, including an in-flight or failed refresh, without
+another LG request. Scheduled reads and explicit refresh actions update them.
+During refresh, the last observed power, temperature, mode, and fan readings
+remain visible; controls wait for a current verified read. Failed reads retain
+labeled last-known state. Owner/credential changes still clear old readings.
+
+Controls are offered only when the configured device profile permits the
 value and the live-state/profile gate is current. Each command is an explicit
 UI action; the Ktor adapter validates against a fresh profile and confirms with
 a bounded live read. Ambiguous outcomes are not resent automatically. ThinQ

@@ -3,24 +3,35 @@ package cloud.airchive.shared
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -36,15 +47,19 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
@@ -63,6 +78,8 @@ import cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult
 import cloud.airchive.shared.data.onboarding.ProductionAccountConfirmStep
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
 import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
+import cloud.airchive.shared.data.thinq.ThinQContextKey
+import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
@@ -71,6 +88,8 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -92,6 +111,11 @@ import kotlinx.coroutines.launch
  * Missing Firebase configuration is handled by the caller (MainActivity): this
  * graph is only ever built with a ready configuration, so there is no fake
  * fallback here to construct.
+ *
+ * [nowProvider] is the single clock seam for this shell: production callers
+ * leave the default system clock, while the isolated debug/test fixture injects
+ * a controlled clock so freshness/age rendering is deterministic. It never
+ * changes which ports are constructed.
  */
 @Composable
 fun ProductionAirchiveApp(
@@ -100,17 +124,22 @@ fun ProductionAirchiveApp(
     onManualRefresh: (() -> Unit)? = null,
     ownerAuthConfigurationMessage: String? = null,
     thinQBindings: ProductionThinQBindings? = null,
+    interfacePreferences: InterfaceDetailPreferences? = null,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-    val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = colors) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            ProductionRouteHost(
-                coordinator = coordinator,
-                accountController = accountController,
-                onManualRefresh = onManualRefresh,
-                ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                thinQBindings = thinQBindings,
-            )
+    val preferences = remember(interfacePreferences) { interfacePreferences ?: InMemoryInterfaceDetailPreferences() }
+    InterfaceDetailProvider(preferences) {
+        AirchiveTheme {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                ProductionRouteHost(
+                    coordinator = coordinator,
+                    accountController = accountController,
+                    onManualRefresh = onManualRefresh,
+                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                    thinQBindings = thinQBindings,
+                    nowProvider = nowProvider,
+                )
+            }
         }
     }
 }
@@ -122,28 +151,15 @@ fun ProductionAirchiveApp(
  */
 @Composable
 fun ProductionConfigBlockedScreen(message: String) {
-    val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = colors) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(WindowInsets.safeDrawing.asPaddingValues())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    "Airchive",
-                    modifier = Modifier.semantics { heading() },
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-                Text("Firebase owner sign-in is not configured", style = MaterialTheme.typography.titleLarge)
-                Text(message, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "This install intentionally does not fall back to demo data. Configure the nonsecret " +
-                        "Firebase client options in config/airchive-mobile.properties, then reopen the app.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+    AirchiveTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.fillMaxSize().padding(WindowInsets.safeDrawing.asPaddingValues()), contentAlignment = Alignment.TopCenter) {
+                InstrumentPage("Airchive") {
+                    SummaryCard("Owner sign-in needs configuration") {
+                        Text(message, style = MaterialTheme.typography.bodyLarge)
+                        Text("Configure the Firebase client options in config/airchive-mobile.properties, then reopen the app. This install does not fall back to demo data.", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
     }
@@ -175,6 +191,7 @@ private fun ProductionRouteHost(
     onManualRefresh: (() -> Unit)?,
     ownerAuthConfigurationMessage: String?,
     thinQBindings: ProductionThinQBindings?,
+    nowProvider: () -> Long,
 ) {
     val session by coordinator.session.collectAsState()
     val isRefreshing by coordinator.isRefreshing.collectAsState()
@@ -194,6 +211,11 @@ private fun ProductionRouteHost(
     } else {
         thinQBindings.credentialState.collectAsState(initial = emptyCredentialState).value
     }
+    val activeThinQContextKey = thinQBindings?.contextKey?.collectAsState()?.value
+    // Keep an unapplied setpoint above the conditional route composition. The
+    // lifecycle key intentionally resets it when the owner/device/credential
+    // context changes, but navigation and display-detail changes do not.
+    var temperatureDraft by remember(activeThinQContextKey) { mutableStateOf<TemperatureDraft?>(null) }
     val historyFlow = remember(coordinator, partition) {
         partition?.let { coordinator.local.observe(it) } ?: flowOf(placeholderHistory)
     }
@@ -222,16 +244,16 @@ private fun ProductionRouteHost(
     val authorized = accessState is OwnerAccessState.Authorized
     LaunchedEffect(coordinator, partition, authorized) {
         if (authorized && partition != null) {
-            val now = Clock.System.now().toEpochMilliseconds()
+            val now = nowProvider()
             // Decide from the durable cache under the coordinator's lock, not
             // from a possibly still-empty Compose placeholder. A successful
-            // access check must not bypass the ten-minute incremental gate.
+            // access check must not bypass the five-minute incremental gate.
             coordinator.onForeground(now)
         }
     }
 
     var route by remember { mutableStateOf(ProductionRoute.HOME) }
-    val nowEpochMillis = Clock.System.now().toEpochMilliseconds()
+    val nowEpochMillis = nowProvider()
     val syncPresentation = presentHistorySync(history, nowEpochMillis)
     val sampledIdentity = (accessState as? OwnerAccessState.Authorized)?.device
 
@@ -253,16 +275,19 @@ private fun ProductionRouteHost(
         }
     }
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val useRail = useInstrumentRail(maxWidth.value, maxHeight.value)
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
-            ProductionBottomNavigation(current = route, onSelect = { route = it })
+            if (!useRail) ProductionBottomNavigation(current = route, onSelect = { route = it })
         },
     ) { innerPadding ->
+        Row(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        if (useRail) InstrumentNavigationRail(route.ordinal) { route = ProductionRoute.entries[it] }
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+                .weight(1f).fillMaxHeight(),
             contentAlignment = Alignment.TopCenter,
         ) {
             when (route) {
@@ -279,16 +304,26 @@ private fun ProductionRouteHost(
                     onOpenSettings = { route = ProductionRoute.SETTINGS },
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     credentialState = credentialState,
+                    thinQBindings = thinQBindings,
+                    temperatureDraft = temperatureDraft,
+                    onTemperatureDraftChange = { temperatureDraft = it },
+                    hasSession = session != null,
+                    onOpenEnergy = { route = ProductionRoute.ENERGY },
+                    nowProvider = nowProvider,
                 )
 
                 ProductionRoute.DEVICE -> if (partition != null) {
                     ProductionDeviceRoute(
+                        history = history,
                         configuredDeviceId = coordinator.configuredDeviceId,
                         identity = sampledIdentity,
                         thinQBindings = thinQBindings,
                         credentialState = credentialState,
                         onBackToHome = { route = ProductionRoute.HOME },
                         onOpenSettings = { route = ProductionRoute.SETTINGS },
+                        nowProvider = nowProvider,
+                        temperatureDraft = temperatureDraft,
+                        onTemperatureDraftChange = { temperatureDraft = it },
                     )
                 } else {
                     ProductionSignedOutRoute(title = "Device")
@@ -302,6 +337,7 @@ private fun ProductionRouteHost(
                         partition = partition,
                         remoteLoadEnabled = authorized,
                         loadRange = { from, to -> coordinator.loadHistoricalRange(partition, from, to) },
+                        nowProvider = nowProvider,
                     ) }
                 } else {
                     ProductionSignedOutRoute(title = "Energy")
@@ -330,6 +366,8 @@ private fun ProductionRouteHost(
                 )
             }
         }
+        }
+    }
     }
 }
 
@@ -338,50 +376,22 @@ private fun ProductionBottomNavigation(
     current: ProductionRoute,
     onSelect: (ProductionRoute) -> Unit,
 ) {
-    NavigationBar {
-        ProductionRoute.entries.forEach { destination ->
-            NavigationBarItem(
-                selected = current == destination,
-                onClick = { onSelect(destination) },
-                icon = {
-                    DestinationGlyph(
-                        destination = destination.shellDestination(),
-                        selected = current == destination,
-                    )
-                },
-                label = { Text(destination.label()) },
-                alwaysShowLabel = true,
-            )
-        }
+    key(current) {
+        InstrumentNavigation(current.ordinal) { onSelect(ProductionRoute.entries[it]) }
     }
 }
 
 @Composable
 private fun ProductionSignedOutRoute(title: String) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(title, modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        SummaryCard("Sign in required") {
-            Text("Sign in to your Google account from Home to load Airchive history for this device.")
-            Text(
-                "History access and authorization are separate: a Google session alone never grants " +
-                    "Airchive history access.",
-            )
+    InstrumentPage(title) {
+        SummaryCard("Sign in to continue") {
+            Text("Open Home to sign in with the enrolled Google account and load this AC's history.")
+            Text("No other account's cached history is shown.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
-// -------------------------------------------------------------------------
-// Home
-// -------------------------------------------------------------------------
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProductionHome(
     coordinator: ProductionHistoryCoordinator,
@@ -396,88 +406,67 @@ private fun ProductionHome(
     onOpenSettings: () -> Unit,
     ownerAuthConfigurationMessage: String?,
     credentialState: ThinQCredentialState,
+    thinQBindings: ProductionThinQBindings?,
+    temperatureDraft: TemperatureDraft?,
+    onTemperatureDraftChange: (TemperatureDraft?) -> Unit,
+    hasSession: Boolean,
+    onOpenEnergy: () -> Unit,
+    nowProvider: () -> Long,
 ) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    val pullState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = isHistorySyncing,
+        onRefresh = { if (!isHistorySyncing) onManualRefresh?.invoke() },
+        state = pullState,
+        modifier = Modifier.fillMaxSize().semantics {
+            customActions = if (onManualRefresh != null && !isHistorySyncing) listOf(
+                CustomAccessibilityAction("Reload history") { onManualRefresh(); true }
+            ) else emptyList()
+        },
     ) {
-        Text(
-            "Airchive",
-            modifier = Modifier.semantics { heading() },
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        Text("Personal AC dashboard", style = MaterialTheme.typography.titleMedium)
-
-        ProductionConfiguredAcCard(
-            configuredDeviceId = coordinator.configuredDeviceId,
-            identity = (accessState as? OwnerAccessState.Authorized)?.device,
-        )
-
-        ProductionEnergySnapshotCard(history = history, nowEpochMillis = nowEpochMillis)
-
-        ProductionCollectorHealthCard(
-            health = history.collectorHealth,
-            nowEpochMillis = nowEpochMillis,
-        )
-
-        ProductionAccessCard(
-            coordinator = coordinator,
-            accessState = accessState,
-            onAccessChanged = onAccessChanged,
-        )
-
-        ProductionHistorySyncCard(
-            historySync = historySync,
-            isHistorySyncing = isHistorySyncing,
-            onManualRefresh = onManualRefresh,
-        )
-
-        SummaryCard("Device") {
-            Text("Open the configured AC's live state and profile-supported controls.")
-            Button(
-                onClick = onOpenDevice,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp),
-            ) {
-                Text("Open device")
-            }
+    Column(
+        modifier = Modifier.offset(y = (pullState.distanceFraction * 80).dp)
+            .widthIn(max = 1100.dp).fillMaxWidth().fillMaxHeight()
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Airchive", modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.headlineLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        if (accessState !is OwnerAccessState.Authorized) {
+            ProductionAccessCard(coordinator, accessState, onAccessChanged, nowProvider)
         }
-
-        SummaryCard("ThinQ control") {
-            val credentialVisible = accessState !is OwnerAccessState.SignedOut
+        key(history.partition) {
+            ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings,
+                nowProvider = nowProvider, temperatureDraft = temperatureDraft,
+                onTemperatureDraftChange = onTemperatureDraftChange)
+        }
+        Text(historySync.lastSuccessfulAgeMillis?.let { "History synced ${instrumentAge(it)} ago" }
+            ?: "History has not synced yet", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (isHistorySyncing || history.sync?.lastError != null || !historySync.hasCachedHistory) {
             Text(
-                if (credentialVisible) credentialState.productionCredentialStatus()
-                else "ThinQ credential status is hidden while signed out.",
-            )
-            if (credentialVisible && (!credentialState.present || credentialState.unlockFailed)) {
-                Button(onClick = onOpenSettings) { Text("Set up ThinQ PAT") }
-            }
+                if (isHistorySyncing && historySync.hasCachedHistory) {
+                    "Refreshing history… Cached observations remain available."
+                } else if (isHistorySyncing) {
+                    "Refreshing history… No history is cached yet."
+                }
+                else historySync.message,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
-
-        ownerAuthConfigurationMessage?.let { configurationMessage ->
-            SummaryCard("Firebase setup") {
-                Text(configurationMessage)
-            }
-        }
+        ownerAuthConfigurationMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
     }
 }
-
+}
 @Composable
 private fun ProductionConfiguredAcCard(
     configuredDeviceId: String,
     identity: DeviceIdentity?,
 ) {
     SummaryCard(productionConfiguredAcTitle()) {
-        Text(productionConfiguredAcTitle(), style = MaterialTheme.typography.titleMedium)
-        Text("Device ID: $configuredDeviceId")
+        InstrumentDetail("Device ID", configuredDeviceId)
         productionSampledIdentityLines(identity).forEach { line ->
-            Text(line, style = MaterialTheme.typography.bodyMedium)
+            InstrumentDetailLine(line)
         }
         if (identity == null) {
             Text(
@@ -580,9 +569,11 @@ private fun ProductionAccessCard(
     coordinator: ProductionHistoryCoordinator,
     accessState: OwnerAccessState,
     onAccessChanged: (OwnerAccessState) -> Unit,
+    nowProvider: () -> Long,
 ) {
     val scope = rememberCoroutineScope()
-    var busy by remember(coordinator) { mutableStateOf(false) }
+    val activeOwnerUid = coordinator.session.collectAsState().value?.uid
+    var busy by remember(coordinator, activeOwnerUid) { mutableStateOf(false) }
 
     fun runAction(action: suspend () -> OwnerAccessState) {
         scope.launch {
@@ -593,7 +584,7 @@ private fun ProductionAccessCard(
                 if (checked is OwnerAccessState.Authorized) {
                     // Only an explicit sign-in/access-retry action may bypass
                     // a recent failed bootstrap, never an automatic resume.
-                    coordinator.onAccessAuthorized(Clock.System.now().toEpochMilliseconds())
+                    coordinator.onAccessAuthorized(nowProvider())
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -622,14 +613,14 @@ private fun ProductionAccessCard(
             style = MaterialTheme.typography.bodyMedium,
         )
         when (accessState) {
-            OwnerAccessState.SignedOut -> Button(
+            OwnerAccessState.SignedOut -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.signIn() } },
             ) {
                 Text(if (busy) "Signing in…" else "Continue with Google")
             }
 
-            is OwnerAccessState.SignInFailed -> Button(
+            is OwnerAccessState.SignInFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.signIn() } },
             ) {
@@ -637,7 +628,7 @@ private fun ProductionAccessCard(
             }
 
             is OwnerAccessState.AccessPending,
-            is OwnerAccessState.AccessCheckFailed -> Button(
+            is OwnerAccessState.AccessCheckFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.retryHistoryAccess() } },
             ) {
@@ -685,7 +676,7 @@ private fun ProductionHistorySyncCard(
         )
         historySync.lastErrorAgeMillis?.let { Text("Last failed attempt: ${productionAgeLabel(it)} ago.") }
         onManualRefresh?.let { refresh ->
-            Button(
+            Button(shape = MaterialTheme.shapes.small,
                 enabled = !isHistorySyncing,
                 onClick = refresh,
                 modifier = Modifier.heightIn(min = 48.dp),
@@ -701,103 +692,69 @@ private fun ProductionHistorySyncCard(
 // -------------------------------------------------------------------------
 
 @Composable
-private fun ProductionDeviceRoute(
+fun ProductionDeviceRoute(
+    history: HistorySnapshot,
     configuredDeviceId: String,
     identity: DeviceIdentity?,
     thinQBindings: ProductionThinQBindings?,
     credentialState: ThinQCredentialState,
     onBackToHome: () -> Unit,
     onOpenSettings: () -> Unit,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    temperatureDraft: TemperatureDraft? = null,
+    onTemperatureDraftChange: (TemperatureDraft?) -> Unit = {},
 ) {
-    val scope = rememberCoroutineScope()
-    val device = if (thinQBindings != null) thinQBindings.device.collectAsState().value else null
-    val profile = if (thinQBindings != null) thinQBindings.profile.collectAsState().value else null
-
-    LaunchedEffect(thinQBindings, credentialState.present, credentialState.unlockFailed) {
-        if (credentialState.present && !credentialState.unlockFailed) {
-            try {
-                thinQBindings?.onDeviceOpened?.invoke()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // The graph and live-state controller expose only safe status.
+    // Read the publication first, then the active context key: a torn read can
+    // then only hide the card (key mismatch), never render a superseded
+    // context's device/profile under the active one (task 2.3).
+    val publication = thinQBindings?.deviceProfile?.collectAsState()?.value
+    val contextKey = thinQBindings?.contextKey?.collectAsState()?.value
+    InstrumentPage("Device", if (LocalInterfaceDetail.current == InterfaceDetail.DETAILED) "Live state and supported controls for your air conditioner." else null) {
+        ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession = true,
+            onEnergy = {}, onSettings = onOpenSettings, comfortOnly = true,
+            nowProvider = nowProvider,
+            temperatureDraft = temperatureDraft, onTemperatureDraftChange = onTemperatureDraftChange)
+        InstrumentPanel {
+            InstrumentDisclosure("Device details", "Identity, profile and last confirmed state", informational = true) {
+                ProductionConfiguredAcCard(configuredDeviceId, identity)
+                if (thinQBindings != null && publication != null && publication.profile != null &&
+                    deviceDetailsReady(publication, contextKey, credentialState)
+                ) {
+                    DeviceLiveStateCard(thinQBindings.liveStateController, publication.device, publication.profile,
+                        simulated = false, onRefresh = thinQBindings.refreshLiveState, readOnOpen = false)
+                }
             }
         }
-    }
-
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Device", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        ProductionConfiguredAcCard(configuredDeviceId = configuredDeviceId, identity = identity)
-
-        when {
-            thinQBindings == null -> SummaryCard("ThinQ controls unavailable") {
-                Text("The protected ThinQ adapter is not configured in this build.")
-            }
-
-            !credentialState.present || credentialState.unlockFailed -> SummaryCard("ThinQ setup required") {
-                Text(
-                    if (credentialState.unlockFailed) {
-                        "The saved ThinQ credential could not be unlocked. Verify and save it again in Settings."
-                    } else {
-                        "No ThinQ PAT is stored in protected app storage. Set it up from Settings; the token is verified before saving."
-                    },
-                )
-                Button(onClick = onOpenSettings) { Text("Open ThinQ settings") }
-            }
-
-            device == null || profile == null -> SummaryCard("ThinQ device profile unavailable") {
-                Text("The configured AC may be offline or its writable profile could not be verified. Controls remain unavailable.")
-                Button(
-                    onClick = { scope.launch { thinQBindings.onDeviceOpened() } },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("Retry live device read") }
-                Button(onClick = onOpenSettings) { Text("Review ThinQ credential") }
-            }
-
-            else -> {
-                DeviceLiveStateCard(
-                    controller = thinQBindings.liveStateController,
-                    device = device,
-                    profile = profile,
-                    simulated = false,
-                    onRefresh = thinQBindings.refreshLiveState,
-                    readOnOpen = false,
-                )
-                DeviceControlsCard(
-                    profile = profile,
-                    liveStateController = thinQBindings.liveStateController,
-                    commandController = thinQBindings.commandController,
-                    simulated = false,
-                    onCommandOutcome = thinQBindings.liveStateController::acceptCommandOutcome,
-                )
-            }
-        }
-
-        Button(
-            onClick = onBackToHome,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-        ) {
-            Text("Back to Home")
-        }
+        TextButton(shape = MaterialTheme.shapes.small, onClick = onBackToHome, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back to Home") }
     }
 }
+
+/**
+ * Device-details rendering fence (task 2.3): the live card only renders when
+ * its publication still belongs to the active lifecycle context, carries a
+ * verified profile, and the credential that produced it is still present and
+ * unlockable — so an absent or key-lost credential never presents an old
+ * reading as current. A superseded or cleared publication is hidden rather
+ * than rendered; opening the disclosure itself stays presentation-only
+ * (`readOnOpen=false` above).
+ */
+internal fun deviceDetailsReady(
+    publication: ThinQDeviceProfilePublication?,
+    currentKey: ThinQContextKey?,
+    credential: ThinQCredentialState,
+): Boolean = publication != null &&
+    publication.profile != null &&
+    credential.present &&
+    !credential.unlockFailed &&
+    currentKey != null &&
+    publication.contextKey == currentKey
 
 // -------------------------------------------------------------------------
 // Settings
 // -------------------------------------------------------------------------
 
 @Composable
-private fun ProductionSettingsRoute(
+fun ProductionSettingsRoute(
     accountController: ProductionAccountController,
     accessState: OwnerAccessState,
     session: OwnerSession?,
@@ -811,62 +768,46 @@ private fun ProductionSettingsRoute(
     thinQBindings: ProductionThinQBindings?,
     credentialState: ThinQCredentialState,
 ) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        SummaryCard("Settings") {
-            Text("Account, history access, sync, and local cache for this device.", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "Cached state is shown without automatic network work. History refresh is an explicit " +
-                    "action; ThinQ uses a separate protected PAT and live device reads.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-
-        ProductionAccountCard(
-            controller = accountController,
-            session = session,
-            history = history,
-            afterSettingsAction = afterSettingsAction,
-        )
-
-        thinQBindings?.let { bindings ->
-            ProductionThinQCredentialCard(
-                bindings = bindings,
-                credentialState = credentialState,
-                signedIn = session != null,
-            )
-        }
-
-        OwnerAccessStatusCard(ownerAccessState = accessState)
-
-        SyncStatusCard(
-            presentation = historySync,
-            sync = history.sync,
-            nowEpochMillis = nowEpochMillis,
-            onManualRefresh = onManualRefresh,
-            isHistorySyncing = isHistorySyncing,
-        )
-
-        if (partition != null) {
-            LocalDiagnosticsCard(
-                partition = partition,
-                history = history,
-                credentialState = credentialState,
-                credentialIsVisible = session != null,
-                thinQStatusLabel = credentialState.productionCredentialStatus(),
-                nowEpochMillis = nowEpochMillis,
-            )
-        } else {
-            SummaryCard("Local diagnostics · nonsecret") {
-                Text("Signed out: no local cache to inspect for another account.")
+    InstrumentPage("Settings") {
+        SettingsSection("Connections") {
+            ProductionAccountCard(accountController, session, afterSettingsAction)
+            if (thinQBindings != null) {
+                ProductionThinQCredentialCard(thinQBindings, credentialState, ownerUid = session?.uid)
+            } else SummaryCard("AC connection") {
+                Text("The protected ThinQ adapter is not configured in this build.")
             }
         }
+        SettingsSection("History") {
+            InstrumentDisclosure("History access", if (accessState is OwnerAccessState.Authorized)
+                "Access verified for this account" else "Review account access", initiallyExpanded = accessState !is OwnerAccessState.Authorized,
+                informational = true, alwaysShowSummary = true, status = historyAccessStatus(accessState)) {
+                // The row already names this section; repeating it as a heading inside only adds height.
+                OwnerAccessStatusCard(ownerAccessState = accessState, showHeading = false)
+            }
+            InstrumentDisclosure("History and storage",
+                historyStorageSummary(historySync.hasCachedHistory, history.observations.size, historySync.lastSuccessfulAgeMillis),
+                informational = true, alwaysShowSummary = true, showDivider = false,
+                status = historyStorageStatus(historySync.hasCachedHistory, hasSyncError = history.sync?.lastError != null)) {
+                SyncStatusCard(historySync, history.sync, nowEpochMillis, onManualRefresh, isHistorySyncing)
+                if (partition != null) {
+                    LocalDiagnosticsCard(partition, history, credentialState, credentialIsVisible = session != null,
+                        thinQStatusLabel = credentialState.productionCredentialStatus(), nowEpochMillis = nowEpochMillis)
+                } else SummaryCard("Local diagnostics · nonsecret") {
+                    Text("Signed out: no local cache to inspect for another account.")
+                }
+            }
+        }
+        SettingsSection("Preferences") { InterfaceDetailSelector() }
+    }
+}
+
+/** Section headings provide the grouping; rows carry the current value and disclose detail. */
+@Composable
+private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, modifier = Modifier.padding(horizontal = 4.dp).semantics { heading() },
+            style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        InstrumentPanel(content)
     }
 }
 
@@ -874,123 +815,243 @@ private fun ProductionSettingsRoute(
 private fun ProductionThinQCredentialCard(
     bindings: ProductionThinQBindings,
     credentialState: ThinQCredentialState,
-    signedIn: Boolean,
+    ownerUid: String?,
 ) {
     val scope = rememberCoroutineScope()
-    var busy by remember(bindings) { mutableStateOf(false) }
-    var replacing by remember(bindings) { mutableStateOf(false) }
-    var confirmingRemoval by remember(bindings) { mutableStateOf(false) }
-    var rawToken by remember(bindings) { mutableStateOf("") }
-    var country by remember(bindings) { mutableStateOf("PH") }
-    var feedback by remember(bindings) { mutableStateOf<String?>(null) }
+    val activeContextKey by bindings.contextKey.collectAsState()
+    val ownerContextReady = productionSetupOwnerReady(ownerUid, activeContextKey)
+    // PAT/country/form/confirmation state is ephemeral and belongs to exactly
+    // one owner+credential generation. It is neither saveable nor shared with a
+    // replacement owner. A same-owner verification failure leaves the context
+    // key unchanged, so the form remains available for a retry.
+    // Operation-busy state belongs to the owner/session lifetime, not the
+    // credential generation: a successful replacement/removal advances the
+    // key mid-operation but must not briefly re-enable another action before
+    // its result is published.
+    var busy by remember(bindings, activeContextKey.ownerUid, activeContextKey.projectId, activeContextKey.deviceId) {
+        mutableStateOf(false)
+    }
+    var replacing by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    var confirmingRemoval by remember(bindings, activeContextKey) { mutableStateOf(false) }
+    var rawToken by remember(bindings, activeContextKey) { mutableStateOf("") }
+    var country by remember(bindings, activeContextKey) { mutableStateOf("PH") }
+    var setupRequestId by remember(bindings) { mutableStateOf(0L) }
+    var setupJob by remember(bindings, activeContextKey) { mutableStateOf<Job?>(null) }
+    // Setup/removal feedback is scoped to the lifecycle context it was
+    // produced under (task 2.4): after any owner/credential transition the
+    // old attempt's message is hidden instead of being shown for the new
+    // context. A superseded attempt records no feedback at all.
+    // Preserve a valid successful same-owner feedback across that commit's
+    // credential-generation advance, but discard the bucket when the owner /
+    // project / device partition changes. Exact-generation rendering is still
+    // fenced by productionSetupFeedback below.
+    var feedbackFor by remember(
+        bindings,
+        activeContextKey.ownerUid,
+        activeContextKey.projectId,
+        activeContextKey.deviceId,
+    ) { mutableStateOf<Pair<ThinQContextKey, String>?>(null) }
+    val latestFeedbackFor by rememberUpdatedState(feedbackFor)
+
+    LaunchedEffect(bindings, activeContextKey) {
+        if (latestFeedbackFor?.first != activeContextKey) feedbackFor = null
+    }
 
     LaunchedEffect(credentialState.credential?.accountCountry, replacing) {
         if (!replacing) country = credentialState.credential?.accountCountry ?: "PH"
     }
 
-    SummaryCard("Settings · ThinQ credential") {
-        if (!signedIn) {
-            Text("Sign in with Google before setting up the separate ThinQ credential.")
-        } else {
-            Text(credentialState.productionCredentialStatus())
-            Text("LG client ID: ${credentialState.clientId}")
-            Text(
-                "The PAT is verified against the configured AC before it is stored in Android Keystore. " +
-                    "A successful read does not prove command authority.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            feedback?.let {
-                Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            }
-
-            if (!replacing) {
-                Button(enabled = !busy, onClick = { replacing = true }) {
-                    Text(if (credentialState.present || credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
+    Column(Modifier.fillMaxWidth()) {
+        val summary = when {
+            ownerUid == null -> "Sign in with Google to connect"
+            !ownerContextReady -> "Updating connection…"
+            credentialState.unlockFailed -> "Saved token needs attention"
+            credentialState.present -> "Token saved · ${credentialState.credential?.accountCountry ?: "country unknown"}"
+            else -> "No ThinQ token saved"
+        }
+        InstrumentDisclosure("AC connection", summary, informational = true, alwaysShowSummary = true,
+            showDivider = false, status = acConnectionStatus(ownerUid, ownerContextReady, credentialState)) {
+            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (ownerUid != null && ownerContextReady) {
+                    Text(credentialState.productionCredentialStatus(), style = MaterialTheme.typography.bodyMedium)
+                    InstrumentFact("LG client ID", credentialState.clientId)
+                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    // The action area below already tells a signed-out owner what to do; do not repeat it here.
+                    Text("The ThinQ token is stored separately from your Google sign-in, in this device's protected storage.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
-                OutlinedTextField(
-                    value = rawToken,
-                    onValueChange = { rawToken = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !busy,
-                    singleLine = true,
-                    label = { Text("ThinQ Personal Access Token") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                )
-                OutlinedTextField(
-                    value = country,
-                    onValueChange = { country = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !busy,
-                    singleLine = true,
-                    label = { Text("ThinQ account country") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                )
-                Button(
-                    enabled = !busy,
-                    onClick = {
-                        val submittedToken = rawToken
-                        rawToken = ""
-                        scope.launch {
-                            busy = true
-                            feedback = try {
-                                when (val result = bindings.setupCredential(submittedToken, country)) {
-                                    is ThinQCredentialSetupResult.Success -> {
-                                        replacing = false
-                                        "The configured AC and profile were verified; the PAT was saved in protected storage. " +
-                                            "LG may still require a control-capable PAT for commands."
-                                    }
-                                    is ThinQCredentialSetupResult.Failure -> result.productionFailureMessage()
-                                }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
-                            } finally {
-                                busy = false
+            }
+        }
+        // Keep active forms and warnings outside the detail disclosure: changing
+        // presentation mode must never dismiss input or hide required recovery.
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                ownerUid == null -> Text("Sign in with Google before setting up the separate ThinQ credential.")
+                !ownerContextReady -> Text("Updating the AC connection for the active account. Please wait.")
+                else -> {
+                    if (credentialState.unlockFailed) {
+                        Text(credentialState.productionCredentialStatus(), color = MaterialTheme.colorScheme.error)
+                    }
+
+                    productionSetupFeedback(feedbackFor, activeContextKey)?.let {
+                        Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+
+                    if (!replacing) {
+                        // Emphasis follows need: a missing or unreadable token is the call to action; replacing a
+                        // working one is occasional upkeep and stays visually quiet.
+                        if (credentialState.present && !credentialState.unlockFailed) {
+                            OutlinedButton(modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small,
+                                enabled = !busy, onClick = { replacing = true }) { Text("Replace ThinQ PAT") }
+                        } else {
+                            Button(modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { replacing = true }) {
+                                Text(if (credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
                             }
                         }
-                    },
-                ) {
-                    Text(if (busy) "Verifying and saving…" else "Verify and save securely")
-                }
-                TextButton(
-                    enabled = !busy,
-                    onClick = { rawToken = ""; replacing = false },
-                ) { Text("Cancel") }
-            }
+                    } else {
+                        OutlinedTextField(
+                            value = rawToken,
+                            onValueChange = { rawToken = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
+                            singleLine = true,
+                            label = { Text("ThinQ Personal Access Token") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        )
+                        OutlinedTextField(
+                            value = country,
+                            onValueChange = { country = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
+                            singleLine = true,
+                            label = { Text("ThinQ account country") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                        )
+                        Button(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            enabled = !busy,
+                            onClick = {
+                                val submittedToken = rawToken
+                                val submittedContextKey = bindings.contextKey.value
+                                val requestId = setupRequestId + 1L
+                                setupRequestId = requestId
+                                rawToken = ""
+                                feedbackFor = null
+                                busy = true
+                                val job = scope.launch(start = CoroutineStart.LAZY) {
+                                    try {
+                                        // Feedback is labeled ONLY by the outcome's
+                                        // own captured/result context key (task 2.4)
+                                        // — never by sampling the active key after
+                                        // the fact, so an invalidation landing
+                                        // between the result and this write can
+                                        // never attribute an old attempt's outcome
+                                        // to the new context.
+                                        val outcome = bindings.setupCredential(submittedToken, country)
+                                        val (nextFeedback, closeForm) = when (val result = outcome.result) {
+                                            is ThinQCredentialSetupResult.Success -> {
+                                                (outcome.contextKey to (
+                                                    "The configured AC and profile were verified; the PAT was saved in protected storage. " +
+                                                        "LG may still require a control-capable PAT for commands."
+                                                    )) to true
+                                            }
+                                            is ThinQCredentialSetupResult.Failure ->
+                                                (outcome.contextKey to result.productionFailureMessage()) to false
+                                            ThinQCredentialSetupResult.Superseded -> {
+                                                // The attempt was superseded (owner
+                                                // change, removal, a newer attempt or
+                                                // cancellation) — including a delayed
+                                                // verification failure: it saved
+                                                // nothing and must never surface
+                                                // stale feedback.
+                                                null to true
+                                            }
+                                        }
+                                        if (setupRequestId == requestId) {
+                                            feedbackFor = nextFeedback
+                                            if (closeForm) replacing = false
+                                        }
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        if (setupRequestId == requestId) {
+                                            feedbackFor = submittedContextKey to
+                                                "ThinQ verification or protected storage failed. Any previously saved PAT was kept."
+                                        }
+                                    } finally {
+                                        if (setupRequestId == requestId) {
+                                            busy = false
+                                            setupJob = null
+                                        }
+                                    }
+                                }
+                                setupJob = job
+                                job.start()
+                            },
+                        ) {
+                            Text(if (busy) "Verifying and saving…" else "Verify and save securely")
+                        }
+                        TextButton(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            onClick = {
+                                // Cancel the request coroutine itself: its coordinator
+                                // catches CancellationException and supersedes exactly
+                                // that attempt before it can reach the commit gate.
+                                setupRequestId += 1L
+                                setupJob?.cancel()
+                                setupJob = null
+                                busy = false
+                                rawToken = ""
+                                replacing = false
+                                feedbackFor = null
+                            },
+                        ) { Text("Cancel") }
+                    }
 
-            if (credentialState.present || credentialState.unlockFailed) {
-                TextButton(
-                    enabled = !busy,
-                    onClick = { confirmingRemoval = true },
-                ) { Text("Remove ThinQ PAT") }
+                    if (credentialState.present || credentialState.unlockFailed) {
+                        TextButton(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            enabled = !busy,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            onClick = { confirmingRemoval = true },
+                        ) { Text("Remove ThinQ PAT") }
+                    }
+                }
             }
         }
     }
 
-    if (confirmingRemoval) {
+    if (confirmingRemoval && ownerContextReady) {
         AlertDialog(
             onDismissRequest = { if (!busy) confirmingRemoval = false },
             title = { Text("Remove ThinQ PAT?", modifier = Modifier.semantics { heading() }) },
             text = { Text("This removes the protected ThinQ credential. Your Google session and cached Airchive history stay intact.") },
             confirmButton = {
-                Button(
+                Button(shape = MaterialTheme.shapes.small,
                     enabled = !busy,
                     onClick = {
+                        val submittedContextKey = activeContextKey
+                        feedbackFor = null
                         scope.launch {
                             busy = true
                             try {
-                                bindings.removeCredential()
+                                val outcome = bindings.removeCredential()
                                 rawToken = ""
                                 replacing = false
-                                feedback = "ThinQ PAT removed. Cached Airchive history was kept."
+                                feedbackFor = outcome.contextKey to if (outcome.removed) {
+                                    "ThinQ PAT removed. Cached Airchive history was kept."
+                                } else {
+                                    "The ThinQ PAT could not be removed. Your current session and cached history remain."
+                                }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                feedback = "The ThinQ PAT could not be removed. Your current session and cached history remain."
+                                feedbackFor = submittedContextKey to
+                                    "The ThinQ PAT could not be removed. Your current session and cached history remain."
                             } finally {
                                 busy = false
                                 confirmingRemoval = false
@@ -1000,25 +1061,53 @@ private fun ProductionThinQCredentialCard(
                 ) { Text("Remove") }
             },
             dismissButton = {
-                TextButton(enabled = !busy, onClick = { confirmingRemoval = false }) { Text("Cancel") }
+                TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { confirmingRemoval = false }) { Text("Cancel") }
             },
         )
     }
 }
 
+/**
+ * Setup-feedback fence (task 2.4): feedback recorded under one lifecycle
+ * context is only visible while that exact context is still active, so an old
+ * attempt's success/failure message can never be shown after an owner or
+ * credential transition. `null` feedback (no outcome, or a suppressed
+ * superseded attempt) renders nothing.
+ */
+internal fun productionSetupFeedback(
+    feedbackFor: Pair<ThinQContextKey, String>?,
+    activeContextKey: ThinQContextKey?,
+): String? = feedbackFor?.takeIf { it.first == activeContextKey }?.second
+
+/** A sensitive credential form is visible only after owner/lifecycle observers agree. */
+internal fun productionSetupOwnerReady(ownerUid: String?, activeContextKey: ThinQContextKey): Boolean =
+    ownerUid != null && ownerUid == activeContextKey.ownerUid
+
 @Composable
 private fun ProductionAccountCard(
     controller: ProductionAccountController,
     session: OwnerSession?,
-    history: HistorySnapshot,
     afterSettingsAction: suspend () -> Unit,
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
-    var busy by remember(controller) { mutableStateOf(false) }
+    var busy by remember(controller, session?.uid) { mutableStateOf(false) }
     var feedback by remember(controller) { mutableStateOf<String?>(null) }
+    var feedbackOwnerUid by remember(controller) { mutableStateOf<String?>(session?.uid) }
+    val latestFeedbackOwnerUid by rememberUpdatedState(feedbackOwnerUid)
+    // A controller can briefly retain the previous snapshot while the session
+    // observer is catching up. Never render a prior owner's destructive dialog
+    // during that frame; refresh() also clears the stale step at the source.
+    val visibleConfirmStep = state.confirmStep.takeIf { session != null && state.session?.uid == session.uid }
+        ?: ProductionAccountConfirmStep.NONE
 
-    LaunchedEffect(controller, session?.uid) { controller.refresh() }
+    LaunchedEffect(controller, session?.uid) {
+        controller.refresh()
+        if (latestFeedbackOwnerUid != session?.uid) {
+            feedback = null
+            feedbackOwnerUid = session?.uid
+        }
+    }
 
     fun launchAction(action: suspend () -> Unit) {
         scope.launch {
@@ -1030,52 +1119,36 @@ private fun ProductionAccountCard(
                 throw cancelled
             } catch (_: Exception) {
                 feedback = "The action could not be completed. Your saved data remains unchanged; retry when ready."
+                feedbackOwnerUid = controller.state.value.session?.uid
             } finally {
                 busy = false
             }
         }
     }
 
-    SummaryCard("Settings · account") {
-        Text(
-            session?.let { owner ->
-                "Google account: ${owner.displayName ?: owner.email ?: owner.uid} · UID ${owner.uid}"
-            } ?: "Google account: signed out",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-
-        history.sync?.let { sync ->
-            Text(
-                sync.lastSuccessfulSyncEpochMillis?.let { "Last successful history sync: ${sinceNowLabel(it)}." }
-                    ?: "No successful history sync yet.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    Column(Modifier.fillMaxWidth()) {
+        InstrumentDisclosure("Google account", session?.let { it.displayName ?: it.email ?: it.uid }
+            ?: "Google account: signed out", alwaysShowSummary = true, status = googleAccountStatus(session != null)) {
+            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
+                if (session != null) {
+                    InstrumentFact("Account UID", session.uid)
+                    SettingsActionRow("Switch Google account", enabled = !busy, onClick = controller::requestChangeAccount)
+                    SettingsActionRow("Clear local history cache", enabled = !busy, onClick = controller::requestClearCache)
+                    SettingsActionRow("Sign out of Google", enabled = !busy, destructive = true,
+                        onClick = controller::requestSignOut)
+                } else {
+                    Text("Sign in from the Home screen to load Airchive history for this device.",
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
-
-        feedback?.let { message ->
-            Text(
-                message,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-
-        if (session != null) {
-            Button(enabled = !busy, onClick = controller::requestChangeAccount) {
-                Text("Switch Google account")
-            }
-            Button(enabled = !busy, onClick = controller::requestClearCache) {
-                Text("Clear local history cache")
-            }
-            Button(enabled = !busy, onClick = controller::requestSignOut) {
-                Text("Sign out of Google")
-            }
-        } else {
-            Text("Sign in from the Home screen to load Airchive history for this device.")
+        feedback?.takeIf { feedbackOwnerUid == session?.uid }?.let { message ->
+            Text(message, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium)
         }
     }
 
-    when (state.confirmStep) {
+    when (visibleConfirmStep) {
         ProductionAccountConfirmStep.NONE -> Unit
         ProductionAccountConfirmStep.SIGN_OUT -> ProductionConfirmationDialog(
             title = "Sign out of Google?",
@@ -1085,6 +1158,7 @@ private fun ProductionAccountCard(
             onConfirm = {
                 launchAction {
                     feedback = controller.signOutConfirmed().productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )
@@ -1096,6 +1170,7 @@ private fun ProductionAccountCard(
             onConfirm = {
                 launchAction {
                     feedback = controller.changeAccountConfirmed().productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )
@@ -1110,9 +1185,36 @@ private fun ProductionAccountCard(
                     feedback = if (result is OwnerSettingsActionResult.Success) {
                         "This account's local history cache was cleared. Google sign-in is unchanged."
                     } else result.productionOutcomeMessage()
+                    feedbackOwnerUid = controller.state.value.session?.uid
                 }
             },
         )
+    }
+}
+
+/**
+ * One account action as an aligned, divided list row. A row that discards data or ends the session is
+ * tinted with the error role, so it is not mistaken for a neighbouring routine action.
+ */
+@Composable
+private fun SettingsActionRow(
+    label: String,
+    enabled: Boolean,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Text(label, Modifier.weight(1f), textAlign = TextAlign.Start)
     }
 }
 
@@ -1129,10 +1231,10 @@ private fun ProductionConfirmationDialog(
         title = { Text(title, modifier = Modifier.semantics { heading() }) },
         text = { Text(message) },
         confirmButton = {
-            Button(enabled = !busy, onClick = onConfirm) { Text("Confirm") }
+            Button(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = onConfirm) { Text("Confirm") }
         },
         dismissButton = {
-            TextButton(enabled = !busy, onClick = onCancel) { Text("Cancel") }
+            TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = onCancel) { Text("Cancel") }
         },
     )
 }
@@ -1218,7 +1320,7 @@ private fun OwnerSettingsActionResult.productionOutcomeMessage(): String = when 
     }
 }
 
-private fun ThinQCredentialState.productionCredentialStatus(): String = when {
+internal fun ThinQCredentialState.productionCredentialStatus(): String = when {
     unlockFailed -> "Saved ThinQ PAT could not be unlocked. Verify and save it again."
     present -> "ThinQ PAT saved: ${credential?.maskedToken ?: "••••"} · country ${credential?.accountCountry ?: "unknown"}."
     else -> "No ThinQ PAT is saved in the app's protected storage."
@@ -1268,14 +1370,9 @@ private fun String.productionBoundLabel(maxChars: Int = 120): String {
     return if (flattened.length <= maxChars) flattened else flattened.take(maxChars - 1) + "…"
 }
 
-private fun productionAgeLabel(ageMillis: Long): String = when {
+internal fun productionAgeLabel(ageMillis: Long): String = when {
     ageMillis < 60_000L -> "less than a minute"
-    ageMillis < 60 * 60_000L -> "${ageMillis / 60_000L} minutes"
-    ageMillis < 24 * 60 * 60_000L -> "${ageMillis / (60 * 60_000L)} hours"
-    else -> "${ageMillis / (24 * 60 * 60_000L)} days"
-}
-
-private fun sinceNowLabel(epochMillis: Long): String {
-    val age = (Clock.System.now().toEpochMilliseconds() - epochMillis).coerceAtLeast(0L)
-    return "${productionAgeLabel(age)} ago"
+    ageMillis < 60 * 60_000L -> countLabel((ageMillis / 60_000L).toInt(), "minute")
+    ageMillis < 24 * 60 * 60_000L -> countLabel((ageMillis / (60 * 60_000L)).toInt(), "hour")
+    else -> countLabel((ageMillis / (24 * 60 * 60_000L)).toInt(), "day")
 }

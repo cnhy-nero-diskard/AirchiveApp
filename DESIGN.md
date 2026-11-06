@@ -1,0 +1,225 @@
+---
+name: Airchive Home Instrument
+description: A precise personal instrument for one AC, giving comfort and recorded energy equal prominence.
+colors:
+  cobalt: "#315EAA"
+  on-cobalt: "#FFFFFF"
+  cobalt-container: "#E2EBFA"
+  on-cobalt-container: "#16396F"
+  slate-secondary: "#53666F"
+  slate-container: "#E5ECF0"
+  porcelain-ground: "#F1F4F5"
+  porcelain-panel: "#FFFFFF"
+  slate-ink: "#202D34"
+  quiet-surface: "#E8EEF2"
+  slate-outline: "#71838E"
+  quiet-rule: "#D4DDE3"
+  coverage-amber: "#8C4B00"
+  coverage-wash: "#FFF4E4"
+  dark-cobalt: "#ABC7FF"
+  dark-on-cobalt: "#092A60"
+  dark-cobalt-container: "#244675"
+  dark-on-cobalt-container: "#D9E6FF"
+  dark-slate-secondary: "#B4C3CD"
+  dark-ground: "#111A21"
+  dark-panel: "#1A252D"
+  dark-ink: "#E6EDF2"
+  dark-quiet-surface: "#2C3D49"
+  dark-outline: "#8C9CA7"
+  dark-quiet-rule: "#40515D"
+  dark-coverage-amber: "#F2BE71"
+  dark-coverage-wash: "#3D2E18"
+typography:
+  reading:
+    fontFamily: "Android system sans-serif (Roboto-compatible); Compose FontFamily.SansSerif"
+    fontSize: "76sp"
+    fontWeight: 600
+    lineHeight: "82sp"
+    letterSpacing: "-1sp"
+    fontFeature: "tnum"
+rounded:
+  coverage: "8dp"
+  small: "12dp"
+  medium: "16dp"
+  large: "20dp"
+spacing:
+  chart-gap: "4dp"
+  compact: "8dp"
+  related: "12dp"
+  screen-inline: "16dp"
+  panel-inline: "20dp"
+  secondary-screen-inline: "24dp (legacy demo only; production routes use screen-inline 16dp)"
+components:
+  shared-panel:
+    backgroundColor: "{colors.porcelain-panel}"
+    textColor: "{colors.slate-ink}"
+    rounded: "{rounded.large}"
+    padding: "16dp 20dp"
+  temperature-step:
+    rounded: "{rounded.small}"
+    size: "48dp"
+  choice-row:
+    textColor: "{colors.slate-ink}"
+    padding: "0dp"
+    height: "48dp minimum"
+  coverage-incomplete:
+    backgroundColor: "{colors.coverage-wash}"
+    textColor: "{colors.coverage-amber}"
+    rounded: "{rounded.coverage}"
+    padding: "6dp 10dp"
+  coverage-complete:
+    backgroundColor: "{colors.quiet-surface}"
+    textColor: "{colors.slate-secondary}"
+    rounded: "{rounded.coverage}"
+    padding: "6dp 10dp"
+  navigation:
+    backgroundColor: "{colors.porcelain-panel}"
+  instrument-reading:
+    typography: "{typography.reading}"
+---
+
+# Design System: Airchive
+
+## Overview
+
+**Creative North Star: "Home Instrument"**
+
+Airchive is a precise personal instrument for one AC. Porcelain surfaces, slate text and restrained cobalt make live comfort controls and recorded energy equally legible. The owner selected the Shared Instrument Home layout: paired readings live within one quiet panel, with familiar native controls and clear measurement labels.
+
+This document records the implemented Android Compose system, not a web translation. Layout uses density-independent `dp`; type uses scalable `sp`. The frontmatter records explicit source tokens; uncustomized Material typography, component states and unspecified color roles remain library defaults. Light and dark schemes are implemented. `AirchiveTheme` wraps all five production destinations and configuration-blocked states; the legacy `AirchiveApp` demo still uses default Material schemes. Production Home, Device, Energy, History, and Settings use the shared instrument page/panel/disclosure composition.
+
+**Key Characteristics:**
+
+- Equal comfort and energy readings.
+- Flat native surfaces and quiet structural rules.
+- Cobalt actions, slate context and explicit coverage status.
+- Native controls, scalable text and honest data states.
+
+Evidence: `AirchiveTheme.kt`, `HomeInstrument.kt`, `ProductionAirchiveApp.kt`, `AirchiveApp.kt`, and the historical emulator captures in `.impeccable/review/`. Those captures are evidence only; no concept image or screenshot ships as UI. `.impeccable/review/final-verification.md` records the historical Home-scored revision (313 shared tests, scoped builds/lint, and six findings resolved within that scored scope); it is not current lifecycle acceptance. The current delivery evidence is revision-linked in `docs/verification/shared-instrument/verification.md`. The historical automated pixel gate remains failed/open at exactly 74.69% with hard region/missing classifications; this system is not certified pixel-perfect. Physical-phone signed-in acceptance, landscape, and maximum system text scale remain outside the current native scope unless separately recorded there.
+
+## Colors
+
+The palette uses porcelain and slate as the reading field, cobalt for active meaning, with neutral coverage explanations in the chart and disclosure details. Frontmatter values are authoritative; the native role mapping below explains their application.
+
+### Primary
+
+- **Restrained Cobalt** (`cobalt`): Material `primary` and `surfaceTint`; the panel's slim index band, active actions, selector cues and recorded-energy bars. `on-cobalt`, `cobalt-container` and `on-cobalt-container` supply the corresponding Material contrast roles.
+- **Dark Cobalt** (`dark-cobalt`): the lighter primary in dark mode, paired with `dark-on-cobalt` and its container/on-container roles.
+
+### Secondary
+
+- **Slate Secondary** (`slate-secondary`): Material `secondary` and `onSurfaceVariant`, used for contextual labels, units and freshness. `slate-container` is `secondaryContainer`, with slate ink as its foreground; `onSecondary` is white.
+- **Dark Slate Secondary** (`dark-slate-secondary`): the dark equivalent. Its container is `dark-quiet-surface`, its foreground is `dark-ink`, and `onSecondary` is `dark-panel`.
+
+### Tertiary
+
+- **Coverage Amber / Coverage Wash** (`coverage-amber`, `coverage-wash`): retained Material tertiary roles; Home and the Energy summary no longer render a coverage badge.
+- **Dark Coverage Amber / Wash**: the corresponding dark roles retain a readable warning label without turning the whole panel into an alert.
+
+### Neutral
+
+- **Porcelain Ground**: `background` and `surfaceContainer`.
+- **Porcelain Panel**: `surface` and `surfaceContainerLow`; also the navigation background.
+- **Slate Ink**: `onBackground`, `onSurface` and `onSecondaryContainer`.
+- **Quiet Surface**: `surfaceVariant` and `surfaceContainerHighest`; complete coverage uses it with slate contextual text.
+- **Slate Outline / Quiet Rule**: `outline` and `outlineVariant`; quiet rules separate reading and control groups.
+- **Dark Ground / Panel / Ink**: the equivalent dark backgrounds, surfaces and foregrounds. `dark-quiet-surface` also supplies dark `surfaceVariant`, `surfaceContainerHighest` and `secondaryContainer`; dark outline tokens keep divisions visible.
+
+**The Semantic Color Rule.** Resolve colors through Material roles so the same hierarchy survives light, dark, disabled and selected states; never use color as the only indication of status.
+
+## Typography
+
+**Display and body family:** native system sans-serif, Roboto-compatible on Android. The reading explicitly uses Compose `FontFamily.SansSerif`; ordinary UI uses the unmodified Material `Typography()` scale. No custom font asset or separate mono face is installed.
+
+The character is clear, compact and instrument-like. The signature reading is the single custom style in the frontmatter: semibold, tabular figures with tight tracking. Units and explanations sit below or beside the number as real text, not baked-in graphics.
+
+### Hierarchy
+
+- **Reading:** `InstrumentReading`, shared by set temperature and current-hour energy. Tabular figures stabilize comparison as values change.
+- **Headline:** Material `headlineLarge` with a semibold override for the production Home title; other route headings retain their own Material roles.
+- **Title:** Material `titleLarge` with a semibold override for the device name and “Today’s record”; `titleSmall` for Temperature and finalized energy; `titleMedium` for reading units.
+- **Body:** `bodyMedium` for readout labels and setup guidance; `bodySmall` for device/sample/sync age, measurement context and command outcomes.
+- **Label:** Material label roles for controls, navigation, coverage and chart values. Chart values use `labelSmall` and one line; no special uppercase or eyebrow system is introduced.
+
+**The Reading Rule.** Temperature and energy retain large tabular figures. The thermostat has its own full-width field on phones; the two fields can share a row only with at least 600dp inside the panel and standard text scale.
+
+## Layout
+
+Production Home is a vertically scrollable column, centered with a maximum width of 640dp, horizontal padding of 16dp, vertical padding of 12dp and 12dp between major children. The Scaffold reserves space for the persistent native bottom navigation. The compact header precedes the grouped panel; separate history-sync context follows it. Access/setup guidance appears when the actual state requires it.
+
+The panel uses 20dp horizontal and 16dp vertical padding with 8dp vertical spacing. Its 3dp cobalt index band follows the clipped panel edge. The device header and power sit above a centered thermostat with a profile-scaled arc, tick marks and a selected-target marker. The large target and the separate room sensor reading sit inside the arc; 48dp minus/plus controls sit at its open base. Energy, separate mode/fan rows, recorded-energy chart, freshness and, when present, yesterday's finalized LG total follow.
+
+**The Stack Before Shrink Rule.** Available panel width below 600dp or font scale above 1.2 stacks the thermostat and energy fields. The thermostat grows with text rather than imposing a fixed height; native navigation stays outside the scroll container.
+
+Production secondary routes use the shared `InstrumentPage` maximum of 640dp, 16dp horizontal/12dp vertical page padding and 12dp major-child rhythm. History uses the same 16dp horizontal gutter with a virtualized `LazyColumn`; instrument panels retain their 20dp horizontal inset and 16dp vertical padding. The 24dp/20dp/16dp secondary-screen token is legacy-demo-only, not the production route layout. No new tablet composition is documented.
+
+## Elevation & Depth
+
+The signature Home panel is flat: a clipped background, tonal contrast, index band and thin rules supply structure; it has no explicit shadow or elevation. Native Material menus, dialogs, buttons, cards and navigation retain their library state/elevation behavior where not overridden. There is no custom shadow or animation vocabulary to export. The time-age label updates locally; it does not create continuous device polling. No decorative motion is added.
+
+**The Flat Panel Rule.** Keep Home's grouped instrument structure legible through surface roles and dividers; do not add a bespoke shadow to recreate preview pixels.
+
+## Shapes
+
+Shared theme shapes are gently rounded: small controls use the small token, medium is available to Material consumers, and the Home panel uses large. Coverage badges use their own smaller radius. The control step buttons are square touch areas with rounded corners, while the real Material power switch and navigation indicator retain their native silhouettes. Quiet row dividers and the vertical readout rule are structural, not a decorative card grid.
+
+## Components
+
+### Shared instrument and readings
+
+One grouped native surface holds comfort and energy. Labels, numbers and units are semantic text; each reading merges its descendants for accessibility. Device name and record title are headings. Missing numeric values render an em dash. The editable setpoint places its temperature unit beside the number. “Room temperature” appears within the thermostat below the setpoint and displays ThinQ’s currentTemperature in the profile’s sensor unit. Missing readings stay unavailable; retained readings use “Last room temperature” wording. The sensor remains independent of the editable target and shares the device-read freshness timestamp. The redundant observed-target section is removed.
+
+### Buttons and temperature controls
+
+Minus/plus are 48dp tonal icon buttons with simple Canvas strokes and explicit accessibility labels. They update the target immediately and send the final supported value after one second without another step. A new step restarts the timer; returning to the observed value cancels it. Pending sends cancel on navigation, owner/credential changes, profile changes, refresh, or loss of control readiness. Restored drafts never arm a send. A matching device observation clears the confirmed draft so later external setpoint changes remain visible in the single readout. Once dispatched, the graph-owned command completes independently of navigation, with no automatic retry on failed or ambiguous outcomes. There is no Apply button. Step boundaries and units follow the verified profile; native disabled/ripple/focus behavior remains in effect.
+
+Text buttons handle Energy, device-state retry, setup and history refresh. Native power is a real Switch with readable On/Off/Unknown context and an “AC power” description. Unsupported, stale, unverified or sending states disable commands; ambiguous outcomes never trigger automatic resend.
+
+### Mode and fan selectors
+
+Each is a full-width native text-button row with a minimum 48dp height, no content padding, a quiet top divider, left-aligned field name, current value and right chevron. The DropdownMenu lists profile-supported options; the current entry is identified and disabled. Controls do not fabricate writable modes or fan settings.
+
+### Coverage status and energy chart
+
+Home and the Energy summary omit the yellow coverage badge. The chart explains outlined bars with “Data might be inaccurate or incomplete during this hour.” Exact sample counts, anomalous readings, unknown units and query coverage remain available in selection and disclosure details. Missing hours stay blank and are never rendered as zero.
+
+Home’s “Daily Cumulative Usage” section and Energy’s Day view share an hourly chart. Every local day retains 24 equal-width hour slots within the viewport, with no horizontal scrolling. Each graph has a bordered surface, a fixed 0–1 kWh y-axis in 0.2 kWh increments, and x-axis markers at midnight (moon), 6 AM, noon (sun), and 6 PM. Five-minute intervals are summed within each hour; slim cobalt bars with rounded tops indicate fully measured hours and outlined bars with the same shape indicate partial hours. Missing and future readings leave blank slots, while recorded zero retains a baseline mark. Values above 1 kWh are visually capped with an explanation and remain exact in selection details.
+
+Tapping a thin bar overlays a vertical cobalt line and updates a separate rectangular surface below the graph. Its left side shows the AM/PM hour range, including correct noon and midnight transitions; the right shows energy in kWh or explicit unavailable/future status. Sample coverage and anomaly/unknown-unit counts remain available. Each hour exposes a button description and selected-state announcement for accessibility. Home labels its current-hour sum “Current power consumption as of h:mm AM/PM”, with the AC’s current Manila time and kWh beside the value. The requested label still represents recorded interval energy, not an instantaneous watt measurement. “Today's net consumption” uses a prominent cobalt heading and daily kWh subtotal without a partial suffix. Finalized LG totals remain separately labeled. Day boundaries use Asia/Manila.
+
+### Navigation
+
+Native Material NavigationBar presents Home, Device, Energy, History and Settings with visible text and Canvas destination glyphs. Selected state uses Material roles/indicator. The bar sits outside Home's scroll container and respects Scaffold/system insets; it is not an image overlay.
+
+### Interface detail and disclosures
+
+Settings groups compact status rows under Connections, History and Preferences. Google account shows the active account and expands to account actions; AC connection shows credential presence and expands to protected-storage details. Status summaries remain visible in both interface modes, and each row leads with a 22dp Canvas status mark whose shape differs by state (check in cobalt for healthy, exclamation on a filled error disc for needs-attention, dash in outline for not-applicable or signed-out); the mark is hidden from accessibility because the row's summary text states the same condition, and it never changes the row's expanded/collapsed semantics. A saved, readable ThinQ token is healthy, a missing or unreadable one needs attention, and History and storage summarizes the cached observation count with the age of the last successful sync. The filled primary button is reserved for a missing or unreadable token; replacing a working one is an outlined button. Expanded detail ranks below its row: section labels inside a disclosure (Sync status, Local diagnostics · nonsecret, Collector health) are `labelLarge` in the primary role, never larger than the row title, and a row title is not repeated as a heading inside its own detail. Reference data is a compact label/value fact line that is announced as one item; a short value sits at the line end and a long one (identifiers, timestamps, large text) drops under its label at the start edge rather than wrapping in a narrow column. Expanded blocks are flush and borderless because the row supplies the divider, so no two dividers stack. Account actions are a divided list of aligned 48dp text rows, and the one that ends the session or discards data (sign-out, Remove ThinQ PAT) uses the error role. The credential form's primary and cancel buttons span the field width. Ages use singular units ("1 minute ago"). Credential setup/replacement, unlock recovery, active forms, feedback and confirmation dialogs sit outside resetting disclosures. History owns sync timestamps and diagnostics so the account row does not repeat sync information. Preferences contains the interface-detail selector.
+
+Settings exposes Simple and Detailed through 48dp-minimum native FilterChips. Simple is the default for absent or unrecognized stored values; the Android choice is an installation-wide nonsecret preference, independent of account/history/credential state. Selection changes presentation immediately and does not trigger reads or commands.
+
+Informational disclosures are collapsed in Simple and expanded in Detailed; action sections, including the Google account row, stay collapsed in both modes. Mode changes reset manual overrides to those defaults. State-required recovery sections such as unverified History access override the normal default and stay expanded across mode changes while remaining manually controllable. Disclosure rows have a 56dp minimum height. Keep their expanded/collapsed semantics aligned with actual visible descendants, and keep PAT forms/confirmation dialogs independently placed so a disclosure reset does not discard active input or dialog state.
+
+### Existing cards and fields
+
+Secondary and access/setup surfaces use native Material cards, buttons, outlined text fields and dialogs within the shared production route composition. `SummaryCard` retains 20dp internal padding and 8dp child spacing. Existing credential fields remain labeled, single-line native fields with password transformation where appropriate; focus, error and disabled treatments are library-owned. No custom field radius is introduced.
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** keep comfort and energy readings prominent and apply the native stacking rule.
+- **Do** preserve scalable text, readable status text, native semantics and at least 48dp interactive targets.
+- **Do** distinguish live device age, latest usable sample age and history-sync age wherever they affect a decision.
+- **Do** show gaps, partial coverage, source and units honestly; keep sampled sums separate from finalized totals.
+- **Do** preserve local temperature drafts, the one-second idle send delay and supported/current-state command gating.
+- **Do** reuse production Material roles in both implemented themes and keep native control states visible.
+- **Do** preserve Simple/Detailed essential-content parity, presentation-only selection, and the informational/action/recovery disclosure rules.
+
+### Don't:
+
+- **Don't** ship preview rasters as controls, charts, backgrounds or production data.
+- **Don't** infer room temperature, humidity, cost, savings, automation or unsupported writable capabilities.
+- **Don't** turn unavailable measurements into zero or sampled energy into instantaneous power.
+- **Don't** disguise disabled controls or uncertain command outcomes to match a generated comp.
+- **Don't** treat the legacy demo as the production route shell or add automatic reads merely because presentation detail changed.
+- **Don't** describe the open failed pixel gate as passed or the implementation as pixel-perfect; retain its exact historical 74.69% attribution.

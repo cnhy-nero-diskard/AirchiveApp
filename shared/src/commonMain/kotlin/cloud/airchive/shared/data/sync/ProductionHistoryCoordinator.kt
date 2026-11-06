@@ -39,7 +39,7 @@ import kotlinx.coroutines.sync.withLock
  *    for the same owner.
  *  - **Open/resume policy.** [onForeground] bootstraps the initial 24-hour +
  *    up-to-30 daily-total window once (via [FirstLoadSyncCoordinator]) and then
- *    delegates to the ten-minute [ForegroundRefreshController] gate.
+ *    delegates to the five-minute [ForegroundRefreshController] gate.
  *    [onManualRefresh] always attempts work and bypasses the age gate.
  *  - **No ThinQ coupling.** History loading never requires a ThinQ credential;
  *    the ac command stack is intentionally not constructed here (all ThinQ
@@ -123,7 +123,7 @@ class ProductionHistoryCoordinator(
 
     /**
      * App-open/resume entry point. Bootstraps the initial window when nothing
-     * is covered yet (deferring a recent failed attempt for the same ten-minute
+     * is covered yet (deferring a recent failed attempt for the same five-minute
      * cadence as the incremental gate), otherwise runs the incremental
      * [ForegroundRefreshController] gate.
      */

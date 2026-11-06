@@ -1,0 +1,7 @@
+interface:
+  display_name: "Make PR"
+  short_description: "Create template-compliant pull requests"
+  default_prompt: "Use $make-pr to create a pull request from the current branch using the repository's PR template."
+
+policy:
+  allow_implicit_invocation: true

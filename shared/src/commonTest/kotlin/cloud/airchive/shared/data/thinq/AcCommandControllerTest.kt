@@ -17,6 +17,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
@@ -74,6 +76,27 @@ class AcCommandControllerTest {
     fun initialStateIsIdle() = runBlocking {
         val controller = controller(ScriptedCommandPort())
         assertEquals(AcCommandUiState.Idle, controller.state.value)
+    }
+
+    @Test
+    fun confirmationEventsAreOnceOnlyAndNeverReplayedForOtherOutcomes() = runBlocking {
+        val port = ScriptedCommandPort().also {
+            it.enqueue(outcome(status = CommandStatus.ACCEPTED))
+            it.enqueue(outcome(status = CommandStatus.UNCONFIRMED))
+            it.enqueue(outcome(status = CommandStatus.CONFIRMED))
+            it.enqueue(outcome(status = CommandStatus.CONFIRMED))
+        }
+        val controller = controller(port)
+        var count = 0
+        val observer = launch(start = CoroutineStart.UNDISPATCHED) { controller.confirmations.collect { count++ } }
+        repeat(4) { controller.submit(powerOn()); yield() }
+        assertEquals(2, count)
+        observer.cancel()
+        var replayed = false
+        val next = launch(start = CoroutineStart.UNDISPATCHED) { controller.confirmations.collect { replayed = true } }
+        yield()
+        assertFalse(replayed)
+        next.cancel()
     }
 
     // ------------------------------------------- Sending published before call

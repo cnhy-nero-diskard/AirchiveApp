@@ -10,6 +10,8 @@ import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -60,6 +62,63 @@ class ProductionAccountControllerTest {
     }
 
     @Test
+    fun confirmedOwnerTransitionInvalidatesThinQBeforeClearingHistoryCredentialOrIdentity() = runBlocking {
+        val events = mutableListOf<String>()
+        val delegateIdentity = FakeOwnerIdentity(fixedSession = owner)
+        delegateIdentity.signIn()
+        val identity = object : OwnerIdentityPort by delegateIdentity {
+            override suspend fun signOut() {
+                events += "identity-sign-out"
+                delegateIdentity.signOut()
+            }
+        }
+        val delegateLocal = FakeLocalHistory()
+        val local = object : LocalHistoryPort by delegateLocal {
+            override suspend fun clear(partition: HistoryPartition) {
+                events += "history-clear"
+                delegateLocal.clear(partition)
+            }
+        }
+        val delegateCredentialStore = FakeThinQCredentialStore().also { it.save("fixture-token", "PH") }
+        val credentialStore = object : ThinQCredentialStore by delegateCredentialStore {
+            override suspend fun clear() {
+                events += "credential-clear"
+                delegateCredentialStore.clear()
+            }
+        }
+        val controller = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = credentialStore,
+            beforeOwnerTransition = {
+                events += "context-invalidate"
+                assertNotNull(identity.currentSession, "the old owner is still active at invalidation")
+                assertEquals("fixture-token", credentialStore.readToken(), "the PAT is still present at invalidation")
+            },
+            afterOwnerTransition = { session ->
+                events += "context-rebind:${session?.uid ?: "signed-out"}"
+            },
+        )
+
+        controller.requestSignOut()
+        assertIs<OwnerSettingsActionResult.Success>(controller.signOutConfirmed())
+
+        assertEquals(
+            listOf(
+                "context-invalidate",
+                "history-clear",
+                "credential-clear",
+                "identity-sign-out",
+                "context-rebind:signed-out",
+            ),
+            events,
+            "old ThinQ presentation is invalidated before any owner data/session transition",
+        )
+    }
+
+    @Test
     fun signOutRequiresExplicitConfirmation(): Unit = runBlocking {
         val identity = FakeOwnerIdentity(fixedSession = owner)
         identity.signIn()
@@ -81,6 +140,72 @@ class ProductionAccountControllerTest {
         identity.signOut()
         assertFailsWith<IllegalStateException> { controller.clearCacheConfirmed() }
         assertTrue(local.clearedPartitions.isEmpty())
+    }
+
+    @Test
+    fun refreshClearsConfirmationAndFeedbackWhenTheOwnerChangesExternally() = runBlocking {
+        val otherOwner = OwnerSession(
+            uid = "owner-uid-2",
+            displayName = "Owner Two",
+            email = "owner2@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 1L,
+        )
+        val identity = SwitchingIdentity(owner, otherOwner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestClearCache()
+        assertEquals(ProductionAccountConfirmStep.CLEAR_CACHE, controller.state.value.confirmStep)
+
+        identity.signOut()
+        identity.signIn()
+        controller.refresh()
+
+        assertEquals(otherOwner, controller.state.value.session)
+        assertEquals(
+            ProductionAccountConfirmStep.NONE,
+            controller.state.value.confirmStep,
+            "a confirmation opened by the previous owner cannot survive an external account switch",
+        )
+        assertNull(controller.state.value.lastActionResult, "prior-owner action feedback is cleared too")
+        assertTrue(identity.currentSession == otherOwner)
+    }
+
+    @Test
+    fun refreshClearsCompletedPriorOwnerActionFeedbackAfterAnExternalSwitch() = runBlocking {
+        val otherOwner = OwnerSession(
+            uid = "owner-uid-3",
+            displayName = "Owner Three",
+            email = "owner3@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 2L,
+        )
+        val identity = SwitchingIdentity(owner, otherOwner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestClearCache()
+        assertIs<OwnerSettingsActionResult.Success>(controller.clearCacheConfirmed())
+        assertNotNull(controller.state.value.lastActionResult)
+
+        identity.signOut()
+        identity.signIn()
+        controller.refresh()
+
+        assertEquals(otherOwner, controller.state.value.session)
+        assertNull(
+            controller.state.value.lastActionResult,
+            "completed feedback from an unrelated prior owner is removed when the owner partition changes",
+        )
+    }
+
+    @Test
+    fun refreshClearsAConfirmationRequestedWithoutAnOwner() = runBlocking {
+        val identity = FakeOwnerIdentity(fixedSession = owner)
+        val controller = ProductionAccountController(identity, RecordingLocalHistory(), project, device)
+        controller.requestSignOut()
+        assertEquals(ProductionAccountConfirmStep.SIGN_OUT, controller.state.value.confirmStep)
+
+        controller.refresh()
+
+        assertEquals(ProductionAccountConfirmStep.NONE, controller.state.value.confirmStep,
+            "a destructive confirmation without an owner is never shown to a later account")
+        assertNull(controller.state.value.session)
     }
 
     @Test
@@ -242,5 +367,19 @@ class ProductionAccountControllerTest {
         override suspend fun signOut() {
             current = null
         }
+    }
+
+    private class SwitchingIdentity(
+        initial: OwnerSession,
+        private val next: OwnerSession,
+    ) : OwnerIdentityPort {
+        private val session = MutableStateFlow<OwnerSession?>(initial)
+        override val currentSession: OwnerSession? get() = session.value
+        override fun observeSession(): Flow<OwnerSession?> = session.asStateFlow()
+        override suspend fun signIn(): SignInResult {
+            session.value = next
+            return SignInResult.Success(next)
+        }
+        override suspend fun signOut() { session.value = null }
     }
 }

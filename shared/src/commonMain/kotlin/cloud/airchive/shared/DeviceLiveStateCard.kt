@@ -56,7 +56,7 @@ fun DeviceLiveStateCard(
         }
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -77,11 +77,11 @@ fun DeviceLiveStateCard(
                 ThinQLiveRefreshState.NotRead -> Unit
                 is ThinQLiveRefreshState.Loading -> snapshot.previous?.lastKnownState()?.let { previous ->
                     Text("Last successful ${if (simulated) "simulated" else "LG"} read (old): ${previous.readAtLabel()} UTC.")
-                    Text(previous.summary(profile.controls.temperatureUnit))
+                    LiveStateDetails(previous, profile.controls.temperatureUnit)
                 }
                 is ThinQLiveRefreshState.Current -> {
                     Text("${if (simulated) "Simulated read time" else "LG read time"}: ${snapshot.state.readAtLabel()} UTC.")
-                    Text(snapshot.state.summary(profile.controls.temperatureUnit))
+                    LiveStateDetails(snapshot.state, profile.controls.temperatureUnit)
                     Text("This timestamp is independent from the Airchive history sync time.")
                     if (!snapshot.canIssueCommands) {
                         Text("Controls remain disabled until a verified device profile is available.")
@@ -89,7 +89,7 @@ fun DeviceLiveStateCard(
                 }
                 is ThinQLiveRefreshState.Stale -> {
                     Text("Last successful ${if (simulated) "simulated" else "LG"} read (old): ${snapshot.lastKnownState.readAtLabel()} UTC.")
-                    Text(snapshot.lastKnownState.summary(profile.controls.temperatureUnit))
+                    LiveStateDetails(snapshot.lastKnownState, profile.controls.temperatureUnit)
                     Text("Refresh attempt: ${Instant.fromEpochMilliseconds(snapshot.failedAtEpochMillis)} UTC.")
                 }
                 is ThinQLiveRefreshState.Unavailable -> {
@@ -165,10 +165,27 @@ private fun ThinQLiveState.summary(unit: TemperatureUnit): String = buildString 
     append("Power ")
     append(if (powerOn) "on" else "off")
     targetTemperature?.let { value ->
-        append(" · ")
+        append(" · target ")
         append(value)
+        append(if (unit == TemperatureUnit.CELSIUS) " °C" else " °F")
+    }
+    currentTemperature?.takeIf { it.isFinite() }?.let { value ->
+        append(" · room temperature (AC sensor) ")
+        append(formatTemperature(value))
         append(if (unit == TemperatureUnit.CELSIUS) " °C" else " °F")
     }
     mode?.let { append(" · "); append(it.name.lowercase().replace('_', ' ')) }
     fanSpeed?.let { append(" · fan "); append(it.name.lowercase()) }
+}
+
+@Composable
+private fun LiveStateDetails(state: ThinQLiveState, unit: TemperatureUnit) {
+    val suffix = if (unit == TemperatureUnit.CELSIUS) "°C" else "°F"
+    InstrumentDetail("Power", if (state.powerOn) "On" else "Off")
+    state.targetTemperature?.let { InstrumentDetail("Target temperature", "$it $suffix") }
+    state.currentTemperature?.takeIf { it.isFinite() }?.let {
+        InstrumentDetail("Room temperature", "${formatTemperature(it)} $suffix", "Reported by the AC sensor")
+    }
+    state.mode?.let { InstrumentDetail("Operating mode", it.name.lowercase().replace('_', ' ')) }
+    state.fanSpeed?.let { InstrumentDetail("Fan speed", it.name.lowercase()) }
 }

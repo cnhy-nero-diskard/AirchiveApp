@@ -1,0 +1,1699 @@
+{
+  "tool": "comp-spec",
+  "version": 1,
+  "createdAt": "2026-10-24T02:27:30.560Z",
+  "comp": ".impeccable/mocks/home-shared.png",
+  "warnings": [
+    "region panel: \"container\": true set in the regions file (the region-size refusal is overridden: one undivided element)"
+  ],
+  "uncoveredInkCells": [],
+  "compSize": {
+    "width": 863,
+    "height": 1823
+  },
+  "aspect": 0.4734,
+  "orientation": "portrait",
+  "palette": [
+    {
+      "hex": "#f7f8f8",
+      "coverage": 0.8859
+    },
+    {
+      "hex": "#2868c8",
+      "coverage": 0.0657
+    },
+    {
+      "hex": "#172838",
+      "coverage": 0.0276
+    },
+    {
+      "hex": "#576373",
+      "coverage": 0.0109
+    },
+    {
+      "hex": "#bfc9d9",
+      "coverage": 0.01
+    }
+  ],
+  "bands": [
+    {
+      "y": 0.0259,
+      "strength": 0.3196
+    },
+    {
+      "y": 0.0778,
+      "strength": 0.3726
+    },
+    {
+      "y": 0.1333,
+      "strength": 0.5602
+    },
+    {
+      "y": 0.1704,
+      "strength": 0.509
+    },
+    {
+      "y": 0.2185,
+      "strength": 0.3964
+    },
+    {
+      "y": 0.2407,
+      "strength": 0.5135
+    },
+    {
+      "y": 0.3111,
+      "strength": 0.822
+    },
+    {
+      "y": 0.4037,
+      "strength": 0.5186
+    },
+    {
+      "y": 0.463,
+      "strength": 0.6866
+    },
+    {
+      "y": 0.537,
+      "strength": 0.2162
+    },
+    {
+      "y": 0.6,
+      "strength": 0.4796
+    },
+    {
+      "y": 0.6444,
+      "strength": 0.2362
+    },
+    {
+      "y": 0.7556,
+      "strength": 0.8579
+    },
+    {
+      "y": 0.7926,
+      "strength": 0.2668
+    },
+    {
+      "y": 0.8333,
+      "strength": 0.2601
+    },
+    {
+      "y": 0.8778,
+      "strength": 0.4107
+    },
+    {
+      "y": 0.9111,
+      "strength": 0.2101
+    },
+    {
+      "y": 0.9741,
+      "strength": 0.2185
+    }
+  ],
+  "regions": [
+    {
+      "id": "panel",
+      "kind": "chrome",
+      "note": "White shared instrument surface with cobalt index band",
+      "grid": "A1:J8",
+      "container": true,
+      "snap": false,
+      "box": {
+        "x": 0.0324,
+        "y": 0.102,
+        "w": 0.9363,
+        "h": 0.7954
+      },
+      "px": {
+        "x": 28,
+        "y": 186,
+        "w": 808,
+        "h": 1450
+      },
+      "aspect": 0.5572,
+      "palette": [
+        {
+          "hex": "#f7f8f8",
+          "coverage": 0.8591
+        },
+        {
+          "hex": "#2767c8",
+          "coverage": 0.0872
+        },
+        {
+          "hex": "#172838",
+          "coverage": 0.0341
+        },
+        {
+          "hex": "#4f5b6d",
+          "coverage": 0.0115
+        },
+        {
+          "hex": "#c3c6d1",
+          "coverage": 0.0081
+        }
+      ],
+      "detail": {
+        "energy": 22.3484
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "app-title",
+      "kind": "text",
+      "note": "Native UI element showing Airchive",
+      "grid": "A0:D0",
+      "snap": false,
+      "box": {
+        "x": 0.0881,
+        "y": 0.0516,
+        "w": 0.2897,
+        "h": 0.0296
+      },
+      "px": {
+        "x": 76,
+        "y": 94,
+        "w": 250,
+        "h": 54
+      },
+      "aspect": 4.6296,
+      "palette": [
+        {
+          "hex": "#f3f7f7",
+          "coverage": 0.7377
+        },
+        {
+          "hex": "#162737",
+          "coverage": 0.1979
+        },
+        {
+          "hex": "#808d95",
+          "coverage": 0.0359
+        },
+        {
+          "hex": "#435360",
+          "coverage": 0.0212
+        },
+        {
+          "hex": "#b2bcc4",
+          "coverage": 0.0073
+        }
+      ],
+      "detail": {
+        "energy": 37.2888
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 7,
+          "capHeightPx": 43.1,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.4179,
+          "advTall": 0.1857,
+          "advX": 0.5455,
+          "gap": 0.0812,
+          "xRatio": 0.7196,
+          "stemW": 0.1788,
+          "contrast": 1.1088,
+          "serif": 1.0277,
+          "densTall": 0.8115,
+          "densX": 0.517,
+          "weight": 0.8115
+        },
+        "widthClass": "condensed",
+        "weightClass": "black"
+      }
+    },
+    {
+      "id": "device-title",
+      "kind": "text",
+      "note": "Native UI element showing Air conditioner",
+      "grid": "A1:F1",
+      "snap": false,
+      "box": {
+        "x": 0.0881,
+        "y": 0.1273,
+        "w": 0.4577,
+        "h": 0.0241
+      },
+      "px": {
+        "x": 76,
+        "y": 232,
+        "w": 395,
+        "h": 44
+      },
+      "aspect": 8.9773,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.7055
+        },
+        {
+          "hex": "#152838",
+          "coverage": 0.2016
+        },
+        {
+          "hex": "#858d97",
+          "coverage": 0.0434
+        },
+        {
+          "hex": "#495766",
+          "coverage": 0.0291
+        },
+        {
+          "hex": "#bcc1c7",
+          "coverage": 0.0204
+        }
+      ],
+      "detail": {
+        "energy": 76.3261
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 14,
+          "capHeightPx": 35.9,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.6403,
+          "advTall": 0.3201,
+          "advX": 0.6542,
+          "gap": 0.0835,
+          "xRatio": 0.7322,
+          "stemW": 0.1835,
+          "contrast": 1.1172,
+          "serif": 0.5506,
+          "densTall": 0.6613,
+          "densX": 0.58,
+          "weight": 0.6613
+        },
+        "widthClass": "normal",
+        "weightClass": "black"
+      }
+    },
+    {
+      "id": "device-age",
+      "kind": "text",
+      "note": "Device read 20 sec ago",
+      "grid": "A1:F1",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.1563,
+        "w": 0.4519,
+        "h": 0.0192
+      },
+      "px": {
+        "x": 77,
+        "y": 285,
+        "w": 390,
+        "h": 35
+      },
+      "aspect": 11.1429,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.8327
+        },
+        {
+          "hex": "#526070",
+          "coverage": 0.0724
+        },
+        {
+          "hex": "#8a909f",
+          "coverage": 0.05
+        },
+        {
+          "hex": "#464c6c",
+          "coverage": 0.0231
+        },
+        {
+          "hex": "#bfc4cd",
+          "coverage": 0.0218
+        }
+      ],
+      "detail": {
+        "energy": 54.7772
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 18,
+          "capHeightPx": 21.3,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.634,
+          "advTall": 0.6574,
+          "advX": 0.634,
+          "gap": 0.1174,
+          "xRatio": 0.7432,
+          "stemW": 0.1493,
+          "contrast": 1.1087,
+          "serif": 0.9717,
+          "densTall": 0.4962,
+          "densX": 0.5571,
+          "weight": 0.4962
+        },
+        "widthClass": "normal",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "power",
+      "kind": "control",
+      "note": "Native power switch and On label",
+      "grid": "H1:J1",
+      "snap": false,
+      "box": {
+        "x": 0.7184,
+        "y": 0.1223,
+        "w": 0.2144,
+        "h": 0.0483
+      },
+      "px": {
+        "x": 620,
+        "y": 223,
+        "w": 185,
+        "h": 88
+      },
+      "aspect": 2.1023,
+      "palette": [
+        {
+          "hex": "#2767c8",
+          "coverage": 0.6328
+        },
+        {
+          "hex": "#f7f8f8",
+          "coverage": 0.3269
+        },
+        {
+          "hex": "#bbccec",
+          "coverage": 0.028
+        },
+        {
+          "hex": "#6390d8",
+          "coverage": 0.0065
+        },
+        {
+          "hex": "#8eafe4",
+          "coverage": 0.0059
+        }
+      ],
+      "detail": {
+        "energy": 13.0164
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "target-label",
+      "kind": "text",
+      "note": "Native UI element showing Set temperature",
+      "grid": "A2:E2",
+      "snap": false,
+      "box": {
+        "x": 0.0881,
+        "y": 0.2052,
+        "w": 0.3476,
+        "h": 0.0176
+      },
+      "px": {
+        "x": 76,
+        "y": 374,
+        "w": 300,
+        "h": 32
+      },
+      "aspect": 9.375,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.77
+        },
+        {
+          "hex": "#545f6f",
+          "coverage": 0.1245
+        },
+        {
+          "hex": "#898e9b",
+          "coverage": 0.0573
+        },
+        {
+          "hex": "#4e5171",
+          "coverage": 0.0255
+        },
+        {
+          "hex": "#bcc4c7",
+          "coverage": 0.0227
+        }
+      ],
+      "detail": {
+        "energy": 54.8361
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 14,
+          "capHeightPx": 22.7,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.6159,
+          "advTall": 0.4289,
+          "advX": 0.6379,
+          "gap": 0.088,
+          "xRatio": 0.7414,
+          "stemW": 0.172,
+          "contrast": 1.1423,
+          "serif": 0.951,
+          "densTall": 0.5167,
+          "densX": 0.5947,
+          "weight": 0.5167
+        },
+        "widthClass": "normal",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "energy-label",
+      "kind": "text",
+      "note": "Native UI element showing Sampled today",
+      "grid": "F2:J2",
+      "snap": false,
+      "box": {
+        "x": 0.562,
+        "y": 0.2052,
+        "w": 0.3476,
+        "h": 0.0176
+      },
+      "px": {
+        "x": 485,
+        "y": 374,
+        "w": 300,
+        "h": 32
+      },
+      "aspect": 9.375,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.8164
+        },
+        {
+          "hex": "#4e586a",
+          "coverage": 0.0909
+        },
+        {
+          "hex": "#b5bbc4",
+          "coverage": 0.0464
+        },
+        {
+          "hex": "#7e8895",
+          "coverage": 0.0382
+        },
+        {
+          "hex": "#2c3a53",
+          "coverage": 0.0082
+        }
+      ],
+      "detail": {
+        "energy": 51.3921
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 12,
+          "capHeightPx": 22.8,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.5933,
+          "advTall": 0.5933,
+          "advX": 0.5933,
+          "gap": 0.1318,
+          "xRatio": 0.6971,
+          "stemW": 0.1425,
+          "contrast": 1.085,
+          "serif": 1.3089,
+          "densTall": 0.4786,
+          "densX": 0.5759,
+          "weight": 0.4786
+        },
+        "widthClass": "normal",
+        "weightClass": "regular"
+      }
+    },
+    {
+      "id": "target-value",
+      "kind": "text",
+      "note": "Native UI element showing 25",
+      "grid": "A2:D3",
+      "snap": false,
+      "box": {
+        "x": 0.0881,
+        "y": 0.2359,
+        "w": 0.2433,
+        "h": 0.0768
+      },
+      "px": {
+        "x": 76,
+        "y": 430,
+        "w": 210,
+        "h": 140
+      },
+      "aspect": 1.5,
+      "palette": [
+        {
+          "hex": "#f8f8f8",
+          "coverage": 0.5132
+        },
+        {
+          "hex": "#172838",
+          "coverage": 0.4566
+        },
+        {
+          "hex": "#bcc5ca",
+          "coverage": 0.0114
+        },
+        {
+          "hex": "#969da5",
+          "coverage": 0.0111
+        },
+        {
+          "hex": "#424b5a",
+          "coverage": 0.0077
+        }
+      ],
+      "detail": {
+        "energy": 20.1149
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": null,
+        "measuredAt": "2026-10-24T02:28:08.289Z",
+        "note": "no separable lettering in the crop; size by the region box"
+      }
+    },
+    {
+      "id": "energy-value",
+      "kind": "text",
+      "note": "Native UI element showing 1.24",
+      "grid": "F2:J3",
+      "snap": false,
+      "box": {
+        "x": 0.5597,
+        "y": 0.2359,
+        "w": 0.3592,
+        "h": 0.0768
+      },
+      "px": {
+        "x": 483,
+        "y": 430,
+        "w": 310,
+        "h": 140
+      },
+      "aspect": 2.2143,
+      "palette": [
+        {
+          "hex": "#f8f8f8",
+          "coverage": 0.5965
+        },
+        {
+          "hex": "#172838",
+          "coverage": 0.3698
+        },
+        {
+          "hex": "#c4c5cc",
+          "coverage": 0.0183
+        },
+        {
+          "hex": "#53606e",
+          "coverage": 0.0136
+        },
+        {
+          "hex": "#9398a3",
+          "coverage": 0.0019
+        }
+      ],
+      "detail": {
+        "energy": 24.524
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 3,
+          "capHeightPx": 127.5,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.7057,
+          "advTall": 0.7057,
+          "advX": null,
+          "gap": 0.247,
+          "xRatio": 0.4044,
+          "stemW": 0.1901,
+          "contrast": 1.0129,
+          "serif": null,
+          "densTall": 0.5443,
+          "densX": null,
+          "weight": 0.5443
+        },
+        "widthClass": "normal",
+        "weightClass": "medium",
+        "chosen": {
+          "family": "Delius Unicase",
+          "weight": 700,
+          "fontSizePx": 182,
+          "source": "catalog",
+          "estimatedSize": true,
+          "stamp": "09d58b0247e9"
+        }
+      }
+    },
+    {
+      "id": "target-unit",
+      "kind": "text",
+      "note": "Native UI element showing Celsius unit",
+      "grid": "A3:B3",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.3225,
+        "w": 0.0927,
+        "h": 0.0236
+      },
+      "px": {
+        "x": 77,
+        "y": 588,
+        "w": 80,
+        "h": 43
+      },
+      "aspect": 1.8605,
+      "palette": [
+        {
+          "hex": "#f7f7f8",
+          "coverage": 0.8198
+        },
+        {
+          "hex": "#576275",
+          "coverage": 0.1605
+        },
+        {
+          "hex": "#848c9c",
+          "coverage": 0.0099
+        },
+        {
+          "hex": "#bcbccc",
+          "coverage": 0.0099
+        }
+      ],
+      "detail": {
+        "energy": 10.6302
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": null,
+        "measuredAt": "2026-10-24T02:28:07.907Z",
+        "note": "no separable lettering in the crop; size by the region box"
+      }
+    },
+    {
+      "id": "energy-unit",
+      "kind": "text",
+      "note": "Native UI element showing kWh",
+      "grid": "F3:G3",
+      "snap": false,
+      "box": {
+        "x": 0.562,
+        "y": 0.3225,
+        "w": 0.1217,
+        "h": 0.0236
+      },
+      "px": {
+        "x": 485,
+        "y": 588,
+        "w": 105,
+        "h": 43
+      },
+      "aspect": 2.4419,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.6405
+        },
+        {
+          "hex": "#596576",
+          "coverage": 0.283
+        },
+        {
+          "hex": "#9a9faf",
+          "coverage": 0.0421
+        },
+        {
+          "hex": "#aeb9ba",
+          "coverage": 0.0306
+        },
+        {
+          "hex": "#405070",
+          "coverage": 0.0038
+        }
+      ],
+      "detail": {
+        "energy": 21.8731
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 3,
+          "capHeightPx": 36.9,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.5964,
+          "advTall": 0.5964,
+          "advX": null,
+          "gap": 0.1356,
+          "xRatio": 0.7047,
+          "stemW": 0.1539,
+          "contrast": 0.8247,
+          "serif": null,
+          "densTall": 0.4803,
+          "densX": null,
+          "weight": 0.4803
+        },
+        "widthClass": "condensed",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "controls-title",
+      "kind": "text",
+      "note": "Native UI element showing Temperature",
+      "grid": "A3:D3",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.3785,
+        "w": 0.2781,
+        "h": 0.0187
+      },
+      "px": {
+        "x": 77,
+        "y": 690,
+        "w": 240,
+        "h": 34
+      },
+      "aspect": 7.0588,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.8133
+        },
+        {
+          "hex": "#4d5a6c",
+          "coverage": 0.1356
+        },
+        {
+          "hex": "#8c949f",
+          "coverage": 0.0375
+        },
+        {
+          "hex": "#bdc1cb",
+          "coverage": 0.0125
+        },
+        {
+          "hex": "#383858",
+          "coverage": 0.001
+        }
+      ],
+      "detail": {
+        "energy": 40.5351
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 11,
+          "capHeightPx": 22.2,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.6317,
+          "advTall": 0.4512,
+          "advX": 0.6317,
+          "gap": 0.1015,
+          "xRatio": 0.7617,
+          "stemW": 0.1763,
+          "contrast": 1.1975,
+          "serif": 0.955,
+          "densTall": 0.5167,
+          "densX": 0.5857,
+          "weight": 0.5167
+        },
+        "widthClass": "normal",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "minus",
+      "kind": "control",
+      "note": "Decrease temperature",
+      "grid": "A4:C4",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.4054,
+        "w": 0.197,
+        "h": 0.0592
+      },
+      "px": {
+        "x": 77,
+        "y": 739,
+        "w": 170,
+        "h": 108
+      },
+      "aspect": 1.5741,
+      "palette": [
+        {
+          "hex": "#e9f6f8",
+          "coverage": 0.9878
+        },
+        {
+          "hex": "#2261c8",
+          "coverage": 0.0122
+        }
+      ],
+      "detail": {
+        "energy": 2.0079
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "plus",
+      "kind": "control",
+      "note": "Increase temperature",
+      "grid": "D4:F4",
+      "snap": false,
+      "box": {
+        "x": 0.3117,
+        "y": 0.4054,
+        "w": 0.19,
+        "h": 0.0592
+      },
+      "px": {
+        "x": 269,
+        "y": 739,
+        "w": 164,
+        "h": 108
+      },
+      "aspect": 1.5185,
+      "palette": [
+        {
+          "hex": "#e8f4f8",
+          "coverage": 0.9652
+        },
+        {
+          "hex": "#2966c8",
+          "coverage": 0.0212
+        },
+        {
+          "hex": "#79a0d7",
+          "coverage": 0.0121
+        },
+        {
+          "hex": "#b0c8e8",
+          "coverage": 0.001
+        },
+        {
+          "hex": "#3878c8",
+          "coverage": 0.0005
+        }
+      ],
+      "detail": {
+        "energy": 2.9436
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "apply",
+      "kind": "control",
+      "note": "Native UI element showing Apply",
+      "grid": "F4:J4",
+      "snap": false,
+      "box": {
+        "x": 0.5342,
+        "y": 0.4054,
+        "w": 0.3998,
+        "h": 0.0592
+      },
+      "px": {
+        "x": 461,
+        "y": 739,
+        "w": 345,
+        "h": 108
+      },
+      "aspect": 3.1944,
+      "palette": [
+        {
+          "hex": "#2868c8",
+          "coverage": 0.9556
+        },
+        {
+          "hex": "#f5f7f8",
+          "coverage": 0.0272
+        },
+        {
+          "hex": "#b1c6eb",
+          "coverage": 0.0082
+        },
+        {
+          "hex": "#5186d3",
+          "coverage": 0.0068
+        },
+        {
+          "hex": "#81a1e1",
+          "coverage": 0.0022
+        }
+      ],
+      "detail": {
+        "energy": 10.488
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "mode",
+      "kind": "control",
+      "note": "Native UI element showing Mode Fan",
+      "grid": "A4:J5",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.4789,
+        "w": 0.847,
+        "h": 0.04
+      },
+      "px": {
+        "x": 77,
+        "y": 873,
+        "w": 731,
+        "h": 73
+      },
+      "aspect": 10.0137,
+      "palette": [
+        {
+          "hex": "#f8f8f8",
+          "coverage": 0.98
+        },
+        {
+          "hex": "#243648",
+          "coverage": 0.0119
+        },
+        {
+          "hex": "#566676",
+          "coverage": 0.0043
+        },
+        {
+          "hex": "#c3c3cc",
+          "coverage": 0.0025
+        },
+        {
+          "hex": "#081828",
+          "coverage": 0.0013
+        }
+      ],
+      "detail": {
+        "energy": 11.1061
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "fan",
+      "kind": "control",
+      "note": "Native UI element showing Fan speed High",
+      "grid": "A5:J5",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.52,
+        "w": 0.847,
+        "h": 0.0499
+      },
+      "px": {
+        "x": 77,
+        "y": 948,
+        "w": 731,
+        "h": 91
+      },
+      "aspect": 8.033,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.9722
+        },
+        {
+          "hex": "#3d4c5c",
+          "coverage": 0.014
+        },
+        {
+          "hex": "#b5bdc6",
+          "coverage": 0.0065
+        },
+        {
+          "hex": "#767f8d",
+          "coverage": 0.0041
+        },
+        {
+          "hex": "#0d2232",
+          "coverage": 0.0032
+        }
+      ],
+      "detail": {
+        "energy": 12.8621
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "record-title",
+      "kind": "text",
+      "note": "Native UI element showing Today's record",
+      "grid": "A5:F6",
+      "snap": false,
+      "box": {
+        "x": 0.0881,
+        "y": 0.593,
+        "w": 0.4635,
+        "h": 0.0247
+      },
+      "px": {
+        "x": 76,
+        "y": 1081,
+        "w": 400,
+        "h": 45
+      },
+      "aspect": 8.8889,
+      "palette": [
+        {
+          "hex": "#f7f8f8",
+          "coverage": 0.7099
+        },
+        {
+          "hex": "#132638",
+          "coverage": 0.2226
+        },
+        {
+          "hex": "#9aa3a9",
+          "coverage": 0.029
+        },
+        {
+          "hex": "#525e6c",
+          "coverage": 0.0245
+        },
+        {
+          "hex": "#ced3dc",
+          "coverage": 0.014
+        }
+      ],
+      "detail": {
+        "energy": 74.4481
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 13,
+          "capHeightPx": 35.9,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.6688,
+          "advTall": 0.6967,
+          "advX": 0.6409,
+          "gap": 0.0697,
+          "xRatio": 0.756,
+          "stemW": 0.1903,
+          "contrast": 1.154,
+          "serif": null,
+          "densTall": 0.5409,
+          "densX": 0.5765,
+          "weight": 0.5409
+        },
+        "widthClass": "normal",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "energy-link",
+      "kind": "control",
+      "note": "Native UI element showing Open Energy",
+      "grid": "H5:J6",
+      "snap": false,
+      "box": {
+        "x": 0.7822,
+        "y": 0.5952,
+        "w": 0.1506,
+        "h": 0.0219
+      },
+      "px": {
+        "x": 675,
+        "y": 1085,
+        "w": 130,
+        "h": 40
+      },
+      "aspect": 3.25,
+      "palette": [
+        {
+          "hex": "#f7f8f8",
+          "coverage": 0.8532
+        },
+        {
+          "hex": "#1e60c9",
+          "coverage": 0.0783
+        },
+        {
+          "hex": "#437cd1",
+          "coverage": 0.0424
+        },
+        {
+          "hex": "#bcceec",
+          "coverage": 0.0131
+        },
+        {
+          "hex": "#8aaade",
+          "coverage": 0.0131
+        }
+      ],
+      "detail": {
+        "energy": 20.3247
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "chart-label",
+      "kind": "text",
+      "note": "Native UI element showing Recorded energy Wh",
+      "grid": "A6:F6",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.6308,
+        "w": 0.4635,
+        "h": 0.0187
+      },
+      "px": {
+        "x": 77,
+        "y": 1150,
+        "w": 400,
+        "h": 34
+      },
+      "aspect": 11.7647,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.8319
+        },
+        {
+          "hex": "#475367",
+          "coverage": 0.076
+        },
+        {
+          "hex": "#798091",
+          "coverage": 0.0442
+        },
+        {
+          "hex": "#bbbfc8",
+          "coverage": 0.0423
+        },
+        {
+          "hex": "#2d3856",
+          "coverage": 0.0056
+        }
+      ],
+      "detail": {
+        "energy": 58.4349
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 18,
+          "capHeightPx": 23.7,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.5688,
+          "advTall": 0.5688,
+          "advX": 0.5688,
+          "gap": 0.1053,
+          "xRatio": 0.6509,
+          "stemW": 0.1293,
+          "contrast": 1.0789,
+          "serif": 0.9943,
+          "densTall": 0.4472,
+          "densX": 0.5149,
+          "weight": 0.4472
+        },
+        "widthClass": "condensed",
+        "weightClass": "regular"
+      }
+    },
+    {
+      "id": "chart",
+      "kind": "control",
+      "note": "Data-driven energy bars, accessible chart and missing slots",
+      "grid": "A6:J7",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.6594,
+        "w": 0.847,
+        "h": 0.1146
+      },
+      "px": {
+        "x": 77,
+        "y": 1202,
+        "w": 731,
+        "h": 209
+      },
+      "aspect": 3.4976,
+      "palette": [
+        {
+          "hex": "#f8f8f8",
+          "coverage": 0.725
+        },
+        {
+          "hex": "#2767c8",
+          "coverage": 0.2436
+        },
+        {
+          "hex": "#b3b8c6",
+          "coverage": 0.0143
+        },
+        {
+          "hex": "#698ac5",
+          "coverage": 0.0094
+        },
+        {
+          "hex": "#cbd8ee",
+          "coverage": 0.0076
+        }
+      ],
+      "detail": {
+        "energy": 22.1128
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "coverage",
+      "kind": "control",
+      "note": "Native UI element showing Incomplete coverage",
+      "grid": "A7:F8",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.7954,
+        "w": 0.4403,
+        "h": 0.0351
+      },
+      "px": {
+        "x": 77,
+        "y": 1450,
+        "w": 380,
+        "h": 64
+      },
+      "aspect": 5.9375,
+      "palette": [
+        {
+          "hex": "#f8f8f7",
+          "coverage": 0.8216
+        },
+        {
+          "hex": "#bf7010",
+          "coverage": 0.059
+        },
+        {
+          "hex": "#f8a81b",
+          "coverage": 0.0467
+        },
+        {
+          "hex": "#f8bc47",
+          "coverage": 0.0444
+        },
+        {
+          "hex": "#f1deb4",
+          "coverage": 0.0284
+        }
+      ],
+      "detail": {
+        "energy": 29.0181
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "sample-age",
+      "kind": "text",
+      "note": "Latest sample 5 min ago",
+      "grid": "G7:J8",
+      "snap": false,
+      "box": {
+        "x": 0.6176,
+        "y": 0.7943,
+        "w": 0.2839,
+        "h": 0.0373
+      },
+      "px": {
+        "x": 533,
+        "y": 1448,
+        "w": 245,
+        "h": 68
+      },
+      "aspect": 3.6029,
+      "palette": [
+        {
+          "hex": "#f7f7f7",
+          "coverage": 0.8772
+        },
+        {
+          "hex": "#505d6e",
+          "coverage": 0.0509
+        },
+        {
+          "hex": "#bec5cb",
+          "coverage": 0.0268
+        },
+        {
+          "hex": "#8c93a1",
+          "coverage": 0.0252
+        },
+        {
+          "hex": "#0a182e",
+          "coverage": 0.0198
+        }
+      ],
+      "detail": {
+        "energy": 33.5468
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 2,
+          "glyphs": 19,
+          "capHeightPx": 20.6,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.5536,
+          "advTall": 0.3346,
+          "advX": 0.5536,
+          "gap": 0.151,
+          "xRatio": 0.7193,
+          "stemW": 0.1519,
+          "contrast": 1.2572,
+          "serif": 0.9918,
+          "densTall": 0.6545,
+          "densX": 0.5358,
+          "weight": 0.6545
+        },
+        "widthClass": "condensed",
+        "weightClass": "bold"
+      }
+    },
+    {
+      "id": "finalized",
+      "kind": "text",
+      "note": "Yesterday LG finalized 3.18 kWh",
+      "grid": "A8:J8",
+      "snap": false,
+      "box": {
+        "x": 0.0892,
+        "y": 0.8612,
+        "w": 0.8459,
+        "h": 0.0203
+      },
+      "px": {
+        "x": 77,
+        "y": 1570,
+        "w": 730,
+        "h": 37
+      },
+      "aspect": 19.7297,
+      "palette": [
+        {
+          "hex": "#f7f7f8",
+          "coverage": 0.8668
+        },
+        {
+          "hex": "#485567",
+          "coverage": 0.0457
+        },
+        {
+          "hex": "#818a96",
+          "coverage": 0.0307
+        },
+        {
+          "hex": "#142939",
+          "coverage": 0.0294
+        },
+        {
+          "hex": "#b1b9c0",
+          "coverage": 0.0275
+        }
+      ],
+      "detail": {
+        "energy": 60.4933
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 26,
+          "capHeightPx": 26.6,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.4891,
+          "advTall": 0.5644,
+          "advX": 0.4891,
+          "gap": 0.1129,
+          "xRatio": 0.5792,
+          "stemW": 0.1289,
+          "contrast": 1.1236,
+          "serif": null,
+          "densTall": 0.5569,
+          "densX": 0.5127,
+          "weight": 0.5569
+        },
+        "widthClass": "condensed",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "sync",
+      "kind": "text",
+      "note": "History synced 2 min ago",
+      "grid": "G9:J9",
+      "snap": false,
+      "box": {
+        "x": 0.6014,
+        "y": 0.9084,
+        "w": 0.3581,
+        "h": 0.0159
+      },
+      "px": {
+        "x": 519,
+        "y": 1656,
+        "w": 309,
+        "h": 29
+      },
+      "aspect": 10.6552,
+      "palette": [
+        {
+          "hex": "#f3f7f7",
+          "coverage": 0.8394
+        },
+        {
+          "hex": "#748090",
+          "coverage": 0.0558
+        },
+        {
+          "hex": "#38485b",
+          "coverage": 0.0441
+        },
+        {
+          "hex": "#c7cfd2",
+          "coverage": 0.0343
+        },
+        {
+          "hex": "#a4afb7",
+          "coverage": 0.0264
+        }
+      ],
+      "detail": {
+        "energy": 54.5781
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null,
+      "type": {
+        "comp": {
+          "lines": 1,
+          "glyphs": 19,
+          "capHeightPx": 15.9,
+          "inkIsDark": true,
+          "allCaps": false,
+          "advance": 0.6144,
+          "advTall": 0.5198,
+          "advX": 0.6144,
+          "gap": 0.1418,
+          "xRatio": 0.7478,
+          "stemW": 0.1527,
+          "contrast": 1.0726,
+          "serif": 0.3966,
+          "densTall": 0.4855,
+          "densX": 0.5272,
+          "weight": 0.4855
+        },
+        "widthClass": "normal",
+        "weightClass": "medium"
+      }
+    },
+    {
+      "id": "navigation",
+      "kind": "chrome",
+      "note": "Five native bottom destinations",
+      "grid": "A9:J9",
+      "snap": false,
+      "box": {
+        "x": 0,
+        "y": 0.9473,
+        "w": 1,
+        "h": 0.0527
+      },
+      "px": {
+        "x": 0,
+        "y": 1727,
+        "w": 863,
+        "h": 96
+      },
+      "aspect": 8.9896,
+      "palette": [
+        {
+          "hex": "#f8f8f8",
+          "coverage": 0.9301
+        },
+        {
+          "hex": "#6e7584",
+          "coverage": 0.0419
+        },
+        {
+          "hex": "#2967c8",
+          "coverage": 0.0138
+        },
+        {
+          "hex": "#969ea8",
+          "coverage": 0.0085
+        },
+        {
+          "hex": "#c3cbd5",
+          "coverage": 0.0057
+        }
+      ],
+      "detail": {
+        "energy": 19.1593
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    },
+    {
+      "id": "native-header",
+      "kind": "chrome",
+      "note": "Native Android system status and app header",
+      "grid": "A0:J0",
+      "snap": false,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 0.1
+      },
+      "px": {
+        "x": 0,
+        "y": 0,
+        "w": 863,
+        "h": 182
+      },
+      "aspect": 4.7418,
+      "palette": [
+        {
+          "hex": "#f6f8f8",
+          "coverage": 0.9627
+        },
+        {
+          "hex": "#162737",
+          "coverage": 0.0208
+        },
+        {
+          "hex": "#090909",
+          "coverage": 0.0103
+        },
+        {
+          "hex": "#c0c4c7",
+          "coverage": 0.0042
+        },
+        {
+          "hex": "#989c9c",
+          "coverage": 0.0021
+        }
+      ],
+      "detail": {
+        "energy": 20.51
+      },
+      "medium": "semantic",
+      "plate": null,
+      "text": null
+    }
+  ]
+}

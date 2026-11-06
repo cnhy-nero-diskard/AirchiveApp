@@ -140,6 +140,16 @@ Client options must be configured locally and the debug signing certificate
 registered with Firebase before a build can use real Google sign-in. This is
 not a release APK or acceptance of a release signing identity.
 
+The side-by-side debug build uses `cloud.airchive.personal.debug` and the
+`firebase.debugApplicationId` registration. Register each development machine's
+debug certificate SHA-1 with that Firebase Android app (SHA-256 is also registered
+for the current Mac). Production package fingerprints do not cover the debug
+package. An unregistered pair can return a misleading chooser cancellation;
+Google Play services logs the actual "application is not registered to use
+OAuth2.0" error. The Mac debug package and certificate were registered on
+2026-11-04, and its generated Firebase configuration includes an Android OAuth
+client matching the package and certificate.
+
 ## Windows-host verification
 
 The shared and Android build checks pass on this host:

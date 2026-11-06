@@ -1,8 +1,12 @@
 package cloud.airchive.shared
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -23,17 +28,19 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -41,10 +48,13 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
@@ -71,42 +81,13 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
-/**
- * Energy day/week/month route (OpenSpec task 5.3).
- *
- * This is a **read-only presentation shell** over the pure projection API in
- * `cloud.airchive.shared.data.energy`. The parent passes the already-observed
- * [HistorySnapshot] (from `LocalHistoryPort.observe`) so this screen renders
- * cached data first; when the parent's snapshot updates after a fetch, this
- * route recomposes from the new cache without ever querying Firestore directly.
- *
- * Contract guarantees:
- *
- *  - **No auto-fetch.** Entering the route, switching Day/Week/Month, and
- *    navigating periods only change *local presentation state* (the anchor
- *    [LocalDate], initially today in [timeZoneId]). Nothing is fetched until the
- *    explicit `Load sampled intervals for this period` button is pressed.
- *  - **Explicit read-and-cache only.** The button builds a
- *    [HistoricalRangeLoader] and requests exactly
- *    `period.startEpochMillis .. min(period.endExclusiveEpochMillis, now)`.
- *    Empty/future ranges are skipped with a fixed message, and every adapter
- *    failure maps to a fixed safe UI string — never a raw exception.
- *  - **Measurement meaning is preserved.** Five-minute interval values are shown
- *    as *sampled energy*, converted to Wh only from recognized source units, and
- *    any energy÷time conversion is labeled *interval-average power* — never
- *    instantaneous wattage. Null intervals stay gaps (never zeros), anomalous
- *    and unknown-unit values are counted and flagged but excluded from usable
- *    sums, and finalized LG daily totals stay separate from local interval sums
- *    and from the sampled five-minute sum.
- *  - **No ThinQ and no raw payload.** This route touches only the telemetry and
- *    local-history ports and renders only sanitized projections.
- */
+/** Cache-first energy presentation. Selected elapsed periods load missing history while this route is active. */
 @Composable
 fun EnergyRoute(
     snapshot: HistorySnapshot,
@@ -116,16 +97,17 @@ fun EnergyRoute(
     timeZoneId: String = DEFAULT_DAY_TIME_ZONE,
     remoteLoadEnabled: Boolean = true,
     loadRange: (suspend (Long, Long) -> HistoricalRangeResult)? = null,
+    nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     // A malformed/unknown zone id must never crash the route; fall back to the
     // documented default day boundary.
     val zoneId = remember(timeZoneId) {
         if (runCatching { TimeZone.of(timeZoneId) }.isSuccess) timeZoneId else DEFAULT_DAY_TIME_ZONE
     }
-    val scope = rememberCoroutineScope()
+    var retry by remember(partition) { mutableStateOf(0) }
 
     var periodType by remember { mutableStateOf(EnergyPeriodType.DAY) }
-    var anchorDate by remember(zoneId) { mutableStateOf(todayIn(zoneId)) }
+    var anchorDate by remember(zoneId) { mutableStateOf(todayIn(zoneId, nowProvider())) }
     var loadState by remember(periodType, anchorDate, zoneId) {
         mutableStateOf<EnergyLoadUiState>(EnergyLoadUiState.Idle)
     }
@@ -142,96 +124,72 @@ fun EnergyRoute(
             snapshot = snapshot,
             periodType = period.periodType,
             selectedDate = period.selectedDate,
-            nowEpochMillis = Clock.System.now().toEpochMilliseconds(),
+            nowEpochMillis = nowProvider(),
             timeZoneId = zoneId,
         )
     }
 
-    fun launchLoad() {
-        // Capture the selection at press time; navigation during the load never
-        // reports feedback for the wrong period.
-        val requestedType = periodType
-        val requestedAnchor = anchorDate
-        scope.launch {
-            loadState = EnergyLoadUiState.Loading
-            val now = Clock.System.now().toEpochMilliseconds()
-            val requestedPeriod = energyPeriodRange(requestedType, requestedAnchor, zoneId)
-            val end = minOf(requestedPeriod.endExclusiveEpochMillis, now)
-            if (end <= requestedPeriod.startEpochMillis) {
-                // Empty or entirely future range: nothing to fetch.
-                loadState = EnergyLoadUiState.SkippedFuture
-                return@launch
-            }
-            loadState = try {
-                val result = loadRange?.invoke(requestedPeriod.startEpochMillis, end)
-                    ?: HistoricalRangeLoader(telemetry, local, partition)
-                        .loadHistoricalRange(requestedPeriod.startEpochMillis, end)
-                EnergyLoadUiState.Loaded(result)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Fixed safe message; raw exceptions never surface.
-                EnergyLoadUiState.Failed
-            }
+    LaunchedEffect(partition, periodType, anchorDate, zoneId, remoteLoadEnabled, retry) {
+        if (!remoteLoadEnabled) {
+            loadState = EnergyLoadUiState.Idle
+            return@LaunchedEffect
+        }
+        val end = completedHistoryEnd(period, nowProvider())
+        if (end <= period.startEpochMillis) {
+            loadState = EnergyLoadUiState.SkippedFuture
+            return@LaunchedEffect
+        }
+        loadState = EnergyLoadUiState.Loading
+        loadState = try {
+            val result = loadRange?.invoke(period.startEpochMillis, end)
+                ?: HistoricalRangeLoader(telemetry, local, partition).loadHistoricalRange(period.startEpochMillis, end)
+            EnergyLoadUiState.Loaded(result)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            EnergyLoadUiState.Failed
         }
     }
 
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Energy", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Five-minute sampled AC energy by local calendar day. Day boundaries use the " +
-                "$zoneId zone; nothing is fetched automatically.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-
-        EnergyPeriodSelector(selected = periodType, onSelect = { periodType = it })
-
-        EnergyPeriodNavigation(
-            period = period,
-            onNavigate = { anchorDate = it },
-        )
-
-        EnergyLoadCard(
-            state = loadState,
-            loading = loadState is EnergyLoadUiState.Loading,
-            onLoad = ::launchLoad,
-            remoteLoadEnabled = remoteLoadEnabled,
-        )
-
-        if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.")
-
-        EnergySummaryCard(presentation = presentation)
-
-        EnergyChartSection(presentation = presentation)
-
-        EnergyDailySections(
-            presentation = presentation,
-            showDayDetail = periodType == EnergyPeriodType.DAY,
-        )
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("Units and conversions", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Interval values keep each source's recorded unit. Wh conversions are shown only for " +
-                        "recognized units (Wh verbatim, kWh × 1000). An unknown or absent unit is labeled " +
-                        "\"unit not recorded/unknown\" and is never guessed. Energy per time is always shown as " +
-                        "interval-average power, never instantaneous wattage.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+    InstrumentPage("Energy", "Recorded energy · $zoneId") {
+        InstrumentPanel {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                EnergyPeriodSelector(selected = periodType, onSelect = { periodType = it })
+                EnergyPeriodNavigation(period = period, onNavigate = { anchorDate = it })
+            }
+            EnergySummaryCard(presentation)
+            EnergyChartSection(presentation)
+            InstrumentDisclosure("Coverage and measurement details", "Measured intervals, cache coverage and units", informational = true) {
+                EnergyCoverageDetails(presentation)
+            }
+        }
+        InstrumentPanel {
+            if (presentation.periodType == EnergyPeriodType.DAY) InstrumentDisclosure("Interval coverage diagnostics", informational = false) {
+                presentation.days.firstOrNull()?.let { IntervalStrip(it, EnergyLegendColors(MaterialTheme.colorScheme)) }
+            }
+            EnergyLoadCard(loadState, loadState is EnergyLoadUiState.Loading, { retry++ }, remoteLoadEnabled)
+            if (!remoteLoadEnabled) Text("Cached energy remains available. Verify history access from Home before downloading another range.",
+                modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+        InstrumentPanel {
+            InstrumentDisclosure(if (periodType == EnergyPeriodType.DAY) "Daily record" else "Daily records",
+                "Sampled sums and separately recorded daily totals", informational = true) {
+                EnergyDailySections(presentation, showDayDetail = periodType == EnergyPeriodType.DAY)
+            }
+            InstrumentDisclosure("Units and conversions", informational = true) {
+                Column(Modifier.padding(20.dp)) {
+                    InstrumentDetail("Energy units", "1 kWh = 1,000 Wh", "Recorded units are preserved; recognized values are normalized to Wh for comparison.")
+                    InstrumentDetail("Unknown units", "Kept as recorded", "No conversion is guessed. These values are excluded from usable energy sums.")
+                    InstrumentDetail("Interval-average power", "Watts = Wh ÷ hours", "An average over the measured interval, never instantaneous wattage.")
+                }
             }
         }
     }
+}
+
+internal fun completedHistoryEnd(period: EnergyPeriodRange, nowEpochMillis: Long): Long {
+    val elapsed = (minOf(period.endExclusiveEpochMillis, nowEpochMillis) - period.startEpochMillis).coerceAtLeast(0L)
+    return period.startEpochMillis + elapsed / 300_000L * 300_000L
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +221,7 @@ private fun EnergyPeriodSelector(
     ) {
         EnergyPeriodType.entries.forEach { type ->
             FilterChip(
+                modifier = Modifier.heightIn(min = 48.dp),
                 selected = type == selected,
                 onClick = { onSelect(type) },
                 label = { Text(type.label()) },
@@ -279,21 +238,23 @@ private fun EnergyPeriodNavigation(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(periodRangeTitle(period), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
+            androidx.compose.material3.OutlinedButton(
+                shape = MaterialTheme.shapes.small,
                 onClick = { onNavigate(navigateAnchor(period.periodType, period.selectedDate, -1)) },
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
             ) {
-                Text("Previous ${period.periodType.unitLabel()}")
+                Text("Previous", modifier = Modifier.semantics { contentDescription = "Previous ${period.periodType.unitLabel()}" })
             }
-            Button(
+            androidx.compose.material3.OutlinedButton(
+                shape = MaterialTheme.shapes.small,
                 onClick = { onNavigate(navigateAnchor(period.periodType, period.selectedDate, +1)) },
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp),
             ) {
-                Text("Next ${period.periodType.unitLabel()}")
+                Text("Next", modifier = Modifier.semantics { contentDescription = "Next ${period.periodType.unitLabel()}" })
             }
         }
     }
@@ -329,25 +290,26 @@ private fun EnergyLoadCard(
     onLoad: () -> Unit,
     remoteLoadEnabled: Boolean,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Fetch sampled intervals", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            Text("Offline history", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             Text(
-                "Select a period and press the button to load and cache its five-minute intervals. " +
-                    "Revisiting an already-fetched period reads the local cache with zero remote reads.",
+                if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "This period loads automatically for offline viewing."
+                else "Missing history is loaded for this period; cached ranges are reused.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
+                shape = MaterialTheme.shapes.small,
                 enabled = !loading && remoteLoadEnabled,
                 onClick = onLoad,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 48.dp),
             ) {
-                Text(if (loading) "Loading sampled intervals…" else "Load sampled intervals for this period")
+                Text(if (loading) "Loading sampled intervals…" else "Retry history loading")
             }
             loadStateDialogText(state)?.let { text ->
                 Text(
@@ -382,9 +344,43 @@ private fun loadStateDialogText(state: EnergyLoadUiState): String? = when (state
 // Period summary: sums, averages, coverage
 // ---------------------------------------------------------------------------
 
+internal fun energySummaryAsOf(presentation: EnergyHistoryPresentation): String {
+    val latest = presentation.intervalPoints.filter { it.usable }.maxOfOrNull { it.intervalEndEpochMillis }
+        ?: return "No readings yet"
+    val zone = TimeZone.of(presentation.timeZoneId)
+    val local = Instant.fromEpochMilliseconds(latest).toLocalDateTime(zone)
+    val today = Instant.fromEpochMilliseconds(presentation.nowEpochMillis).toLocalDateTime(zone).date
+    val hour = (local.hour % 12).takeIf { it != 0 } ?: 12
+    val minute = local.minute.toString().padStart(2, '0')
+    val meridiem = if (local.hour < 12) "AM" else "PM"
+    val date = if (local.date == today) "" else "${local.date} · "
+    return "As of $date$hour:$minute $meridiem"
+}
+
 @Composable
 private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val periodLabel = when (presentation.periodType) {
+        EnergyPeriodType.DAY -> "daily"
+        EnergyPeriodType.WEEK -> "weekly"
+        EnergyPeriodType.MONTH -> "monthly"
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Net $periodLabel power consumed", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(presentation.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—",
+                style = InstrumentReading, modifier = Modifier.weight(1f, fill = false).alignByBaseline(), maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 28.sp, maxFontSize = 76.sp))
+            Text("kWh", modifier = Modifier.alignByBaseline(), style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(energySummaryAsOf(presentation), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun EnergyCoverageDetails(presentation: EnergyHistoryPresentation) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -397,7 +393,7 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
             val expected = presentation.days.sumOf { it.expectedSlotCount }
             val usableValue = presentation.usableEnergyValueWh
             if (usableValue != null) {
-                Text("Sampled interval sum: ${usableValue.toTrimmedString()} Wh (normalized to Wh only where the source unit was recognized).")
+                InstrumentDetail("Sampled interval sum", "${usableValue.toTrimmedString()} Wh", "Only recognized source units are converted.")
             } else if (unusableUnitSlots > 0) {
                 Text("Sampled interval sum: unavailable — interval values were recorded without a recognized unit and are kept raw (unit not recorded/unknown; never guessed).")
             } else {
@@ -405,10 +401,8 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
             }
 
             presentation.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W — sampled energy ÷ elapsed time. " +
-                        "This is an average over elapsed slots, never instantaneous wattage.",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Sampled energy ÷ elapsed hours. An average over elapsed slots, never instantaneous wattage.")
             }
 
             // ---- Query-cache coverage (explicitly distinct from measured). ----
@@ -425,12 +419,10 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
                     val tenths = queriedTenths.coerceAtMost(999)
                     "${tenths / 10}.${tenths % 10}%"
                 }
-                Text(
-                    "Queried into the local cache: $queriedPercent of this period's elapsed time · " +
-                        "fully queried: ${if (presentation.queryCoverage.fullyQueried) "yes" else "no"}.",
-                )
+                InstrumentDetail("Elapsed range cached", queriedPercent,
+                    if (presentation.queryCoverage.fullyQueried) "Fully queried" else "Some elapsed range remains unfetched")
                 if (!presentation.queryCoverage.fullyQueried) {
-                    Text("Some elapsed range remains unfetched — use the Load button above.")
+                    Text("Some elapsed range remains unfetched — use the Load button below.")
                 }
                 Text(
                     "This describes which epoch ranges have been fetched from Airchive, separate from measured " +
@@ -449,7 +441,7 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
                 Text("No elapsed five-minute slots in this period yet.")
             } else {
                 val measuredPercent = (usable.toDouble() / expected * 100.0).roundToInt()
-                Text("Usable five-minute slots: $usable of $expected ($measuredPercent%).")
+                InstrumentDetail("Measured coverage", "$measuredPercent%", "$usable of $expected elapsed five-minute slots have usable energy.")
                 buildList {
                     if (gaps > 0) add("$gaps gap(s)")
                     if (anomalous > 0) add("$anomalous anomalous")
@@ -466,7 +458,161 @@ private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
 // Charts: day slot strip (DAY) and per-day bars (WEEK/MONTH)
 // ---------------------------------------------------------------------------
 
-private data class EnergyLegendColors(val scheme: ColorScheme) {
+internal fun hourlyKwh(wh: Double): String {
+    val milliKwh = wh.roundToLong()
+    val sign = if (milliKwh < 0) "-" else ""
+    val magnitude = kotlin.math.abs(milliKwh)
+    return "$sign${magnitude / 1000}.${(magnitude % 1000).toString().padStart(3, '0')}"
+}
+
+/** A full local day: every hour owns one equal-width slot, including missing/future hours. */
+internal fun energyHourRange(hour: Int): String {
+    fun label(value: Int): String {
+        val h = value % 24
+        return "${if (h % 12 == 0) 12 else h % 12} ${if (h < 12) "AM" else "PM"}"
+    }
+    return "${label(hour)} – ${label(hour + 1)}"
+}
+
+@Composable
+internal fun HourlyEnergyChart(day: EnergyDaySummary, nowEpochMillis: Long) {
+    val groups = remember(day) { instrumentEnergyGroups(day) }
+    var selectedHour by remember(day.date) { mutableStateOf<Int?>(null) }
+    val color = MaterialTheme.colorScheme.primary
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val chosen = selectedHour?.let { groups[it] }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, grid),
+            color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Energy (kWh)", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.height(144.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                        listOf("1", "0.8", "0.6", "0.4", "0.2", "0").forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.fillMaxWidth().height(144.dp)) {
+                            Canvas(Modifier.matchParentSize().clearAndSetSemantics {}) {
+                                (0..5).forEach { tick ->
+                                    val fraction = tick / 5f
+                                    val y = (size.height * fraction).coerceIn(.5f, size.height - .5f)
+                                    drawLine(grid, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+                                }
+                                drawLine(grid, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx())
+                            }
+                            Row(Modifier.fillMaxWidth()) {
+                                groups.forEach { group ->
+                                    val value = group.energyWh
+                                    val future = nowEpochMillis < day.dayStartEpochMillis + group.hour * 3_600_000L
+                                    val partial = group.usable < group.expected || group.expected < 12
+                                    val status = when { future -> "future"; value == null -> "unavailable"; partial -> "data may be inaccurate or incomplete"; else -> "recorded" }
+                                    val isSelected = selectedHour == group.hour
+                                    Canvas(Modifier.weight(1f).height(144.dp)
+                                        .clickable { selectedHour = group.hour }
+                                        .semantics {
+                                            role = Role.Button
+                                            selected = isSelected
+                                            stateDescription = if (isSelected) "Selected" else "Not selected"
+                                            contentDescription = "${energyHourRange(group.hour)}, ${value?.let { hourlyKwh(it) + " kWh" } ?: status}, $status, ${group.usable} of ${group.expected} intervals measured"
+                                        }) {
+                                        val inset = size.width * .23f
+                                        val barWidth = size.width - 2 * inset
+                                        if (value != null) {
+                                            val barHeight = (value / 1000.0).coerceIn(0.0, 1.0).toFloat() * size.height
+                                            if (barHeight > 0f) {
+                                                val top = size.height - barHeight
+                                                val right = size.width - inset
+                                                val radius = minOf(barWidth / 2, barHeight)
+                                                val bar = Path().apply {
+                                                    moveTo(inset, size.height)
+                                                    lineTo(inset, top + radius)
+                                                    quadraticBezierTo(inset, top, inset + radius, top)
+                                                    lineTo(right - radius, top)
+                                                    quadraticBezierTo(right, top, right, top + radius)
+                                                    lineTo(right, size.height)
+                                                    close()
+                                                }
+                                                drawPath(bar, color,
+                                                    style = if (partial) androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
+                                            } else drawLine(color, Offset(inset, size.height - 1.dp.toPx()),
+                                                Offset(size.width - inset, size.height - 1.dp.toPx()), 2.dp.toPx())
+                                        }
+                                        if (isSelected) drawLine(color, Offset(size.width / 2, 0f),
+                                            Offset(size.width / 2, size.height), 2.dp.toPx())
+                                    }
+                                }
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            repeat(4) { quarter ->
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (quarter % 2 == 0) "12" else "6", style = MaterialTheme.typography.labelSmall)
+                                    if (quarter % 2 == 0) DayAxisIcon(noon = quarter == 2)
+                                }
+                            }
+                        }
+                        Text("Hour of day", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Surface(shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, grid),
+            color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()
+                .semantics { liveRegion = LiveRegionMode.Polite }) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (chosen == null) Text("Select an hour to see energy use", style = MaterialTheme.typography.bodySmall)
+                else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(energyHourRange(chosen.hour), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                        Text(chosen.energyWh?.let { hourlyKwh(it) + " kWh" }
+                            ?: if (nowEpochMillis < day.dayStartEpochMillis + chosen.hour * 3_600_000L) "Future" else "Unavailable",
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelLarge)
+                    }
+                    val points = day.points.filter { it.slotIndex / 12 == chosen.hour }
+                    val anomalous = points.count { it.quality == ObservationQuality.ANOMALOUS }
+                    val unknown = points.count { it.energyValue != null && it.recordedUnit == null && it.quality != ObservationQuality.ANOMALOUS }
+                    Text("${chosen.usable}/${chosen.expected} elapsed samples" +
+                        (if (anomalous > 0) " · $anomalous anomalous" else "") +
+                        (if (unknown > 0) " · $unknown unknown unit" else ""), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Text("Outlined bars: Data might be inaccurate or incomplete during this hour. Blank hours: no reading.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (groups.any { (it.energyWh ?: 0.0) > 1000.0 }) {
+            Text("Bars above 1 kWh are capped; select an hour for its full value.", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** Small native vector markers; descriptions preserve midnight/noon meaning for screen readers. */
+@Composable
+private fun DayAxisIcon(noon: Boolean) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    val background = MaterialTheme.colorScheme.surface
+    Canvas(Modifier.size(12.dp).semantics { contentDescription = if (noon) "noon" else "midnight" }) {
+        val center = Offset(size.width / 2, size.height / 2)
+        val radius = size.minDimension * .25f
+        drawCircle(ink, radius, center, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+        if (noon) repeat(8) { index ->
+            val angle = index * kotlin.math.PI / 4
+            fun point(r: Float) = Offset(center.x + kotlin.math.cos(angle).toFloat() * r,
+                center.y + kotlin.math.sin(angle).toFloat() * r)
+            drawLine(ink, point(radius * 1.5f), point(radius * 2f), 1.dp.toPx())
+        } else {
+            drawCircle(ink, radius, center)
+            drawCircle(background, radius, center + Offset(radius * .65f, -radius * .4f))
+        }
+    }
+}
+
+internal data class EnergyLegendColors(val scheme: ColorScheme) {
     val usable: Color = scheme.primary
     val gap: Color = scheme.surfaceVariant
     val anomalous: Color = scheme.tertiary
@@ -477,43 +623,35 @@ private data class EnergyLegendColors(val scheme: ColorScheme) {
 
 @Composable
 private fun EnergyChartSection(presentation: EnergyHistoryPresentation) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 if (presentation.periodType == EnergyPeriodType.DAY) {
-                    "Five-minute interval coverage"
+                    "Recorded interval energy"
                 } else {
                     "Daily energy measures"
                 },
                 modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.titleMedium,
             )
-            val colors = EnergyLegendColors(MaterialTheme.colorScheme)
-            EnergyLegend(colors = colors, intervalDay = presentation.periodType == EnergyPeriodType.DAY)
-            when (presentation.periodType) {
-                EnergyPeriodType.DAY -> {
-                    val day = presentation.days.firstOrNull()
-                    if (day != null) IntervalStrip(day = day, colors = colors)
-                }
-                EnergyPeriodType.WEEK, EnergyPeriodType.MONTH -> DayBars(days = presentation.days, colors = colors)
-            }
+            GranularEnergyChart(presentation)
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EnergyLegend(colors: EnergyLegendColors, intervalDay: Boolean) {
+internal fun EnergyLegend(colors: EnergyLegendColors, intervalDay: Boolean) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (intervalDay) {
-            LegendItem(colors.usable, "Usable interval (recognized unit)")
+            LegendItem(colors.usable, if (LocalInterfaceDetail.current == InterfaceDetail.SIMPLE) "Measured interval" else "Usable interval (recognized unit)")
             LegendItem(colors.gap, "Gap / missing interval")
             LegendItem(colors.anomalous, "Anomalous sample")
             LegendItem(colors.unknownUnit, "Unknown-unit value")
@@ -587,7 +725,7 @@ private fun EnergyIntervalPoint.statusColor(colors: EnergyLegendColors): Color =
 
 /** Grouped per-day bars keep interval sums and stored daily measure sources distinct. */
 @Composable
-private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
+internal fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
     val barsByDay = days.map { day ->
         buildList {
             day.usableEnergyValueWh?.takeIf { it.isFinite() }?.let { value ->
@@ -613,7 +751,7 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
             .semantics(mergeDescendants = true) {
                 role = Role.Image
                 contentDescription =
-                    "Daily energy chart for ${days.size} days. Grouped bars show sampled five-minute sums, " +
+                    "Daily energy chart for ${days.size} days. Bars or smooth lines show sampled five-minute sums, " +
                         "finalized LG daily totals, or local interval sums in Wh on one relative scale. " +
                         "Each source is separately named in the legend, with exact units, coverage, and values " +
                         "in the day details below."
@@ -624,6 +762,22 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
         val barWidth = groupWidth / (maxBarsPerGroup + 1)
         for ((index, day) in days.withIndex()) {
             for ((barIndex, bar) in barsByDay[index].withIndex()) {
+                if (groupWidth < 24.dp.toPx()) {
+                    val current = Offset((index + .5f) * groupWidth,
+                        size.height * (1 - bar.valueWh / maxWh.coerceAtLeast(1.0)).toFloat())
+                    val previous = barsByDay.getOrNull(index - 1)?.firstOrNull { it.color == bar.color }
+                    if (previous != null) {
+                        val from = Offset((index - .5f) * groupWidth,
+                            size.height * (1 - previous.valueWh / maxWh.coerceAtLeast(1.0)).toFloat())
+                        val mid = (from.x + current.x) / 2
+                        drawPath(Path().apply {
+                            moveTo(from.x, from.y)
+                            cubicTo(mid, from.y, mid, current.y, current.x, current.y)
+                        }, bar.color, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                    }
+                    drawCircle(bar.color, 2.dp.toPx(), current)
+                    continue
+                }
                 val barHeight = if (maxWh > 0.0) (bar.valueWh / maxWh * size.height).toFloat() else 0f
                 drawRect(
                     color = bar.color,
@@ -649,7 +803,7 @@ private fun DayBars(days: List<EnergyDaySummary>, colors: EnergyLegendColors) {
         }
     }
     Text(
-        "Bar height is relative usable energy normalized to Wh; bar color names the distinct source. " +
+        "Height is energy normalized to Wh. Dense data uses smooth lines; each color names a distinct source. Missing readings remain gaps. " +
             "Coverage and missing/anomalous slots are listed in each day summary below; sources are never merged.",
         style = MaterialTheme.typography.bodySmall,
     )
@@ -667,7 +821,7 @@ private fun EnergyDailySections(
     showDayDetail: Boolean,
 ) {
     if (presentation.days.isEmpty()) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -689,31 +843,27 @@ private fun EnergyDailySections(
 /** Full single-day detail: slot strip, all counts, units, preserved measures. */
 @Composable
 private fun DayDetailCard(day: EnergyDaySummary) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(dayHeading(day), modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            slotCountsText(day)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            InstrumentDetail("Measured intervals", "${day.usableSlotCount} / ${day.expectedSlotCount}", slotCountsText(day))
 
             day.usableEnergyValueWh?.let { value ->
-                Text("Usable sampled five-minute energy: ${value.toTrimmedString()} Wh (recognized units only).")
+                InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh", "Five-minute intervals with recognized units only.")
             }
             day.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W — sampled energy ÷ elapsed time " +
-                        "(an average, never instantaneous wattage).",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Sampled energy ÷ elapsed hours; never instantaneous wattage.")
             }
             peakIntervalAverageWatts(day)?.let { watts ->
-                Text(
-                    "Peak sampled interval-average power: ${watts.toTrimmedString()} W (a five-minute average, " +
-                        "not instantaneous).",
-                )
+                InstrumentDetail("Peak interval-average power", "${watts.toTrimmedString()} W",
+                    "Highest five-minute average; never instantaneous wattage.")
             }
 
-            unitLabels(day)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            EnergyUnitDetails(day)
 
             DailyMeasuresSection(day = day)
         }
@@ -723,23 +873,21 @@ private fun DayDetailCard(day: EnergyDaySummary) {
 /** Compact textual row for week/month views. */
 @Composable
 private fun DaySummaryCard(day: EnergyDaySummary) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(dayHeading(day), style = MaterialTheme.typography.titleSmall)
-            slotCountsText(day)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            InstrumentDetail("Measured intervals", "${day.usableSlotCount} / ${day.expectedSlotCount}", slotCountsText(day))
             day.usableEnergyValueWh?.let { value ->
-                Text("Usable sampled five-minute energy: ${value.toTrimmedString()} Wh.")
+                InstrumentDetail("Sampled energy", "${value.toTrimmedString()} Wh")
             }
             day.averagePowerWatts?.let { averageWatts ->
-                Text(
-                    "Interval-average power: ${averageWatts.toTrimmedString()} W (average over elapsed slots, " +
-                        "never instantaneous wattage).",
-                )
+                InstrumentDetail("Interval-average power", "${averageWatts.toTrimmedString()} W",
+                    "Average over elapsed slots; never instantaneous wattage.")
             }
-            unitLabels(day)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            EnergyUnitDetails(day)
             DaySummaryMeasures(day = day)
         }
     }
@@ -747,7 +895,7 @@ private fun DaySummaryCard(day: EnergyDaySummary) {
 
 private fun dayHeading(day: EnergyDaySummary): String {
     val prefix = day.date.longDate()
-    return if (day.isCurrentDay) "$prefix · today (partial elapsed slots)" else prefix
+    return if (day.isCurrentDay) "$prefix · today" else prefix
 }
 
 private fun slotCountsText(day: EnergyDaySummary): String? = if (day.expectedSlotCount == 0) {
@@ -766,17 +914,12 @@ private fun slotCountsText(day: EnergyDaySummary): String? = if (day.expectedSlo
     }
 }
 
-private fun unitLabels(day: EnergyDaySummary): String? = buildList {
-    if (day.recordedUnits.isNotEmpty()) {
-        add("Recognized unit(s): ${day.recordedUnits.joinToString { it.energyUnitLabel() }}")
-    }
-    if (day.unitTexts.isNotEmpty()) {
-        add("Source unit text: ${day.unitTexts.joinToString { "\"$it\"" }}")
-    }
-    if (day.unitSourceTexts.isNotEmpty()) {
-        add("Unit provenance: ${day.unitSourceTexts.joinToString()}")
-    }
-}.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+@Composable
+private fun EnergyUnitDetails(day: EnergyDaySummary) {
+    if (day.recordedUnits.isNotEmpty()) InstrumentDetail("Recognized units", day.recordedUnits.joinToString { it.energyUnitLabel() })
+    if (day.unitTexts.isNotEmpty()) InstrumentDetail("Source unit text", day.unitTexts.joinToString { "\"$it\"" })
+    if (day.unitSourceTexts.isNotEmpty()) InstrumentDetail("Unit provenance", day.unitSourceTexts.joinToString())
+}
 
 /** Peak single-interval average power for the day (uses [intervalAveragePowerWatts]). */
 private fun peakIntervalAverageWatts(day: EnergyDaySummary): Double? {
@@ -837,7 +980,7 @@ private fun DailyMeasureRow(measure: EnergyDailyMeasure) {
     val normalized = measure.energyValueWh ?: normalizeToWh(total.energyValue, recorded)
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("${total.source.sourceLabel()} · ${if (total.finalized) "finalized" else "not finalized"}")
-        Text("${total.energyValue.toTrimmedString()} ${measureUnitLabel(measure)}")
+        InstrumentDetail("Recorded total", "${total.energyValue.toTrimmedString()} ${measureUnitLabel(measure)}")
         when {
             recorded == null && total.unitText.isNullOrBlank() ->
                 Text("Unit not recorded/unknown — no Wh conversion is shown (never guessed).")
@@ -845,7 +988,7 @@ private fun DailyMeasureRow(measure: EnergyDailyMeasure) {
                 Text("Raw source unit text: \"${total.unitText}\"")
         }
         normalized?.let { value ->
-            Text("≈ ${value.toTrimmedString()} Wh (normalized from the recorded unit).")
+            InstrumentDetail("Converted energy", "${value.toTrimmedString()} Wh", "Normalized from the recorded unit.")
         }
     }
 }
@@ -893,8 +1036,8 @@ private fun Double.toTrimmedString(): String {
     return if (negative && (intPart > 0 || frac != 0)) "-$text" else text
 }
 
-private fun todayIn(timeZoneId: String): LocalDate =
-    Clock.System.now().toLocalDateTime(TimeZone.of(timeZoneId)).date
+private fun todayIn(timeZoneId: String, nowEpochMillis: Long): LocalDate =
+    Instant.fromEpochMilliseconds(nowEpochMillis).toLocalDateTime(TimeZone.of(timeZoneId)).date
 
 private fun LocalDate.dayOfMonthLabel(): String {
     val first = LocalDate(year, month, 1)

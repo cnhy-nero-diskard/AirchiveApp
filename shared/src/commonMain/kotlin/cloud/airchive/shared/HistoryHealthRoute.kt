@@ -1,43 +1,58 @@
 package cloud.airchive.shared
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.history.CoveredRange
+import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
 import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.telemetry.CollectorHealth
@@ -49,12 +64,12 @@ import cloud.airchive.shared.contract.telemetry.ObservationQuality
 import cloud.airchive.shared.contract.telemetry.QualityFlag
 import cloud.airchive.shared.contract.telemetry.SourceReadFailure
 import cloud.airchive.shared.data.energy.normalizeToWh
-import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.presentHistorySync
 import cloud.airchive.shared.data.telemetry.DEFAULT_DAY_TIME_ZONE
 import kotlin.math.abs
 import kotlin.math.roundToLong
 import kotlin.time.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -85,11 +100,8 @@ import kotlinx.datetime.toLocalDateTime
  *    from usable counts; unknown/legacy-null units are labeled "unit not
  *    recorded/unknown" and never guessed; usable Wh conversions are shown only
  *    for recognized units.
- *  - **Virtualized and accessible.** The observation list is a [LazyColumn]
- *    keyed by `sampleId` (history may hold thousands of explicit cached rows),
- *    every row is a tappable, labeled control with a screen-reader description,
- *    and tapping opens a detail dialog that whitelists exactly the display
- *    fields above.
+ *  - **Virtualized and accessible.** Hour groups are virtualized, with selectable
+ *    observation details available within each expanded group.
  */
 @Composable
 fun HistoryHealthRoute(
@@ -113,34 +125,54 @@ fun HistoryHealthRoute(
             .distinctBy { it.sampleId }
     }
     val counters = remember(observations) { countSampleTypes(observations) }
+    val days = remember(observations, nowEpochMillis) { historyDays(observations, nowEpochMillis) }
+    val maxHourWh = remember(days) { maxHourEnergyWh(days) }
+    val today = remember(nowEpochMillis) { historyToday(nowEpochMillis) }
+    val detailed = LocalInterfaceDetail.current == InterfaceDetail.DETAILED
 
-    var selectedSampleId by remember { mutableStateOf<String?>(null) }
-    val selected = selectedSampleId?.let { id -> observations.firstOrNull { it.sampleId == id } }
+    var selectedSample by remember(snapshot.partition) { mutableStateOf<HistorySampleSelection?>(null) }
+    val selected = selectedHistoryObservation(selectedSample, snapshot)
+    // Held at route level (not per row) so an opened hour stays open while it scrolls out of and back
+    // into the virtualized list. A different owner/device partition starts with everything collapsed.
+    val expandedHours = remember(snapshot.partition) { mutableStateListOf<String>() }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .widthIn(max = 640.dp),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .widthIn(max = 640.dp)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            item(key = "header") { HistoryHeader() }
-            item(key = "sync") {
-                SyncContextCard(
-                    presentation = syncPresentation,
-                    sync = snapshot.sync,
-                    coveredRanges = snapshot.coveredRanges,
-                    nowEpochMillis = nowEpochMillis,
-                    onRefresh = onRefresh,
-                    isRefreshing = isRefreshing,
-                )
+            item(key = "header") {
+                Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    InstrumentPageHeading("History", if (detailed) "Hourly energy from recorded five-minute observations · newest first" else null)
+                }
             }
-            item(key = "health") {
-                CollectorHealthCard(health = snapshot.collectorHealth, nowEpochMillis = nowEpochMillis)
+            item(key = "overview") {
+                InstrumentPanel {
+                    Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (!detailed) "${counters.total} saved observations" else "${counters.total} cached · ${counters.usable} usable energy values", style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.semantics { heading() })
+                        Text(if (isRefreshing) "Refreshing history… Cached observations remain available." else syncPresentation.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        // Zero horizontal padding keeps the action's label on the same left edge as the text above.
+                        onRefresh?.let { refresh -> TextButton(onClick = refresh, enabled = !isRefreshing,
+                            contentPadding = PaddingValues(horizontal = 0.dp),
+                            modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(if (isRefreshing) "Syncing history…" else syncPresentation.retryLabel)
+                        } }
+                    }
+                    InstrumentDisclosure("Sync and collector health", "Refresh history, collector status and sample quality", informational = true) {
+                        SyncContextCard(snapshot.sync, snapshot.coveredRanges, nowEpochMillis, isRefreshing)
+                        CollectorHealthCard(snapshot.collectorHealth, nowEpochMillis)
+                        SampleCountersCard(counters)
+                    }
+                    InstrumentDisclosure("Sample status guide", "Gaps, anomalies and unknown units", informational = true) { SampleLegendCard() }
+                }
             }
-            item(key = "counters") { SampleCountersCard(counters = counters) }
-            item(key = "legend") { SampleLegendCard() }
             if (observations.isEmpty()) {
                 item(key = "empty") {
                     EmptyHistoryCard(onRefresh = onRefresh, retryLabel = syncPresentation.retryLabel)
@@ -157,17 +189,30 @@ fun HistoryHealthRoute(
                 }
                 item(key = "list-header") {
                     Text(
-                        "Cached observations (newest first)",
-                        modifier = Modifier.semantics { heading() },
+                        "Recorded hours (newest first)",
+                        modifier = Modifier.padding(top = 20.dp).semantics { heading() },
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
-                items(observations, key = { it.sampleId }) { sample ->
-                    // Row strings are formed lazily only for visible items; the
-                    // cached snapshot can include thousands of explicitly loaded
-                    // historical observations.
-                    val row = observationRowUi(sample)
-                    ObservationRow(row = row, onClick = { selectedSampleId = row.sample.sampleId })
+                // Each day reads as one panel: a header (with the day's total) and its hours,
+                // split into virtualized rows whose corners are rounded only at the panel's ends.
+                days.forEach { day ->
+                    item(key = "day-${day.date}") {
+                        HistoryDayHeader(day = day, today = today)
+                    }
+                    itemsIndexed(day.hours, key = { _, hour -> hour.key }) { index, hour ->
+                        HistoryHourRow(
+                            hour = hour,
+                            maxWh = maxHourWh,
+                            expanded = hour.key in expandedHours,
+                            detailed = detailed,
+                            isLast = index == day.hours.lastIndex,
+                            // An open hour above ends in its own tinted band, which already separates the two.
+                            showTopRule = index == 0 || day.hours[index - 1].key !in expandedHours,
+                            onToggle = { if (!expandedHours.remove(hour.key)) expandedHours.add(hour.key) },
+                            onSample = { sample -> selectedSample = HistorySampleSelection(snapshot.partition, sample.sampleId) },
+                        )
+                    }
                 }
             }
         }
@@ -175,8 +220,23 @@ fun HistoryHealthRoute(
 
     val selectedRow = selected?.let(::observationRowUi)
     if (selectedRow != null) {
-        ObservationDetailDialog(row = selectedRow, onDismiss = { selectedSampleId = null })
+        ObservationDetailDialog(row = selectedRow, onDismiss = { selectedSample = null })
     }
+}
+
+/** History detail selection belongs to the owner/project/device partition, not the PAT generation. */
+internal data class HistorySampleSelection(
+    val partition: HistoryPartition,
+    val sampleId: String,
+)
+
+/** Prevents an old partition's identifier from selecting a same-id row in another owner's cache. */
+internal fun selectedHistoryObservation(
+    selection: HistorySampleSelection?,
+    snapshot: HistorySnapshot,
+): Observation? {
+    if (selection == null || selection.partition != snapshot.partition) return null
+    return snapshot.observations.firstOrNull { it.sampleId == selection.sampleId }
 }
 
 // ---------------------------------------------------------------------------
@@ -199,42 +259,34 @@ private fun HistoryHeader() {
 // Cache & sync context card
 // ---------------------------------------------------------------------------
 
+/**
+ * Sync status detail. The overview panel above already carries the live sync message and the one
+ * refresh action, so this card adds only what that panel does not say.
+ */
 @Composable
 private fun SyncContextCard(
-    presentation: HistorySyncPresentation,
     sync: SyncMetadata?,
     coveredRanges: List<CoveredRange>,
     nowEpochMillis: Long,
-    onRefresh: (() -> Unit)?,
     isRefreshing: Boolean,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Cache & sync", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            // One concise polite live region: only announces when sync status
-            // changes to an error state (denied/offline/remote failure).
-            Text(
-                if (isRefreshing) {
-                    "Refreshing Airchive history… Cached observations remain visible. ${presentation.message}"
-                } else {
-                    presentation.message
-                },
-                modifier = if (isRefreshing || presentation.shouldAnnounceUpdate) {
-                    Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                } else {
-                    Modifier
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
+            HistoryStatusBadge(when {
+                isRefreshing -> "Syncing history"
+                sync?.lastError != null -> syncErrorLabel(sync.lastError!!)
+                sync?.lastSuccessfulSyncEpochMillis != null -> "History cached"
+                else -> "Awaiting first sync"
+            }, attention = sync?.lastError != null)
             val lastSuccess = sync?.lastSuccessfulSyncEpochMillis
             if (lastSuccess != null) {
-                Text("Last successful sync: ${syncInstantLabel(lastSuccess, nowEpochMillis)}.")
+                InstrumentDetail("Last successful sync", syncInstantLabel(lastSuccess, nowEpochMillis))
             } else {
-                Text("Last successful sync: not yet.")
+                InstrumentDetail("Last successful sync", "Not yet")
             }
 
             val lastErrorCode = sync?.lastError
@@ -246,27 +298,15 @@ private fun SyncContextCard(
                 } else {
                     ""
                 }
-                Text("Last sync error: $label$whenText.")
+                InstrumentDetail("Last sync error", "$label$whenText")
             } else {
-                Text("No recorded sync errors.")
+                InstrumentDetail("Sync errors", "None recorded")
             }
 
             Text(
                 coveredRangeSummary(coveredRanges, DEFAULT_DAY_TIME_ZONE),
                 style = MaterialTheme.typography.bodySmall,
             )
-
-            onRefresh?.let { refresh ->
-                Button(
-                    enabled = !isRefreshing,
-                    onClick = refresh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                ) {
-                    Text(if (isRefreshing) "Syncing history…" else presentation.retryLabel)
-                }
-            }
         }
     }
 }
@@ -295,7 +335,7 @@ private fun coveredRangeSummary(ranges: List<CoveredRange>, zoneId: String): Str
 
 @Composable
 private fun CollectorHealthCard(health: CollectorHealth?, nowEpochMillis: Long) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -308,29 +348,27 @@ private fun CollectorHealthCard(health: CollectorHealth?, nowEpochMillis: Long) 
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                Text("Status: ${health.status.label()}.", style = MaterialTheme.typography.bodyMedium)
+                HistoryStatusBadge(health.status.label(), attention = health.status != CollectorStatus.HEALTHY)
+                Text("Cached health record; this is not a live connection indicator.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 health.lastPollEpochMillis?.let {
-                    Text("Last poll: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("Last poll: not recorded.")
+                    InstrumentDetail("Last poll", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Last poll", "Not recorded")
                 health.lastSuccessEpochMillis?.let {
-                    Text("Last success: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("Last success: not recorded.")
+                    InstrumentDetail("Last successful collection", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Last successful collection", "Not recorded")
                 health.lastFailureEpochMillis?.let {
-                    Text("Last failure: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("No recorded failure.")
+                    InstrumentDetail("Last failure", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Collector failures", "None recorded")
                 (health.consecutiveFailures ?: 0).takeIf { it > 0 }?.let { failures ->
-                    Text("$failures consecutive failure(s).")
+                    InstrumentDetail("Consecutive failures", "$failures")
                 }
                 health.lastErrorClass?.takeIf { it.isNotBlank() }?.let { clazz ->
-                    Text("Last failure class: ${clazz.safeHistoryLabel()}.")
+                    InstrumentDetail("Failure category", clazz.safeHistoryLabel())
                 }
                 health.collectorVersion?.takeIf { it.isNotBlank() }?.let { version ->
-                    Text("Collector version: ${version.safeHistoryLabel()}.")
+                    InstrumentDetail("Collector version", version.safeHistoryLabel())
                 }
-                Text(
-                    "Health is cached sample data from the collector; it does not describe a live connection.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
             }
         }
     }
@@ -395,7 +433,7 @@ internal fun countSampleTypes(samples: List<Observation>): SampleCounters {
 
 @Composable
 private fun SampleCountersCard(counters: SampleCounters) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -407,17 +445,10 @@ private fun SampleCountersCard(counters: SampleCounters) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                Text(
-                    "${counters.total} cached observation(s): ${counters.normal} normal · " +
-                        "${counters.anomalous} anomalous · ${counters.missingOrUnavailable} missing/unavailable.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "${counters.energyFailed} energy-read failure(s) · ${counters.stateFailed} state-read " +
-                        "failure(s) · ${counters.unclassifiedLegacyFailure} unclassified legacy source " +
-                        "failure(s) · ${counters.usable} usable energy value(s).",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                InstrumentDetail("Cached observations", "${counters.total}")
+                InstrumentDetail("Usable energy values", "${counters.usable}", "Finite readings with recognized units, excluding anomalies and energy-read failures.")
+                InstrumentDetail("Sample quality", "${counters.normal} normal · ${counters.anomalous} anomalous", "${counters.missingOrUnavailable} missing or unavailable")
+                InstrumentDetail("Source read failures", "${counters.energyFailed} energy · ${counters.stateFailed} state", "${counters.unclassifiedLegacyFailure} unclassified legacy source failures")
                 Text(
                     "Counts can overlap — one sample may be anomalous and also have a failed source read.",
                     style = MaterialTheme.typography.bodySmall,
@@ -433,23 +464,17 @@ private fun SampleCountersCard(counters: SampleCounters) {
 
 @Composable
 private fun SampleLegendCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text("What each sample status means", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "NORMAL — the collector did not flag an anomaly. The energy value may still be missing or " +
-                    "carry an unknown unit; only finite values with a recognized unit count as usable energy.",
-            )
-            Text(
-                "ANOMALOUS — the interval exists but the collector/dashboard flags it (for example a partial " +
-                    "observation, device offline, or an implausible value). It stays visible but is excluded from " +
-                    "usable-energy counts.",
-            )
-            Text("MISSING_INTERVAL — the interval exists but has no usable energy value; it is a gap.")
-            Text("UNAVAILABLE — no sample exists for the slot; it is a gap.")
+            InstrumentDetail("Normal", "No anomaly flagged", "Usable energy still requires a finite value and a recognized unit. Normal does not guarantee a usable reading.")
+            InstrumentDetail("Anomalous", "Recorded, excluded from usable energy", "Flagged by the collector or dashboard, for example a partial observation, offline device or implausible value. The original sample stays visible.")
+            InstrumentDetail("Missing interval", "Gap in measured energy", "An interval record exists, but it contains no usable energy value.")
+            InstrumentDetail("Unavailable", "No sample for this slot", "No observation was recorded. This remains a gap.")
+            InstrumentDetail("Unknown unit", "Value preserved without conversion", "A recorded value without a recognized unit is excluded from usable energy; its unit is never guessed.")
             Text(
                 "A null or missing energy value is a gap — never a measured zero.",
                 style = MaterialTheme.typography.labelLarge,
@@ -464,7 +489,7 @@ private fun SampleLegendCard() {
 
 @Composable
 private fun EmptyHistoryCard(onRefresh: (() -> Unit)?, retryLabel: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -495,7 +520,7 @@ private fun NoUsableMeasurementsCard(
     onRefresh: (() -> Unit)?,
     retryLabel: String,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -526,12 +551,10 @@ private fun NoUsableMeasurementsCard(
 /** Immutable, precomputed row projection so each LazyColumn row stays cheap. */
 private data class ObservationRowUi(
     val sample: Observation,
-    val zoneId: String,
-    val intervalTimeText: String,
-    val energyText: String,
-    val statusText: String,
-    val flagText: String?,
-    val failureText: String?,
+    /** `17:05–17:10`, in the sample's own zone, with the zone named only when it is not the AC's. */
+    val clockText: String,
+    val summary: HistoryRowSummary,
+    /** Full spoken description: complete date, interval, zone, wording and status. */
     val contentDescription: String,
 )
 
@@ -541,18 +564,15 @@ private fun observationRowUi(sample: Observation): ObservationRowUi {
     val start = localOf(sample.intervalStartEpochMillis, zone)
     val end = localOf(sample.intervalEndEpochMillis, zone)
     val intervalTimeText = "${describeDate(start)} ${describeClock(start)}–${describeClock(end)} $zoneId"
-    val energyText = sampleEnergyText(sample)
-    val statusText = buildString {
-        append(sample.quality.label())
-        sample.intervalStatus?.takeIf { it.isNotBlank() }?.let {
-            append(" · status \"").append(it.safeHistoryLabel()).append('"')
-        }
+    val clockText = buildString {
+        append(describeClock(start)).append('–').append(describeClock(end))
+        if (zoneId != DEFAULT_DAY_TIME_ZONE) append(' ').append(zoneId)
     }
     val flagText = sampleFlagsText(sample)
     val failureText = sampleFailuresText(sample)
     val contentDescription = buildString {
         append("Sample at ").append(intervalTimeText).append(". ")
-        append(energyText).append(" ")
+        append(sampleEnergyText(sample)).append(" ")
         append("Status: ").append(sample.quality.label()).append(". ")
         flagText?.let { append("Flags: ").append(it).append(". ") }
         failureText?.let { append(it).append(". ") }
@@ -560,47 +580,267 @@ private fun observationRowUi(sample: Observation): ObservationRowUi {
     }
     return ObservationRowUi(
         sample = sample,
-        zoneId = zoneId,
-        intervalTimeText = intervalTimeText,
-        energyText = energyText,
-        statusText = statusText,
-        flagText = flagText,
-        failureText = failureText,
+        clockText = clockText,
+        summary = sample.historyRowSummary(),
         contentDescription = contentDescription,
     )
 }
 
+/**
+ * What a ledger row shows at a glance. A clean, usable reading carries only its [valueText]; anything
+ * that changes how the reading should be trusted adds a worded [badge] (never color alone) and a
+ * short [note]. The full wording remains in [historyEnergySummaryText] and the detail dialog.
+ */
+internal data class HistoryRowSummary(
+    val valueText: String,
+    val badge: String? = null,
+    val note: String? = null,
+)
+
+private const val GAP_VALUE = "—"
+
+internal fun Observation.historyRowSummary(): HistoryRowSummary {
+    val value = energyValue
+    val unit = recordedUnit
+    val extras = listOfNotNull(
+        if (hasStateReadFailure()) "State read failed · energy unaffected" else null,
+        qualityFlags.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "Flags: ") { it.label() },
+    )
+    fun note(vararg lead: String?) = (lead.filterNotNull() + extras).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    return when {
+        hasEnergyReadFailure() -> HistoryRowSummary(GAP_VALUE, "Gap", note("Energy read failed"))
+        quality == ObservationQuality.MISSING_INTERVAL || quality == ObservationQuality.UNAVAILABLE ->
+            HistoryRowSummary(GAP_VALUE, "Gap", note(quality.label()))
+        value == null -> HistoryRowSummary(GAP_VALUE, "Gap", note("No energy value"))
+        !value.isFinite() -> HistoryRowSummary(GAP_VALUE, "Gap", note("Value unusable"))
+        quality == ObservationQuality.ANOMALOUS ->
+            HistoryRowSummary(recordedValueText(value, unit), "Anomalous", note("Excluded from usable totals"))
+        unit == null ->
+            HistoryRowSummary(recordedValueText(value, null), "Unit unknown", note("Not converted"))
+        else -> {
+            val converted = if (unit == EnergyUnit.WH) null else normalizeToWh(value, unit)?.let { "≈ ${it.toTrimmedString()} Wh" }
+            HistoryRowSummary("${value.toTrimmedString()} ${unit.energyUnitLabel()}", note = note(converted))
+        }
+    }
+}
+
+/** The recorded number with its unit when recognized, or the raw unit text, never a guessed one. */
+private fun Observation.recordedValueText(value: Double, unit: EnergyUnit?): String {
+    if (unit != null) return "${value.toTrimmedString()} ${unit.energyUnitLabel()}"
+    val rawUnit = unitText?.takeIf { it.isNotBlank() }?.let { " (${it.safeHistoryLabel()})" }.orEmpty()
+    return "${intervalValue ?: value.toTrimmedString()}$rawUnit"
+}
+
+// ---------------------------------------------------------------------------
+// Ledger: day header, hour row, five-minute row
+// ---------------------------------------------------------------------------
+
+private val LedgerInset = 20.dp
+
+/** Tabular figures keep the stacked kWh readings aligned as the digits change. */
+private fun tabularStyle(base: TextStyle): TextStyle = base.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum")
+
 @Composable
-private fun ObservationRow(row: ObservationRowUi, onClick: () -> Unit) {
-    Card(
+private fun HistoryDayHeader(day: HistoryDay, today: LocalDate) {
+    val title = historyDayTitle(day.date, today)
+    val dateLine = if (title == "Today" || title == "Yesterday") historyShortDate(day.date) else null
+    val total = day.energyWh?.let { "${hourlyKwh(it)} kWh" }
+    val caption = when {
+        day.energyWh == null -> null
+        day.recordedHours < day.expectedHours -> "Partial · ${day.recordedHours} of ${day.expectedHours} hours"
+        day.isPartial -> "Partial · some readings missing"
+        day.isCurrentDay -> "So far"
+        else -> null
+    }
+    val spoken = buildString {
+        if (dateLine != null) append(title).append(", ")
+        append(historySpokenDate(day.date)).append(". ")
+        append(day.energyWh?.let { "${hourlyKwh(it)} kilowatt-hours recorded" } ?: "No usable energy recorded").append(". ")
+        caption?.let { append(it).append('.') }
+    }
+    val corner = MaterialTheme.shapes.large
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        shape = corner.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = LedgerInset, end = LedgerInset, top = 16.dp, bottom = 12.dp)
+                .semantics(mergeDescendants = true) { heading(); contentDescription = spoken },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                dateLine?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Column(Modifier.widthIn(max = 200.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    total ?: "Unavailable",
+                    style = tabularStyle(MaterialTheme.typography.titleMedium),
+                    color = if (total == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                )
+                caption?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (day.isPartial) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryHourRow(
+    hour: HistoryHour,
+    maxWh: Double,
+    expanded: Boolean,
+    detailed: Boolean,
+    isLast: Boolean,
+    showTopRule: Boolean,
+    onToggle: () -> Unit,
+    onSample: (Observation) -> Unit,
+) {
+    val range = historyHourRange(hour.group.hour)
+    val energyWh = hour.group.energyWh
+    val note = hour.note(detailed)
+    val amount = energyWh?.let { "${hourlyKwh(it)} kWh" } ?: "Unavailable"
+    val spoken = buildString {
+        append("Hour ").append(range.replace("–", " to ")).append(". ")
+        append(energyWh?.let { "${hourlyKwh(it)} kilowatt-hours" } ?: "No usable energy").append(". ")
+        note.badge?.let { append(it).append(". ") }
+        note.text?.let { append(it).append('.') }
+    }
+    val corner = MaterialTheme.shapes.large
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = if (isLast) corner.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize) else RectangleShape,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column {
+            if (showTopRule) HorizontalDivider(Modifier.padding(horizontal = LedgerInset), color = MaterialTheme.colorScheme.outlineVariant)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(
+                        onClickLabel = if (expanded) "Hide five-minute readings" else "Show five-minute readings",
+                        role = Role.Button,
+                        onClick = onToggle,
+                    )
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = spoken
+                        stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    }
+                    .padding(horizontal = LedgerInset, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(range, style = tabularStyle(MaterialTheme.typography.titleSmall), modifier = Modifier.weight(1f))
+                    Text(
+                        amount,
+                        style = tabularStyle(MaterialTheme.typography.titleMedium),
+                        color = if (energyWh == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                    InstrumentChevron(expanded)
+                }
+                if (energyWh != null) {
+                    HistoryEnergyBar(hourBarFraction(energyWh, maxWh), attention = hour.status == HistoryHourStatus.PARTIAL)
+                }
+                if (note.badge != null || note.text != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        note.badge?.let { HistoryChip(it, attention = hour.status != HistoryHourStatus.IN_PROGRESS) }
+                        note.text?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            if (expanded) {
+                // Readings sit on the porcelain ground so they read as the hour's contents, not more hours.
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {
+                    hour.samples.forEachIndexed { index, sample ->
+                        if (index > 0) HorizontalDivider(Modifier.padding(start = LedgerInset + 12.dp, end = LedgerInset), color = MaterialTheme.colorScheme.outlineVariant)
+                        HistorySampleRow(observationRowUi(sample), onClick = { onSample(sample) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Relative size of the hour among all cached hours. Decorative: the kWh figure carries the value. */
+@Composable
+private fun HistoryEnergyBar(fraction: Float, attention: Boolean) {
+    Box(
+        Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).clearAndSetSemantics {},
+    ) {
+        if (fraction > 0f) {
+            Box(
+                Modifier.fillMaxWidth(fraction).fillMaxHeight()
+                    .background(if (attention) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary),
+            )
+        }
+    }
+}
+
+/** A short worded status. Amber marks incomplete or untrusted data; slate marks neutral context. */
+@Composable
+private fun HistoryChip(label: String, attention: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (attention) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (attention) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+    }
+}
+
+@Composable
+private fun HistorySampleRow(row: ObservationRowUi, onClick: () -> Unit) {
+    val summary = row.summary
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clickable(onClickLabel = "View sample detail", onClick = onClick)
-            .semantics(mergeDescendants = true) {
-                role = Role.Button
-                contentDescription = row.contentDescription
-            },
+            .clickable(onClickLabel = "View sample detail", role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = row.contentDescription }
+            .padding(start = LedgerInset + 12.dp, end = LedgerInset, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(row.intervalTimeText, style = MaterialTheme.typography.titleSmall)
-            Text(row.energyText, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                row.statusText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            row.flagText?.let {
-                Text("Flags: $it", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-            }
-            row.failureText?.let {
-                Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(row.clockText, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+            if (summary.badge != null || summary.note != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    summary.badge?.let { HistoryChip(it, attention = true) }
+                    summary.note?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                }
             }
         }
+        Text(
+            summary.valueText,
+            style = tabularStyle(MaterialTheme.typography.bodyMedium),
+            textAlign = TextAlign.End,
+            modifier = Modifier.widthIn(max = 160.dp),
+        )
+        InstrumentChevron(expanded = false, modifier = Modifier.rotate(-90f), ink = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -924,4 +1164,15 @@ private fun Double.toTrimmedString(): String {
         }
     }
     return if (negative && (intPart > 0 || frac != 0)) "-$text" else text
+}
+
+@Composable
+private fun HistoryStatusBadge(label: String, attention: Boolean) {
+    androidx.compose.material3.Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (attention) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (attention) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
 }

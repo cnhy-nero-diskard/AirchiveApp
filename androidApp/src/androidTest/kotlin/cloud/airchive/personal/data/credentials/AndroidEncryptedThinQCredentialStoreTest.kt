@@ -53,36 +53,35 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        // Wipe any leftover PAT record and Keystore key from prior tests, but
-        // deliberately KEEP the persisted per-install client id: its stability
-        // across store instances is asserted separately below.
-        runBlocking { AndroidEncryptedThinQCredentialStore(context).clear() }
+        // Tests use a dedicated no-backup directory and Keystore alias; the
+        // production `thinq/` record and key are never opened or cleared.
+        testStorageDir.deleteRecursively()
         deleteKeyForTesting()
     }
 
     @After
     fun tearDown() {
-        runBlocking { AndroidEncryptedThinQCredentialStore(context).clear() }
         deleteKeyForTesting()
+        testStorageDir.deleteRecursively()
     }
 
     // --- save + reopen -------------------------------------------------------
 
     @Test
     fun saveThenReopen_returnsSameToken() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
         assertEquals(TOKEN_A, store.readToken())
 
         // A brand-new store over the same install (same noBackupFilesDir and
         // Keystore) must decrypt the persisted record.
-        val reopened = AndroidEncryptedThinQCredentialStore(context)
+        val reopened = store()
         assertEquals(TOKEN_A, reopened.readToken())
     }
 
     @Test
     fun saveReplacingToken_olderTokenNoLongerReadable() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH))
 
@@ -97,7 +96,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun observe_neverExposesPlaintextToken() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH))
 
         val state = store.observe().first()
@@ -115,7 +114,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun onDiskRecord_containsNoPlaintext() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
 
         val recordFile = credentialFile()
@@ -129,7 +128,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun plaintextPatNeverAppearsInRoomHistoryFile(): Unit = runBlocking {
-        val credentialStore = AndroidEncryptedThinQCredentialStore(context)
+        val credentialStore = store()
         assertEquals(SaveThinQResult.Success, credentialStore.save(TOKEN_B, COUNTRY_PH))
 
         val partition = HistoryPartition(
@@ -171,18 +170,18 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun clientId_stableAcrossStoresAndSurvivesClear() = runBlocking {
-        val first = AndroidEncryptedThinQCredentialStore(context)
+        val first = store()
         val id1 = first.clientId
         val parsed = runCatching { UUID.fromString(id1) }.getOrNull()
         assertNotNull("client id must be a well-formed UUID, was '$id1'", parsed)
         assertEquals("canonical UUID string is 36 chars", 36, id1.length)
 
         first.save(TOKEN_A, COUNTRY_PH)
-        val second = AndroidEncryptedThinQCredentialStore(context)
+        val second = store()
         assertEquals("client id must persist across store instances", id1, second.clientId)
 
         second.clear()
-        val third = AndroidEncryptedThinQCredentialStore(context)
+        val third = store()
         assertEquals("client id must survive a token clear", id1, third.clientId)
     }
 
@@ -190,7 +189,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun clear_removesTokenButKeepsClientId() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         val id = store.clientId
         store.save(TOKEN_A, COUNTRY_PH)
         assertNotNull("precondition: a saved token exists", store.readToken())
@@ -211,7 +210,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun invalidSave_doesNotOverwritePriorRecord() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
 
         val blankToken = store.save("   \t ", COUNTRY_PH)
@@ -237,7 +236,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun recordLivesUnderNoBackupDirAndBackupDisabled() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         store.save(TOKEN_A, COUNTRY_PH)
 
         val noBackup = context.noBackupFilesDir
@@ -247,7 +246,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
             recordFile.canonicalPath.startsWith(noBackup.canonicalPath),
         )
         assertTrue(recordFile.isFile)
-        assertTrue(File(noBackup, "thinq/thinq_client_id").isFile)
+        assertTrue(File(testStorageDir, "thinq_client_id").isFile)
 
         val backupEnabled = context.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP != 0
         assertFalse("android:allowBackup must be false in the manifest", backupEnabled)
@@ -257,7 +256,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun keyLoss_readsNullSurfacesUnlockFailed_thenSaveRecovers() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
         assertEquals(TOKEN_A, store.readToken())
 
@@ -283,11 +282,11 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     @Test
     fun reopenAfterKeyLoss_surfacesUnlockFailedWithoutCrash() = runBlocking {
-        val store = AndroidEncryptedThinQCredentialStore(context)
+        val store = store()
         store.save(TOKEN_A, COUNTRY_PH)
         deleteKeyForTesting()
 
-        val reopened = AndroidEncryptedThinQCredentialStore(context)
+        val reopened = store()
         val state = reopened.observe().first()
         assertTrue("a reopened store must surface unlockFailed", state.unlockFailed)
         assertFalse(state.present)
@@ -296,15 +295,25 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     // --- helpers ---------------------------------------------------------------
 
-    private fun credentialFile(): File =
-        File(context.noBackupFilesDir, "thinq/thinq_credential.enc")
+    private fun store(): AndroidEncryptedThinQCredentialStore =
+        AndroidEncryptedThinQCredentialStore.forTesting(
+            context = context,
+            storageSubdirectory = TEST_STORAGE_SUBDIR,
+            testKeyAlias = TEST_KEY_ALIAS,
+        )
+
+    private val testStorageDir: File
+        get() = File(context.noBackupFilesDir, TEST_STORAGE_SUBDIR)
+
+    private fun credentialFile(): File = File(testStorageDir, "thinq_credential.enc")
 
     private fun maskOf(token: String): String = "$MASK ${token.takeLast(4)}"
 
     companion object {
         const val COUNTRY_PH = "PH"
         const val MASK = "\u2022\u2022\u2022\u2022"
-        private const val TEST_KEY_ALIAS = "airchive_thinq_pat_key"
+        private const val TEST_STORAGE_SUBDIR = "thinq-credential-adapter-test"
+        private const val TEST_KEY_ALIAS = "airchive_thinq_pat_test_key"
 
         private fun deleteKeyForTesting() {
             KeyStore.getInstance("AndroidKeyStore").apply {

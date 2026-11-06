@@ -1,0 +1,726 @@
+{
+  "baseline_commit": "2415bda046a73c63b3e7755a7d8906d913734ca2",
+  "captured_date": "2026-10-27",
+  "scope": "approved UI identity, native prototype, preferences, fixtures and evidence",
+  "exclusions": [
+    "unrelated skill deletions",
+    "local.properties",
+    "local credentials and cache",
+    "config changes",
+    "APKs",
+    "emulator and browser debug logs"
+  ],
+  "files": [
+    {
+      "path": ".impeccable/build/spec.json",
+      "bytes": 34070,
+      "sha256": "2ba8eb6a97c5a77afc171a06fc8460f4acca767a18359d668fb52b261f2d3275"
+    },
+    {
+      "path": ".impeccable/build/state.json",
+      "bytes": 12827,
+      "sha256": "aefebb7ea1a2f8a067f84dd62d49083acb1d72b34e19080abc46ddcd10fe6f06"
+    },
+    {
+      "path": ".impeccable/config.json",
+      "bytes": 22,
+      "sha256": "35ce5e28b8dc53eeffd37dd7de7b8884dc0bb6613ba55996da7a12cc6291d031"
+    },
+    {
+      "path": ".impeccable/design.json",
+      "bytes": 14412,
+      "sha256": "a613877abc90179ef866362b72ebc7c07c000428de52867646060ac0c58fcd5a"
+    },
+    {
+      "path": ".impeccable/interface-detail-contract.md",
+      "bytes": 1479,
+      "sha256": "629f90e1cef51cec07f0e3a581339c38efa779e7a8c8b25412072fe6218f8264"
+    },
+    {
+      "path": ".impeccable/mocks/decision/clear-utility-prompt.txt",
+      "bytes": 3377,
+      "sha256": "f382ffbbf79a0a9ce6918761bfd8081a615d319b14d6b472116aebfa4fe357b6"
+    },
+    {
+      "path": ".impeccable/mocks/decision/clear-utility.json",
+      "bytes": 3499,
+      "sha256": "465997c4b11d6744c29fa16a3f8c226f73beb1d68bbe76d2bc94d33bf7a2380d"
+    },
+    {
+      "path": ".impeccable/mocks/decision/clear-utility.png",
+      "bytes": 1110687,
+      "sha256": "a67971a1cb5f0f2278f342daf8070e69410bf9089f4249e30dfabbea8cdf40fa"
+    },
+    {
+      "path": ".impeccable/mocks/decision/climate-journal-prompt.txt",
+      "bytes": 3344,
+      "sha256": "839f7f7889cd9ff92a7a6e6f688cef4e47417feb033e590257a91084b89d6901"
+    },
+    {
+      "path": ".impeccable/mocks/decision/climate-journal.json",
+      "bytes": 3470,
+      "sha256": "9e9bd7c6964db2e8c76033d04bf77668f11b18e2c411ae6dd73c583bcf9942e8"
+    },
+    {
+      "path": ".impeccable/mocks/decision/climate-journal.png",
+      "bytes": 1222841,
+      "sha256": "43b73350a46cc2b7959f891664e1d4b73435afe02205de99ed43fbe2ef0ea40a"
+    },
+    {
+      "path": ".impeccable/mocks/decision/familiar-material-prompt.txt",
+      "bytes": 3221,
+      "sha256": "236608b41798661250b15645d610901b2360ca7eed86e98c5b888776fd465011"
+    },
+    {
+      "path": ".impeccable/mocks/decision/familiar-material.json",
+      "bytes": 3343,
+      "sha256": "9ad4846800960bc590a8f55a0150d15a55f51e56bf369eb0dae6a7190d616191"
+    },
+    {
+      "path": ".impeccable/mocks/decision/familiar-material.png",
+      "bytes": 1166621,
+      "sha256": "26b772d8493bc3541719b9413d4aaac8b65163b0b41dc4c76534c05affff36c1"
+    },
+    {
+      "path": ".impeccable/mocks/decision/home-instrument-prompt.txt",
+      "bytes": 3042,
+      "sha256": "0e1e2fe1788cf78b68020d4863b713cbfdf17a7419ad73b7f3737b615c0830b9"
+    },
+    {
+      "path": ".impeccable/mocks/decision/home-instrument.json",
+      "bytes": 3164,
+      "sha256": "88c9387cb497a5519385c580cdc245b1e422bd1c796b7ca58d56eac116e74993"
+    },
+    {
+      "path": ".impeccable/mocks/decision/home-instrument.png",
+      "bytes": 1186481,
+      "sha256": "74500464278b9e62ee5fad072848e22a71a68622944b12ca974720599dcd5ec2"
+    },
+    {
+      "path": ".impeccable/mocks/home-balanced.json",
+      "bytes": 993,
+      "sha256": "5d988b9cf9fb58a881d63d7344cc86ccdee5e2f6b100d0826287dc98c2249333"
+    },
+    {
+      "path": ".impeccable/mocks/home-balanced.png",
+      "bytes": 1509408,
+      "sha256": "80a7c23b342a59ce5ab94f7025ffad06e69404f3a5b6172fb04cd0085cbc34ab"
+    },
+    {
+      "path": ".impeccable/mocks/home-balanced.png.json",
+      "bytes": 993,
+      "sha256": "5d988b9cf9fb58a881d63d7344cc86ccdee5e2f6b100d0826287dc98c2249333"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/01-original.json",
+      "bytes": 3164,
+      "sha256": "88c9387cb497a5519385c580cdc245b1e422bd1c796b7ca58d56eac116e74993"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/01-original.png",
+      "bytes": 1186481,
+      "sha256": "74500464278b9e62ee5fad072848e22a71a68622944b12ca974720599dcd5ec2"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers-prompt.txt",
+      "bytes": 3178,
+      "sha256": "00ad2fb411e5de4c622d484aeb19bc3a72882a5b899c2504c36b65793914359f"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers-v2-prompt.txt",
+      "bytes": 839,
+      "sha256": "fba11b8fa5c55118ebc183b1d80761652e3918c151ce55e836f352efa442e37a"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers-v2.json",
+      "bytes": 993,
+      "sha256": "5d988b9cf9fb58a881d63d7344cc86ccdee5e2f6b100d0826287dc98c2249333"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers-v2.png",
+      "bytes": 1509408,
+      "sha256": "80a7c23b342a59ce5ab94f7025ffad06e69404f3a5b6172fb04cd0085cbc34ab"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers.json",
+      "bytes": 3322,
+      "sha256": "989c62b3ab1be120354aced4a28b94abebdbfbc085421fd3c16cbd02a6cbf9ac"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/02-balanced-registers.png",
+      "bytes": 1224156,
+      "sha256": "757f31b31d15b57face9476cee261f909cf62234e26966d9c859451143fe0dfe"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/03-shared-instrument-prompt.txt",
+      "bytes": 3200,
+      "sha256": "a78f2b18be08489d00b260a2c7b5bd0aa74138fbe64e64ebb1bd0df877f4fc72"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/03-shared-instrument.json",
+      "bytes": 3462,
+      "sha256": "709f9f8d2fd639d63eccdd998275f4deb86ddde5e9b228f2c3199f88def07b1f"
+    },
+    {
+      "path": ".impeccable/mocks/home-instrument/03-shared-instrument.png",
+      "bytes": 1234617,
+      "sha256": "c8e4afed1f4a5882914022be4cd686826c9e4cb610eadd5e6d79b87a149783c5"
+    },
+    {
+      "path": ".impeccable/mocks/home-original.json",
+      "bytes": 3164,
+      "sha256": "88c9387cb497a5519385c580cdc245b1e422bd1c796b7ca58d56eac116e74993"
+    },
+    {
+      "path": ".impeccable/mocks/home-original.png",
+      "bytes": 1186481,
+      "sha256": "74500464278b9e62ee5fad072848e22a71a68622944b12ca974720599dcd5ec2"
+    },
+    {
+      "path": ".impeccable/mocks/home-original.png.json",
+      "bytes": 3164,
+      "sha256": "88c9387cb497a5519385c580cdc245b1e422bd1c796b7ca58d56eac116e74993"
+    },
+    {
+      "path": ".impeccable/mocks/home-shared.json",
+      "bytes": 3462,
+      "sha256": "709f9f8d2fd639d63eccdd998275f4deb86ddde5e9b228f2c3199f88def07b1f"
+    },
+    {
+      "path": ".impeccable/mocks/home-shared.png",
+      "bytes": 1234617,
+      "sha256": "c8e4afed1f4a5882914022be4cd686826c9e4cb610eadd5e6d79b87a149783c5"
+    },
+    {
+      "path": ".impeccable/mocks/home-shared.png.json",
+      "bytes": 3462,
+      "sha256": "709f9f8d2fd639d63eccdd998275f4deb86ddde5e9b228f2c3199f88def07b1f"
+    },
+    {
+      "path": ".impeccable/review/diff/final/heatmap.png",
+      "bytes": 573396,
+      "sha256": "c0cce65a0b85077909688abf0c65556313cc25f6761c0699cf8e5aaea2742093"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/app-title.png",
+      "bytes": 91398,
+      "sha256": "d3f8f5722918a1767d7b2014b179a743b690dc0a4fab95a2f9d3099037280a3c"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/apply.png",
+      "bytes": 64521,
+      "sha256": "33b0fb05f070ec6f57a1c48c52e985609d3fa9f7118bda5756e6138233d410b2"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/chart-label.png",
+      "bytes": 64642,
+      "sha256": "a52ffc42d47c721f3c1d0af956c5326b83e78b700c7d6b568ab0d0ea004e3dad"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/chart.png",
+      "bytes": 125484,
+      "sha256": "1bfbd5c4cfbd8e092a8ff4e7db404ae8507222c62fd3cee1a30ab0770e049020"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/controls-title.png",
+      "bytes": 68508,
+      "sha256": "61bfceca1aa2bc901628cf30837c37fd9d462d34fcbcb23311b02c7d7f083ba6"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/coverage.png",
+      "bytes": 80589,
+      "sha256": "58cc39fcc681dced023fee8ad03c9368c3472dc59d699a98a9dc75aabb8b8095"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/device-age.png",
+      "bytes": 67106,
+      "sha256": "e7d396fb05e726751232fba69a8eda3e68ddb107dc342b15668ee189112ff6f0"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/device-title.png",
+      "bytes": 71187,
+      "sha256": "fcbc02c32d875377d359ee4878fb49793f3f1f841a6a2e8effcb4b44abc1fc86"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/energy-label.png",
+      "bytes": 64397,
+      "sha256": "6e976a69f3d3c3c9e100024edef9d3c1ef3356a3662422b792c75583ed1bbeea"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/energy-link.png",
+      "bytes": 81815,
+      "sha256": "b05f98a71acd14702c5bc4244264e6e484ae21b43e496f26adbf1398f59697ff"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/energy-unit.png",
+      "bytes": 135892,
+      "sha256": "c32b6ba5fda7a4de12763b1fa47b9351a39b8c7a3151e74377f5fecc58066bf1"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/energy-value.png",
+      "bytes": 132183,
+      "sha256": "79494a1061fe8739f811a9f051b902cb7d82cdc70b04673e1c2e194e2f01e7b2"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/fan.png",
+      "bytes": 49170,
+      "sha256": "48bc9cc7a9f9b50f2910ab10102b5d57bca98c72a222c83117877e166d8768b7"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/finalized.png",
+      "bytes": 43653,
+      "sha256": "3a58703078b4c402ca000506790bf2d15277bdd24f78dac9ed32cc6568fd099c"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/minus.png",
+      "bytes": 43389,
+      "sha256": "0030c2a0e5d63ec6d186a8d857d4e21d33b8a408d79ed1ba6bcc01ac5815ae5e"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/mode.png",
+      "bytes": 39163,
+      "sha256": "0d86cda9701c08f7f83fb0585fe0284c78ede8ef089f9ff227b1576cec198fd9"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/native-header.png",
+      "bytes": 102453,
+      "sha256": "367c3c3c7edfcb8fa62e31af331a2583d9a3fae4c5e41838c0fb0e4c7860e2ae"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/navigation.png",
+      "bytes": 61232,
+      "sha256": "49b2601adfd5f97ef57bbb0071426982fc2253387deefe3e6ee32786f9111ee0"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/panel.png",
+      "bytes": 316647,
+      "sha256": "3355c69d0f1f033e80d9a6fa00725f9d2a9cb2c10d0143ccdc3ac867b10914f1"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/plus.png",
+      "bytes": 50420,
+      "sha256": "6007b97cb567d8a9fbed87eaad29d9c7ff435c11a76682e3f88dc23301b07dee"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/power.png",
+      "bytes": 128284,
+      "sha256": "281dd837274b5a778d4b163e850656207a6478a00919a14f152ac45caf2bc244"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/record-title.png",
+      "bytes": 63569,
+      "sha256": "a7ec5b1509c5ce41a6d26436b9b8d964aa2fd0a69aba075d60bac203e6659a1b"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/sample-age.png",
+      "bytes": 94847,
+      "sha256": "7a4734c6f776a225ade54b6d42380bd06f7c95afbc1a088cddd7a4c9020e2810"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/sync.png",
+      "bytes": 62953,
+      "sha256": "9141592eac9d8039d5d6260c03fc10f192406d6b8e5be106d4a44dc54f189a8f"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/target-label.png",
+      "bytes": 66850,
+      "sha256": "0a0c0700c7fcf71fdebebe417c4d73dae4f75f15395d3c3541451ffeb150fc7b"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/target-unit.png",
+      "bytes": 130576,
+      "sha256": "0eaa52325c0058ded86e50af3562e03b43c29fdbfa5c010ac706217688f503ec"
+    },
+    {
+      "path": ".impeccable/review/diff/final/regions/target-value.png",
+      "bytes": 204132,
+      "sha256": "8bbe1d671c7807723cb2199a34c61208e3242eb87568d6ce8e24eca5217c634c"
+    },
+    {
+      "path": ".impeccable/review/diff/final/report.json",
+      "bytes": 22218,
+      "sha256": "1ad4a031ccaea6560a2134f13508319889c1e2a562647d9a5f8d5f3a7db49aba"
+    },
+    {
+      "path": ".impeccable/review/diff/final/side-by-side.png",
+      "bytes": 1350309,
+      "sha256": "0a4762f1e298cbb27d7990edec4c99097a34ae030195814ac0c0093b94af5c9b"
+    },
+    {
+      "path": ".impeccable/review/final-verification.md",
+      "bytes": 3881,
+      "sha256": "c79f608acee08880d3f0e99674c5b7e084fa778ac77f99f3174da854ec4d3d3b"
+    },
+    {
+      "path": ".impeccable/review/finish-review.md",
+      "bytes": 1870,
+      "sha256": "cd93deb4d897dec1f502938088ebdc8cf0f5e7170926f9f0aebeb680d1838750"
+    },
+    {
+      "path": ".impeccable/review/hero-repro.png",
+      "bytes": 107484,
+      "sha256": "413b9d270768c61ffb14b3da3c9b4e4b65b3b8abaf50706026bdd8bee4d32e0c"
+    },
+    {
+      "path": ".impeccable/review/interface-detail-build.log",
+      "bytes": 9385,
+      "sha256": "baa6c61d9f41753ab63e6912fd987132250258ff8e5690ab4315099ed31940d4"
+    },
+    {
+      "path": ".impeccable/review/interface-detail-large-text.log",
+      "bytes": 805,
+      "sha256": "6b3ef3d50f96db4e52d639957703564d1d27b2d4c3997bd4b7f1d1d7b6914a28"
+    },
+    {
+      "path": ".impeccable/review/interface-detail-native.log",
+      "bytes": 4270,
+      "sha256": "cb31ce71dc90b7c99056dd88b2930b87e0f4dc2974b800b727d8de09a33c6006"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/finish-review.md",
+      "bytes": 4338,
+      "sha256": "316b09236c3e8e7e37e32732e1781a0405f598c884443498789e2f431113fdf0"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/index.html",
+      "bytes": 2071,
+      "sha256": "799d59125d10f37ca19c8b45eb7025664d19af62fc15956cc03c9d82f6957681"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-detailed-dark-1.0.png",
+      "bytes": 176305,
+      "sha256": "1923073a60d422d925b877a7bead53d332ce3b60123a2988b715b73b16836217"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-detailed-dark-1.3.png",
+      "bytes": 175266,
+      "sha256": "e7b983d42be7e783925dbd8ea51faed051a5f5ce97eb296e74a3872cea554eee"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-detailed-light-1.0.png",
+      "bytes": 174123,
+      "sha256": "f308a51fcbce7da3e92f0d9edef0cb00e412ee1d1b04de5f20e734cd5eb6a463"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-detailed-light-1.3.png",
+      "bytes": 174227,
+      "sha256": "a359ec5393b0624d3adc86d8f6597078332fd4619afad86bff1e140331a9dcd8"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-simple-dark-1.0.png",
+      "bytes": 142416,
+      "sha256": "eff07362ba457adfc4ab3a7821d68378bf000aa14f995f22c7495d96099099d5"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-simple-dark-1.3.png",
+      "bytes": 157986,
+      "sha256": "52bf3e167e12a9efa651cb1eb878de65df0432e90594547fa63b3c929c2bd040"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-simple-light-1.0.png",
+      "bytes": 141219,
+      "sha256": "f80141b6650607a32698d233dc6053f063b490f53ddba4ccd752aabeecc2d466"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/interface-simple-light-1.3.png",
+      "bytes": 156840,
+      "sha256": "417892db3ef0642441eda41fde2d727f155964b66f536e3a69cfcf9d90c36635"
+    },
+    {
+      "path": ".impeccable/review/interface-detail/verification.md",
+      "bytes": 1780,
+      "sha256": "84e20d89c9def9d1d6d34186a9c1fcd1dbd4e36e1e636b44053e358f2f0bec54"
+    },
+    {
+      "path": ".impeccable/review/phone-dark-large-text.png",
+      "bytes": 147424,
+      "sha256": "5027cb10bf3fd34fc586917c00e9e5f64896fc69cd08c900e018c1d730d1bb47"
+    },
+    {
+      "path": ".impeccable/review/phone-dark.png",
+      "bytes": 153770,
+      "sha256": "503398dbd1d6c67aae48a623578a94116df1d5a28c514eac737245090c55f9f4"
+    },
+    {
+      "path": ".impeccable/review/phone-light-large-text.png",
+      "bytes": 146590,
+      "sha256": "a36fcf7eff948a98abbd534e9b871206b432c9966e4e70a0b3d12c5ff81dd7fc"
+    },
+    {
+      "path": ".impeccable/review/phone-light.png",
+      "bytes": 153142,
+      "sha256": "14d6c23e7ee31bbd0c4d3f652e4ca301a8f6c61a2ab3f9cb020415f44f633d57"
+    },
+    {
+      "path": ".impeccable/review/remaining/device-dark-1.0.png",
+      "bytes": 124236,
+      "sha256": "df69ea07a5ded70e271d4ac61eba42dbdfcc615cc2b787600b436b95da84116f"
+    },
+    {
+      "path": ".impeccable/review/remaining/device-dark-1.3.png",
+      "bytes": 149157,
+      "sha256": "95c9de8770bf3dd614f3cf927a69acaf60cec0b3a63c9c5ee56e1fce040a95e9"
+    },
+    {
+      "path": ".impeccable/review/remaining/device-light-1.0.png",
+      "bytes": 123461,
+      "sha256": "de70f11dce06d36ceae5c191fcf5f1ad6662b042bbbb2403c4edf0f154463e43"
+    },
+    {
+      "path": ".impeccable/review/remaining/device-light-1.3.png",
+      "bytes": 147279,
+      "sha256": "430e93ce5bb951fd6bc9787f71c5a59c78e35bb9a9490dce80c3ae3dbcf7eeb4"
+    },
+    {
+      "path": ".impeccable/review/remaining/energy-dark-1.0.png",
+      "bytes": 157897,
+      "sha256": "b0053dd86f9668294a1382d0e0248ddca2fbafaf1a733074a19c26f7450b1cf2"
+    },
+    {
+      "path": ".impeccable/review/remaining/energy-dark-1.3.png",
+      "bytes": 163943,
+      "sha256": "c964f94d6456e158b64c8d4a7d348c60cb7e7f1a588b6c6d6d91c6ccb61d0fdc"
+    },
+    {
+      "path": ".impeccable/review/remaining/energy-light-1.0.png",
+      "bytes": 156807,
+      "sha256": "c1c4690acb32f1f33e6ced45a0c83f008fa5ce721c9d8ac62be5d7f91dfc51d3"
+    },
+    {
+      "path": ".impeccable/review/remaining/energy-light-1.3.png",
+      "bytes": 163641,
+      "sha256": "318f8c7818e7addf04a37b23bef55ea80f822ef775a8ba777c8c472df939de79"
+    },
+    {
+      "path": ".impeccable/review/remaining/finish-review.md",
+      "bytes": 3544,
+      "sha256": "4f973ea613f8450fd39e07026a5efd7c033783209c8237555d96b07bbead518c"
+    },
+    {
+      "path": ".impeccable/review/remaining/finish-verdict.md",
+      "bytes": 1490,
+      "sha256": "b23465c47184cde99e116e86347a4feda10bf18b724dc7e6194c884c040bdf2a"
+    },
+    {
+      "path": ".impeccable/review/remaining/history-dark-1.0.png",
+      "bytes": 158520,
+      "sha256": "12e2caf1e1c37d6ec9e01eaeab60e8b72a8bdaf42efcbeb165786b9e7c5cbcde"
+    },
+    {
+      "path": ".impeccable/review/remaining/history-dark-1.3.png",
+      "bytes": 178869,
+      "sha256": "6b6ca66ff56031f64b5a6d16b1f28f7ff8f6998beeadbed2c30eda827a7cbf4e"
+    },
+    {
+      "path": ".impeccable/review/remaining/history-light-1.0.png",
+      "bytes": 159180,
+      "sha256": "15c1b2effd2f97aa4316714a54efe63313c300707aa558a78314ab95672678af"
+    },
+    {
+      "path": ".impeccable/review/remaining/history-light-1.3.png",
+      "bytes": 179933,
+      "sha256": "58635a708a8925baa3465ba7733b223c77f299a5967f44e9469d0e569d801aa8"
+    },
+    {
+      "path": ".impeccable/review/remaining/index.html",
+      "bytes": 2253,
+      "sha256": "517c50abdd46f4fc6cd0f974cd44ada6fe8f581b9aee5634d0aef2a895fffa15"
+    },
+    {
+      "path": ".impeccable/review/remaining/settings-dark-1.0.png",
+      "bytes": 151351,
+      "sha256": "95292531f14586cddc6c2ba1c596ad0305ae21b237c740214502b2f20c90ee94"
+    },
+    {
+      "path": ".impeccable/review/remaining/settings-dark-1.3.png",
+      "bytes": 159420,
+      "sha256": "13f06cd3db340a5d184a2a905e8d6bedf8e5fd30fd4ca56430b453dd32f44a08"
+    },
+    {
+      "path": ".impeccable/review/remaining/settings-light-1.0.png",
+      "bytes": 149763,
+      "sha256": "02b18c76fb61ac9fcd307ede46d16cc8787c299273b2e828ca3306bdb27b9424"
+    },
+    {
+      "path": ".impeccable/review/remaining/settings-light-1.3.png",
+      "bytes": 158027,
+      "sha256": "5e5aa4dcd65acfe915a56809b15dd636368904f16d5f20ed49c21c399fb6e0a9"
+    },
+    {
+      "path": ".impeccable/review/remaining/verification.md",
+      "bytes": 2057,
+      "sha256": "c6299b14986e95e0fbad2cfb176b5ccb7325490c7abf34c0077d6140fd748cac"
+    },
+    {
+      "path": ".impeccable/review/routes-build.log",
+      "bytes": 9495,
+      "sha256": "40f3557383ffb3c5d7ac077aca0bece82095f3aa28c4d4a822ff88d40c1d7191"
+    },
+    {
+      "path": ".impeccable/review/routes-instrumentation.log",
+      "bytes": 2902,
+      "sha256": "11e2d6e533df7ba37f813147a24e256891a28a94b192a8e6478b4c3f7694f954"
+    },
+    {
+      "path": ".impeccable/review/routes-large-text.log",
+      "bytes": 796,
+      "sha256": "cf78a956276ad7e79e466ec9d27d6c155117a856bc2624700372848cb32cec6d"
+    },
+    {
+      "path": ".impeccable/shared-instrument-contract.md",
+      "bytes": 1725,
+      "sha256": "eeccd3e32fc9f2ecf03b503d66c9978c44f535aaaeb3538f9e8165b68ac6a9f6"
+    },
+    {
+      "path": ".impeccable/shared-instrument-remaining-contract.md",
+      "bytes": 1930,
+      "sha256": "acc1615463a6234c899e7bd1fe235f0344cae2b2569ea92677c584f8e15108ac"
+    },
+    {
+      "path": ".impeccable/shared-regions-exact.json",
+      "bytes": 8800,
+      "sha256": "1ca669e07bb4d86112e3e7153c0713903fc1e005c051cda7cdbf2e065d035036"
+    },
+    {
+      "path": ".impeccable/surfaces/airchive-shared-productionairchiveapp-kt-2a22bfbc.md",
+      "bytes": 1968,
+      "sha256": "fa33b89412d9aedd5df92fae9097c9a700587086a6798cc72125abba457556a5"
+    },
+    {
+      "path": "DESIGN.md",
+      "bytes": 15596,
+      "sha256": "75f64e90e638863a6f4008385f3fb17b011fdf526bc78316f17ee861951c79ad"
+    },
+    {
+      "path": "PRODUCT.md",
+      "bytes": 4637,
+      "sha256": "1c170563f60f1587d6691dc19cb334fd9901e371b377b6081c6162e643d410b8"
+    },
+    {
+      "path": "androidApp/build.gradle.kts",
+      "bytes": 8685,
+      "sha256": "fa6b3cb3434b82ff1d3c8015d44f9644eee84f36af1a5e1981be98ed7f2fc390"
+    },
+    {
+      "path": "androidApp/src/androidTest/kotlin/cloud/airchive/personal/preview/SharedInstrumentUiTest.kt",
+      "bytes": 11432,
+      "sha256": "51e7ec26fec9383a7d5a75dc4ec017df0eb0899d342ba0bffb3d89e264280f45"
+    },
+    {
+      "path": "androidApp/src/debug/AndroidManifest.xml",
+      "bytes": 257,
+      "sha256": "b0be83f2bc298e44683b35a2733729048cf7bcb81d867c6e95cfdcb8fb7db7a3"
+    },
+    {
+      "path": "androidApp/src/debug/kotlin/cloud/airchive/personal/preview/InstrumentRoutePreview.kt",
+      "bytes": 3642,
+      "sha256": "fb7008c448862acc14b7d44ae9b614a2932bed9f744089d986e2c1b1b531eb87"
+    },
+    {
+      "path": "androidApp/src/debug/kotlin/cloud/airchive/personal/preview/SharedInstrumentPreviewActivity.kt",
+      "bytes": 6199,
+      "sha256": "6d40bf6463a2f6447792414977cbaf418121563dcedd267bc3e4243c31edb939"
+    },
+    {
+      "path": "androidApp/src/main/kotlin/cloud/airchive/personal/MainActivity.kt",
+      "bytes": 9127,
+      "sha256": "3635d3b4b6511a22f27e099e1763d580e9e38b058cabfa92cf6354d99c272511"
+    },
+    {
+      "path": "androidApp/src/main/kotlin/cloud/airchive/personal/data/preferences/AndroidInterfaceDetailPreferences.kt",
+      "bytes": 997,
+      "sha256": "f20cc22334a7595178c750c36815e7f9c7dd10bb1086a8be304be28fc7a8832e"
+    },
+    {
+      "path": "docs/home-instrument-refinement.md",
+      "bytes": 6877,
+      "sha256": "3613585e11b772e71eb2274c237a1a7f901d5918172d53d0fc11df3463c9f6f6"
+    },
+    {
+      "path": "docs/interface-detail.md",
+      "bytes": 4745,
+      "sha256": "c39e8a288230d92adacdcd52c00465ecd204df097e8b4373b68767d5d7c17bfd"
+    },
+    {
+      "path": "docs/shared-instrument-screens.md",
+      "bytes": 8081,
+      "sha256": "df59d8db448771fad216645cb0044ba8c1e440c48ce32d912c1858ff15cd54cc"
+    },
+    {
+      "path": "docs/ui-ux-agent-handoff.md",
+      "bytes": 4846,
+      "sha256": "0f72eef6ddb1773fac77d41f7130e1d2b12dd7639f690d878d2250788381ed77"
+    },
+    {
+      "path": "docs/ui-ux-identity-exploration.md",
+      "bytes": 5208,
+      "sha256": "6c6d90ccbf3389f52d20cb1e4b38418722156cbe7c5775f0494b954e1c9802bf"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/AirchiveApp.kt",
+      "bytes": 49097,
+      "sha256": "c72ace749edcd1e3cab6290a9e41a4e79cc42d4623e69cb748375f90e5b8a9c8"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/AirchiveTheme.kt",
+      "bytes": 3868,
+      "sha256": "416bad69e26552ba037cc62c8c5c7882a0e68650fa34155041f54d891a59cad8"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/DeviceControlsCard.kt",
+      "bytes": 28480,
+      "sha256": "fbc09f156c1af340053c864fb3d40aab2813c42dc852280b1225715977c50caa"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/DeviceLiveStateCard.kt",
+      "bytes": 8396,
+      "sha256": "c0d5b8d03fcf546d173a7a43ead64363aeabd65e22c4f9c3071d54c50d98da6f"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/EnergyRoute.kt",
+      "bytes": 42761,
+      "sha256": "61244478dc22ef341df5dabdd8d94b0f44a07ad0dab7f6d39521be5e961a8d61"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/HistoryHealthRoute.kt",
+      "bytes": 44669,
+      "sha256": "969408cc4d3d65e92cc3aeedff43e86194f99ff465493b6d53dc572b6ece8b30"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/HomeInstrument.kt",
+      "bytes": 23694,
+      "sha256": "b9fec40ab51506cbc0c0cd9f9f2322cd61a7197a63fa8ce8d35cb1107d505f1c"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/InstrumentLayout.kt",
+      "bytes": 4980,
+      "sha256": "66b986f40ab8a43f735ba670e5f67d4ea7473e860510fe78a49588b1dce3249d"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/InterfaceDetail.kt",
+      "bytes": 3215,
+      "sha256": "0e5d4eb4c292778da2f287f1db2ce5214478bc6b75ad516ae6b61661bcfc7abc"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/ProductionAirchiveApp.kt",
+      "bytes": 53578,
+      "sha256": "1ef9d88cdf43978b2ab6c25c0518853c444b9809e2cbb2f544821c0fcbcf183f"
+    },
+    {
+      "path": "shared/src/commonMain/kotlin/cloud/airchive/shared/SettingsRoute.kt",
+      "bytes": 19604,
+      "sha256": "6d1cece2d23d7182b69686db00f4d1b95f4516ebef76e0b23130f72129242974"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/cloud/airchive/shared/HomeInstrumentTest.kt",
+      "bytes": 3044,
+      "sha256": "b00c043b8762ee25b7dc4e3fb1105ad22e26b94285364cfb4b4ad995bec339b5"
+    },
+    {
+      "path": "shared/src/commonTest/kotlin/cloud/airchive/shared/InterfaceDetailTest.kt",
+      "bytes": 474,
+      "sha256": "d24dccb7625a570871a8e86ecc8036d1161120516db1f9f7f1f3efd8320708ec"
+    }
+  ],
+  "hash_note": "SHA-256 values describe original workspace bytes; Git may normalize line endings for text. PNG bytes are unchanged."
+}
