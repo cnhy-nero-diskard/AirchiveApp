@@ -79,10 +79,11 @@ class SharedInstrumentUiTest {
                 assertTrue(range.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, Bundle().apply {
                     putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 0f)
                 }))
-                awaitVisibleNode { it.text?.toString() == "Granularity · 5 minutes" }
-                val graph = awaitVisibleNode { it.contentDescription?.toString()?.startsWith("Smooth line chart, 288 time buckets") == true }
-                tapNodeCenter(graph)
-                awaitVisibleNode { it.text?.toString()?.contains("elapsed intervals measured") == true }
+                awaitNode { it.text?.toString() == "Granularity · 5 minutes" }
+                scrollForward()
+                val graph = awaitNode { it.contentDescription?.toString()?.startsWith("Energy chart, 288 time buckets") == true }
+                assertTrue(graph.performAction(graph.actionList.first { it.label?.toString() == "Next time bucket" }.id))
+                awaitNode { it.stateDescription?.toString()?.contains("selected bucket 0") == true }
                 saveCapture("feedback-granularity-line-$dark")
                 val reset = awaitVisibleNode { it.contentDescription?.toString() == "Energy chart time bucket size" }
                 val resetRange = allNodes(reset).firstOrNull { it.rangeInfo != null }
@@ -93,6 +94,49 @@ class SharedInstrumentUiTest {
                 awaitVisibleNode { it.text?.toString() == "Granularity · 1 hour" }
                 awaitVisibleNode { it.text?.toString() == "Energy (kWh)" }
                 saveCapture("feedback-granularity-hourly-$dark")
+            }
+        }
+    }
+
+    @Test fun fineEnergyIntervalsSupportManualAndAutoZoom() {
+        for ((progress, minutes, total) in listOf(Triple(0f, 5, 288), Triple(1f, 15, 96), Triple(2f, 30, 48))) {
+            launch(route = 2).use {
+                val slider = awaitVisibleNode { it.contentDescription?.toString() == "Energy chart time bucket size" }
+                val range = allNodes(slider).firstOrNull { it.rangeInfo != null } ?: awaitNode { it.rangeInfo?.max == 3f }
+                assertTrue(range.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, Bundle().apply {
+                    putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, progress)
+                }))
+                awaitNode { it.text?.toString() == "Granularity · $minutes minutes" }
+                scrollForward()
+                fun graph() = awaitNode { it.contentDescription?.toString()?.startsWith("Energy chart, $total time buckets") == true }
+                fun showing(count: Int) = awaitNode { it.stateDescription?.toString()?.startsWith("Showing $count of $total") == true }
+                val plot = uiDevice.findObject(By.descStartsWith("Energy chart, $total time buckets"))
+                assertNotNull(plot)
+                plot.pinchOpen(.8f)
+                val zoomed = awaitNode {
+                    it.contentDescription?.toString()?.startsWith("Energy chart, $total time buckets") == true &&
+                        it.stateDescription?.toString()?.startsWith("Showing $total of $total") == false
+                }
+                val beforePan = zoomed.stateDescription.toString()
+                val bounds = Rect().also { zoomed.getBoundsInScreen(it) }
+                assertTrue(uiDevice.swipe(bounds.centerX(), bounds.centerY(), bounds.centerX() - bounds.width() / 4, bounds.centerY(), 20))
+                awaitNode {
+                    it.contentDescription?.toString()?.startsWith("Energy chart, $total time buckets") == true &&
+                        it.stateDescription.toString() != beforePan
+                }
+                tapNodeCenter(graph())
+                awaitNode { it.stateDescription?.toString()?.contains("selected bucket") == true }
+                clickNode(awaitNode { it.text?.toString() == "Reset zoom" })
+                showing(total)
+                clickNode(awaitVisibleNode { it.contentDescription?.toString()?.startsWith("Auto zoom. Off") == true })
+                awaitNode { it.contentDescription?.toString()?.startsWith("Auto zoom. Off") == true && allNodes(it).any { node -> node.isChecked } }
+                scrollForward()
+                tapNodeCenter(graph())
+                showing(5)
+                awaitNode { it.text?.toString()?.contains("elapsed intervals measured") == true }
+                saveCapture("energy-auto-zoom-$minutes")
+                clickNode(awaitNode { it.text?.toString() == "Reset zoom" })
+                showing(total)
             }
         }
     }
