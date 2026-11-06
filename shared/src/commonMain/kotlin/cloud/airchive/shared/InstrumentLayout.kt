@@ -93,3 +93,24 @@ fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpand
         if (showDivider) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
+
+/** Stacked fields remain readable at large text sizes and with long identifiers. */
+@Composable
+internal fun InstrumentDetail(label: String, value: String, note: String? = null) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+        note?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+@Composable
+internal fun InstrumentDetailLine(text: String) {
+    val split = text.indexOf(": ")
+    if (split > 0) InstrumentDetail(text.substring(0, split), text.substring(split + 2))
+    else Text(text, style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(vertical = 6.dp))
+}
