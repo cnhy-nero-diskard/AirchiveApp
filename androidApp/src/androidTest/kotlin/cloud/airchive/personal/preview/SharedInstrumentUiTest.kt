@@ -2574,8 +2574,22 @@ class SharedInstrumentUiTest {
     }
 
     private fun expandFirstHistoryHour() {
-        val hour = awaitVisibleNode { it.text?.toString()?.contains("Show details") == true }
+        // Hour rows describe themselves ("Hour 17:00 to 18:00. 0.093 kilowatt-hours. ...") and expose
+        // Expanded/Collapsed as state on their clickable parent node, as disclosures do. Open the first
+        // collapsed one.
+        val hour = awaitVisibleNode {
+            it.contentDescription?.toString()?.startsWith("Hour ") == true &&
+                (it.stateDescription ?: it.parent?.stateDescription)?.toString() == "Collapsed"
+        }
         clickNode(hour)
+        // The expanded readings join a lazily composed list. The automation client caches node child lists
+        // and can serve the pre-expansion tree for several seconds, so clear its cache while waiting.
+        awaitTrue("the opened hour exposes its five-minute readings") {
+            instrumentation.uiAutomation.clearCache()
+            find(instrumentation.uiAutomation.rootInActiveWindow) {
+                it.contentDescription?.toString()?.startsWith("Sample at ") == true
+            } != null
+        }
     }
 
     private fun awaitLoadButtonEnabled() {
