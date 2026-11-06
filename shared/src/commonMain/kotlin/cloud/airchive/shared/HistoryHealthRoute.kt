@@ -262,6 +262,12 @@ private fun SyncContextCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Cache & sync", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            HistoryStatusBadge(when {
+                isRefreshing -> "Syncing history"
+                sync?.lastError != null -> syncErrorLabel(sync.lastError!!)
+                sync?.lastSuccessfulSyncEpochMillis != null -> "History cached"
+                else -> "Awaiting first sync"
+            }, attention = sync?.lastError != null)
             // One concise polite live region: only announces when sync status
             // changes to an error state (denied/offline/remote failure).
             Text(
@@ -280,9 +286,9 @@ private fun SyncContextCard(
 
             val lastSuccess = sync?.lastSuccessfulSyncEpochMillis
             if (lastSuccess != null) {
-                Text("Last successful sync: ${syncInstantLabel(lastSuccess, nowEpochMillis)}.")
+                InstrumentDetail("Last successful sync", syncInstantLabel(lastSuccess, nowEpochMillis))
             } else {
-                Text("Last successful sync: not yet.")
+                InstrumentDetail("Last successful sync", "Not yet")
             }
 
             val lastErrorCode = sync?.lastError
@@ -294,9 +300,9 @@ private fun SyncContextCard(
                 } else {
                     ""
                 }
-                Text("Last sync error: $label$whenText.")
+                InstrumentDetail("Last sync error", "$label$whenText")
             } else {
-                Text("No recorded sync errors.")
+                InstrumentDetail("Sync errors", "None recorded")
             }
 
             Text(
@@ -356,24 +362,26 @@ private fun CollectorHealthCard(health: CollectorHealth?, nowEpochMillis: Long) 
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                Text("Status: ${health.status.label()}.", style = MaterialTheme.typography.bodyMedium)
+                HistoryStatusBadge(health.status.label(), attention = health.status != CollectorStatus.HEALTHY)
+                Text("Cached health record; this is not a live connection indicator.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 health.lastPollEpochMillis?.let {
-                    Text("Last poll: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("Last poll: not recorded.")
+                    InstrumentDetail("Last poll", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Last poll", "Not recorded")
                 health.lastSuccessEpochMillis?.let {
-                    Text("Last success: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("Last success: not recorded.")
+                    InstrumentDetail("Last successful collection", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Last successful collection", "Not recorded")
                 health.lastFailureEpochMillis?.let {
-                    Text("Last failure: ${ageLabel(ageFrom(it, nowEpochMillis))} ago.")
-                } ?: Text("No recorded failure.")
+                    InstrumentDetail("Last failure", "${ageLabel(ageFrom(it, nowEpochMillis))} ago")
+                } ?: InstrumentDetail("Collector failures", "None recorded")
                 (health.consecutiveFailures ?: 0).takeIf { it > 0 }?.let { failures ->
-                    Text("$failures consecutive failure(s).")
+                    InstrumentDetail("Consecutive failures", "$failures")
                 }
                 health.lastErrorClass?.takeIf { it.isNotBlank() }?.let { clazz ->
-                    Text("Last failure class: ${clazz.safeHistoryLabel()}.")
+                    InstrumentDetail("Failure category", clazz.safeHistoryLabel())
                 }
                 health.collectorVersion?.takeIf { it.isNotBlank() }?.let { version ->
-                    Text("Collector version: ${version.safeHistoryLabel()}.")
+                    InstrumentDetail("Collector version", version.safeHistoryLabel())
                 }
                 Text(
                     "Health is cached sample data from the collector; it does not describe a live connection.",
@@ -455,17 +463,10 @@ private fun SampleCountersCard(counters: SampleCounters) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                Text(
-                    "${counters.total} cached observation(s): ${counters.normal} normal · " +
-                        "${counters.anomalous} anomalous · ${counters.missingOrUnavailable} missing/unavailable.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "${counters.energyFailed} energy-read failure(s) · ${counters.stateFailed} state-read " +
-                        "failure(s) · ${counters.unclassifiedLegacyFailure} unclassified legacy source " +
-                        "failure(s) · ${counters.usable} usable energy value(s).",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                InstrumentDetail("Cached observations", "${counters.total}")
+                InstrumentDetail("Usable energy values", "${counters.usable}", "Finite readings with recognized units, excluding anomalies and energy-read failures.")
+                InstrumentDetail("Sample quality", "${counters.normal} normal · ${counters.anomalous} anomalous", "${counters.missingOrUnavailable} missing or unavailable")
+                InstrumentDetail("Source read failures", "${counters.energyFailed} energy · ${counters.stateFailed} state", "${counters.unclassifiedLegacyFailure} unclassified legacy source failures")
                 Text(
                     "Counts can overlap — one sample may be anomalous and also have a failed source read.",
                     style = MaterialTheme.typography.bodySmall,
@@ -487,17 +488,11 @@ private fun SampleLegendCard() {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text("What each sample status means", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "NORMAL — the collector did not flag an anomaly. The energy value may still be missing or " +
-                    "carry an unknown unit; only finite values with a recognized unit count as usable energy.",
-            )
-            Text(
-                "ANOMALOUS — the interval exists but the collector/dashboard flags it (for example a partial " +
-                    "observation, device offline, or an implausible value). It stays visible but is excluded from " +
-                    "usable-energy counts.",
-            )
-            Text("MISSING_INTERVAL — the interval exists but has no usable energy value; it is a gap.")
-            Text("UNAVAILABLE — no sample exists for the slot; it is a gap.")
+            InstrumentDetail("Normal", "No anomaly flagged", "Usable energy still requires a finite value and a recognized unit. Normal does not guarantee a usable reading.")
+            InstrumentDetail("Anomalous", "Recorded, excluded from usable energy", "Flagged by the collector or dashboard, for example a partial observation, offline device or implausible value. The original sample stays visible.")
+            InstrumentDetail("Missing interval", "Gap in measured energy", "An interval record exists, but it contains no usable energy value.")
+            InstrumentDetail("Unavailable", "No sample for this slot", "No observation was recorded. This remains a gap.")
+            InstrumentDetail("Unknown unit", "Value preserved without conversion", "A recorded value without a recognized unit is excluded from usable energy; its unit is never guessed.")
             Text(
                 "A null or missing energy value is a gap — never a measured zero.",
                 style = MaterialTheme.typography.labelLarge,
@@ -974,4 +969,15 @@ private fun Double.toTrimmedString(): String {
         }
     }
     return if (negative && (intPart > 0 || frac != 0)) "-$text" else text
+}
+
+@Composable
+private fun HistoryStatusBadge(label: String, attention: Boolean) {
+    androidx.compose.material3.Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (attention) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (attention) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
 }
