@@ -314,6 +314,8 @@ private fun EnergyGranularitySlider(value: Float, lastIndex: Int, onValueChange:
     val position by animateFloatAsState(value, tween(260), label = "Granularity indicator")
     val primary = MaterialTheme.colorScheme.primary
     val inactive = MaterialTheme.colorScheme.outlineVariant
+    val activeStep = MaterialTheme.colorScheme.onPrimary
+    val inactiveStep = MaterialTheme.colorScheme.onSurfaceVariant
     Slider(value = value, onValueChange = { onValueChange(it.roundToInt().toFloat()) },
             valueRange = 0f..lastIndex.toFloat(), steps = lastIndex - 1,
             thumb = {
@@ -327,7 +329,8 @@ private fun EnergyGranularitySlider(value: Float, lastIndex: Int, onValueChange:
                     drawLine(inactive, Offset(0f, y), Offset(size.width, y), 4.dp.toPx(), StrokeCap.Round)
                     drawLine(primary, Offset(0f, y), Offset(x, y), 4.dp.toPx(), StrokeCap.Round)
                     (0..lastIndex).forEach { stop ->
-                        drawCircle(if (stop <= position) primary else inactive, 2.dp.toPx(),
+                        // Contrast with the track so each stop stays visible on either side of the thumb.
+                        drawCircle(if (stop <= position) activeStep else inactiveStep, 1.5.dp.toPx(),
                             Offset(size.width * stop / lastIndex, y))
                     }
                     drawCircle(primary, 5.dp.toPx(), Offset(x, y))
