@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -775,12 +776,14 @@ fun ProductionSettingsRoute(
         SettingsSection("History") {
             InstrumentDisclosure("History access", if (accessState is OwnerAccessState.Authorized)
                 "Access verified for this account" else "Review account access", initiallyExpanded = accessState !is OwnerAccessState.Authorized,
-                informational = true, alwaysShowSummary = true) {
-                OwnerAccessStatusCard(ownerAccessState = accessState)
+                informational = true, alwaysShowSummary = true, status = historyAccessStatus(accessState)) {
+                // The row already names this section; repeating it as a heading inside only adds height.
+                OwnerAccessStatusCard(ownerAccessState = accessState, showHeading = false)
             }
-            InstrumentDisclosure("History and storage", if (historySync.hasCachedHistory)
-                "${history.observations.size} cached observations" else "No history cached yet", informational = true,
-                alwaysShowSummary = true, showDivider = false) {
+            InstrumentDisclosure("History and storage",
+                historyStorageSummary(historySync.hasCachedHistory, history.observations.size, historySync.lastSuccessfulAgeMillis),
+                informational = true, alwaysShowSummary = true, showDivider = false,
+                status = historyStorageStatus(historySync.hasCachedHistory, hasSyncError = history.sync?.lastError != null)) {
                 SyncStatusCard(historySync, history.sync, nowEpochMillis, onManualRefresh, isHistorySyncing)
                 if (partition != null) {
                     LocalDiagnosticsCard(partition, history, credentialState, credentialIsVisible = session != null,
@@ -863,7 +866,7 @@ private fun ProductionThinQCredentialCard(
             else -> "No ThinQ token saved"
         }
         InstrumentDisclosure("AC connection", summary, informational = true, alwaysShowSummary = true,
-            showDivider = false) {
+            showDivider = false, status = acConnectionStatus(ownerUid, ownerContextReady, credentialState)) {
             Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (ownerUid != null && ownerContextReady) {
                     Text(credentialState.productionCredentialStatus(), style = MaterialTheme.typography.bodyMedium)
@@ -891,8 +894,15 @@ private fun ProductionThinQCredentialCard(
                     }
 
                     if (!replacing) {
-                        Button(modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { replacing = true }) {
-                            Text(if (credentialState.present || credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
+                        // Emphasis follows need: a missing or unreadable token is the call to action; replacing a
+                        // working one is occasional upkeep and stays visually quiet.
+                        if (credentialState.present && !credentialState.unlockFailed) {
+                            OutlinedButton(modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small,
+                                enabled = !busy, onClick = { replacing = true }) { Text("Replace ThinQ PAT") }
+                        } else {
+                            Button(modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.small, enabled = !busy, onClick = { replacing = true }) {
+                                Text(if (credentialState.unlockFailed) "Replace ThinQ PAT" else "Set up ThinQ PAT")
+                            }
                         }
                     } else {
                         OutlinedTextField(
@@ -1107,7 +1117,7 @@ private fun ProductionAccountCard(
 
     Column(Modifier.fillMaxWidth()) {
         InstrumentDisclosure("Google account", session?.let { it.displayName ?: it.email ?: it.uid }
-            ?: "Google account: signed out", alwaysShowSummary = true) {
+            ?: "Google account: signed out", alwaysShowSummary = true, status = googleAccountStatus(session != null)) {
             Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (session != null) {
                     Text("Account UID: ${session.uid}", style = MaterialTheme.typography.bodySmall)

@@ -154,13 +154,15 @@ private fun SettingsHeaderCard() {
 // ---------------------------------------------------------------------------
 
 @Composable
-internal fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState) {
+internal fun OwnerAccessStatusCard(ownerAccessState: OwnerAccessState, showHeading: Boolean = true) {
     InstrumentBlock(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("History access", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            if (showHeading) {
+                Text("History access", modifier = Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            }
             // Only fixed copy per state: the reason, error code, and session
             // identity details of the sealed state are deliberately never
             // interpolated into UI strings.
