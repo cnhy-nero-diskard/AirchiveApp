@@ -166,6 +166,17 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Keep the development build installable beside the privately signed
+            // production package, whose signing key is not available on every machine.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            buildConfigField(
+                "String",
+                "AIRCHIVE_FIREBASE_APPLICATION_ID",
+                buildConfigStringLiteral(airchiveConfigValueOrBlank("firebase.debugApplicationId")),
+            )
+        }
         getByName("release") {
             isMinifyEnabled = false
             if (hasPrivateReleaseSigning) {

@@ -17,9 +17,11 @@ Rebuild the Android app, install the debug APK on a connected device, and launch
 - `$run-on-device` — build + install + launch from the **current** repo directory.
 - `$run-on-device <worktree>` — build + install + launch from the named worktree (e.g. `$run-on-device AirchiveApp-owner-mobile-auth-access`).
 
-Package id used for launch: `cloud.airchive.personal` (debug and release share
-the application id, so a debug install replaces any same-signature build on the
-device; back up anything valuable from a differently-signed install first).
+Package id used for launch: **`cloud.airchive.personal.debug`** — the debug
+variant sets `applicationIdSuffix = ".debug"` in `androidApp/build.gradle.kts`, so
+`cloud.airchive.personal` is not installed and `monkey`/`am start` against it fail
+with "No activities found". Back up anything valuable from a differently-signed
+install first.
 
 ## Workflow
 
@@ -62,11 +64,39 @@ a hang to the user.
 
 ### 3. Launch on device
 
-```powershell
-C:\Users\cnhyn\AppData\Local\Android\Sdk\platform-tools\adb.exe shell monkey -p cloud.airchive.personal 1
+Launch with `am start`, **never `monkey`**. On Xiaomi/HyperOS, `adb shell monkey`
+flips the system `accelerometer_rotation` setting from `0` to `1`, silently
+unlocking the phone's rotation lock; the app itself does not touch that setting.
+(`am start` leaves it alone — verified on 2406APNFAG / Android 16.)
+
+Guard the rotation lock: read it before and after launch, and restore it if
+anything changed.
+
+```bash
+ADB=~/Library/Android/sdk/platform-tools/adb   # or adb on PATH
+SERIAL=<device serial from `adb devices`>
+PRE_AUTO=$($ADB -s "$SERIAL" shell settings get system accelerometer_rotation | tr -d '\r')
+PRE_ROT=$($ADB -s "$SERIAL" shell settings get system user_rotation | tr -d '\r')
+
+$ADB -s "$SERIAL" shell am start -W \
+  -n cloud.airchive.personal.debug/cloud.airchive.personal.MainActivity
+
+POST_AUTO=$($ADB -s "$SERIAL" shell settings get system accelerometer_rotation | tr -d '\r')
+if [ "$POST_AUTO" != "$PRE_AUTO" ]; then
+  $ADB -s "$SERIAL" shell settings put system accelerometer_rotation "$PRE_AUTO"
+fi
 ```
 
-Confirm `Events injected: 1` in the output.
+Confirm the `am start` output ends with `Status: ok` / `Complete` (not
+`Error: Activity not started`) and that the activity is resumed:
+
+```bash
+$ADB -s "$SERIAL" shell pidof cloud.airchive.personal.debug
+$ADB -s "$SERIAL" shell dumpsys activity activities | grep -m1 topResumedActivity
+```
+
+When several devices are attached (emulator + phone), always pass `-s <serial>`
+and set `ANDROID_SERIAL=$SERIAL` for the Gradle install step.
 
 ### 4. Report
 
@@ -77,4 +107,5 @@ Summarize: build directory, branch, `BUILD SUCCESSFUL`, `Installed on <device>`,
 - **Run everything inside the target worktree.** Never switch branches in the original repo.
 - **Do not launch if the build failed.** Stop and report the error.
 - **Only commit log files if intended.** `build_install*.log` are build artifacts; prefer to leave them untracked.
-- **Verify before reporting success.** Confirm the `installDebug` task and the monkey `Events injected` line actually appear in the output.
+- **Never launch with `monkey`.** It unlocks rotation on HyperOS; use `am start -W -n <pkg>/<activity>` instead.
+- **Verify before reporting success.** Confirm the `installDebug` task, the `am start` success status, and the resumed activity actually appear in the output.
