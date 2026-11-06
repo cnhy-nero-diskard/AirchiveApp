@@ -1,6 +1,7 @@
 package cloud.airchive.shared
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -53,6 +54,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.HistorySnapshot
@@ -342,12 +344,37 @@ private fun loadStateDialogText(state: EnergyLoadUiState): String? = when (state
 // Period summary: sums, averages, coverage
 // ---------------------------------------------------------------------------
 
+internal fun energySummaryAsOf(presentation: EnergyHistoryPresentation): String {
+    val latest = presentation.intervalPoints.filter { it.usable }.maxOfOrNull { it.intervalEndEpochMillis }
+        ?: return "No readings yet"
+    val zone = TimeZone.of(presentation.timeZoneId)
+    val local = Instant.fromEpochMilliseconds(latest).toLocalDateTime(zone)
+    val today = Instant.fromEpochMilliseconds(presentation.nowEpochMillis).toLocalDateTime(zone).date
+    val hour = (local.hour % 12).takeIf { it != 0 } ?: 12
+    val minute = local.minute.toString().padStart(2, '0')
+    val meridiem = if (local.hour < 12) "AM" else "PM"
+    val date = if (local.date == today) "" else "${local.date} · "
+    return "As of $date$hour:$minute $meridiem"
+}
+
 @Composable
 private fun EnergySummaryCard(presentation: EnergyHistoryPresentation) {
+    val periodLabel = when (presentation.periodType) {
+        EnergyPeriodType.DAY -> "daily"
+        EnergyPeriodType.WEEK -> "weekly"
+        EnergyPeriodType.MONTH -> "monthly"
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Sampled energy", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(presentation.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—", style = InstrumentReading)
-        Text("kWh · five-minute interval sum", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Net $periodLabel power consumed", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(presentation.usableEnergyValueWh?.let { instrumentNumber(it / 1000) } ?: "—",
+                style = InstrumentReading, modifier = Modifier.weight(1f, fill = false).alignByBaseline(), maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 28.sp, maxFontSize = 76.sp))
+            Text("kWh", modifier = Modifier.alignByBaseline(), style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(energySummaryAsOf(presentation), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
