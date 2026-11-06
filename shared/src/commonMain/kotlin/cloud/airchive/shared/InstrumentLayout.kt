@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,11 +63,51 @@ internal fun InstrumentBlock(modifier: Modifier = Modifier, content: @Composable
     }
 }
 
-/** Technical explanation remains available without preceding the everyday task. */
+/** Health of what a disclosure row describes; the row's summary text always carries the same meaning in words. */
+enum class InstrumentStatus { OK, ATTENTION, NEUTRAL }
+
+/**
+ * Decorative status mark. Shape, not color alone, separates the states (check, exclamation, dash),
+ * and it is hidden from accessibility because the adjacent summary text states the condition.
+ */
+@Composable
+internal fun InstrumentStatusGlyph(status: InstrumentStatus, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val ink = when (status) {
+        InstrumentStatus.OK -> scheme.primary
+        InstrumentStatus.ATTENTION -> scheme.error
+        InstrumentStatus.NEUTRAL -> scheme.outline
+    }
+    val mark = scheme.onError
+    Canvas(modifier.size(22.dp).clearAndSetSemantics {}) {
+        val stroke = 2.dp.toPx()
+        val w = size.width
+        val h = size.height
+        val ringRadius = size.minDimension / 2 - stroke / 2
+        when (status) {
+            InstrumentStatus.OK -> {
+                drawCircle(ink, ringRadius, center, style = Stroke(stroke))
+                drawLine(ink, Offset(w * .3f, h * .52f), Offset(w * .45f, h * .66f), stroke, StrokeCap.Round)
+                drawLine(ink, Offset(w * .45f, h * .66f), Offset(w * .72f, h * .36f), stroke, StrokeCap.Round)
+            }
+            InstrumentStatus.ATTENTION -> {
+                drawCircle(ink, size.minDimension / 2, center)
+                drawLine(mark, Offset(w * .5f, h * .28f), Offset(w * .5f, h * .56f), stroke, StrokeCap.Round)
+                drawCircle(mark, stroke * .6f, Offset(w * .5f, h * .72f))
+            }
+            InstrumentStatus.NEUTRAL -> {
+                drawCircle(ink, ringRadius, center, style = Stroke(stroke))
+                drawLine(ink, Offset(w * .32f, h * .5f), Offset(w * .68f, h * .5f), stroke, StrokeCap.Round)
+            }
+        }
+    }
+}
+
+/** Technical explanation remains available without preceding the everyday task. [status] adds a leading mark; it never changes expanded/collapsed semantics. */
 @Composable
 fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpanded: Boolean = false,
                          inset: Dp = 20.dp, showDivider: Boolean = true, informational: Boolean = false,
-                         alwaysShowSummary: Boolean = false,
+                         alwaysShowSummary: Boolean = false, status: InstrumentStatus? = null,
                          content: @Composable ColumnScope.() -> Unit) {
     val detail = LocalInterfaceDetail.current
     val openByDefault = initiallyExpanded || (informational && detail == InterfaceDetail.DETAILED)
@@ -77,6 +118,7 @@ fun InstrumentDisclosure(title: String, summary: String? = null, initiallyExpand
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics {
                 stateDescription = if (expanded) "Expanded" else "Collapsed"
             }, contentPadding = PaddingValues(horizontal = inset, vertical = 12.dp)) {
+            status?.let { InstrumentStatusGlyph(it, Modifier.padding(end = 14.dp)) }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.Start) {
                 Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
