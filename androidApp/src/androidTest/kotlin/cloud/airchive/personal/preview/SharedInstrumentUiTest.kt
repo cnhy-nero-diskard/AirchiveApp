@@ -1314,13 +1314,13 @@ class SharedInstrumentUiTest {
             clickTab("Settings")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.DETAILED)
             clickTab("Energy")
-            awaitNode { it.text?.toString() == "Sampled energy" }
+            awaitNode { it.text?.toString() == "Net daily power consumed" }
             val detailedTruth = energySummarySnapshot()
 
             clickTab("Settings")
             selectShellDetail(scene, cloud.airchive.shared.InterfaceDetail.SIMPLE)
             clickTab("Energy")
-            awaitNode { it.text?.toString() == "Sampled energy" }
+            awaitNode { it.text?.toString() == "Net daily power consumed" }
             assertEquals(detailedTruth, energySummarySnapshot())
         }
         clearFixturePreferences()
@@ -1406,11 +1406,11 @@ class SharedInstrumentUiTest {
             assertTextPresent("Fan speed")
 
             clickText("Energy")
-            awaitNode { it.text?.toString() == "Sampled energy" }
+            awaitNode { it.text?.toString() == "Net daily power consumed" }
             awaitVisibleNode { it.text?.toString() == "Retry history loading" }
             assertTextPresent("Coverage and measurement details")
             val energyTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
-            assertTrue(energyTree.indexOf("Sampled energy") < energyTree.indexOf("Offline history"))
+            assertTrue(energyTree.indexOf("Net daily power consumed") < energyTree.indexOf("Offline history"))
 
             clickText("History")
             awaitVisibleNode { it.text?.toString() == "Recorded hours (newest first)" }
@@ -1615,7 +1615,7 @@ class SharedInstrumentUiTest {
                 systemTheme(if (dark) "yes" else "no")
                 for ((route, name) in listOf(1 to "device", 2 to "energy", 3 to "history", 4 to "settings")) {
                     launch(dark = dark, route = route).use {
-                        awaitNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Sampled energy"; 3 -> "Sample status guide"; else -> "Account actions" } }
+                        awaitNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Net daily power consumed"; 3 -> "Sample status guide"; else -> "Account actions" } }
                         if (route == 1) awaitNode { it.text?.toString() == "25" }
                         instrumentation.waitForIdleSync()
                         instrumentation.uiAutomation.waitForIdle(250, 5_000)
@@ -1880,7 +1880,7 @@ class SharedInstrumentUiTest {
                         for ((route, anchor) in listOf(
                             "Home" to "Airchive",
                             "Device" to "Set temperature",
-                            "Energy" to "Sampled energy",
+                            "Energy" to "Net daily power consumed",
                             "History" to "History",
                         )) {
                             clickTab(route)
@@ -1963,7 +1963,7 @@ class SharedInstrumentUiTest {
                 for ((route, label) in listOf(
                     "Home" to "Airchive",
                     "Device" to "Device details",
-                    "Energy" to "Sampled energy",
+                    "Energy" to "Net daily power consumed",
                     "History" to "Recorded hours (newest first)",
                 )) {
                     clickTab(route)
@@ -2330,7 +2330,7 @@ class SharedInstrumentUiTest {
         val fixedLabels = setOf(
             "Home", "Device", "Energy", "History", "Settings", "Day", "Week", "Month",
             "Coverage and measurement details", "Daily record", "Daily records", "Units and conversions",
-            "Period summary", "Sampled energy", "Sampled five-minute interval energy", "Retry history loading",
+            "Period summary", "Net daily power consumed", "Sampled five-minute interval energy", "Retry history loading",
             "History access", "History and storage", "Connection details", "Account actions",
             "Sync and collector health", "Sample status guide", "Recorded hours (newest first)",
             "No cached observations yet", "Set up ThinQ PAT", "Set temperature", "Room temperature",
@@ -2443,7 +2443,7 @@ class SharedInstrumentUiTest {
 
     private fun energySummarySnapshot(): List<String> {
         val lines = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).lineSequence().toList()
-        val labelIndex = lines.indexOf("Sampled energy")
+        val labelIndex = lines.indexOf("Net daily power consumed")
         assertTrue("the summary label is in the accessibility tree", labelIndex >= 0 && labelIndex + 2 < lines.size)
         return listOf(
             lines[labelIndex],
