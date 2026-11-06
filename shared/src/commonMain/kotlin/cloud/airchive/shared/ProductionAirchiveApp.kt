@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -25,6 +26,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -56,6 +59,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cloud.airchive.shared.contract.credentials.ThinQCredentialState
 import cloud.airchive.shared.contract.history.HistoryPartition
@@ -870,10 +874,13 @@ private fun ProductionThinQCredentialCard(
             Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (ownerUid != null && ownerContextReady) {
                     Text(credentialState.productionCredentialStatus(), style = MaterialTheme.typography.bodyMedium)
-                    Text("LG client ID: ${credentialState.clientId}", style = MaterialTheme.typography.bodySmall)
-                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.", style = MaterialTheme.typography.bodySmall)
+                    InstrumentFact("LG client ID", credentialState.clientId)
+                    Text("The PAT is verified against the configured AC before it is stored in Android Keystore. A successful read does not prove command authority.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    Text("Sign in with Google before setting up the separate ThinQ credential.")
+                    // The action area below already tells a signed-out owner what to do; do not repeat it here.
+                    Text("The ThinQ token is stored separately from your Google sign-in, in this device's protected storage.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -925,6 +932,7 @@ private fun ProductionThinQCredentialCard(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                         )
                         Button(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             enabled = !busy,
                             onClick = {
                                 val submittedToken = rawToken
@@ -988,6 +996,7 @@ private fun ProductionThinQCredentialCard(
                             Text(if (busy) "Verifying and saving…" else "Verify and save securely")
                         }
                         TextButton(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             onClick = {
                                 // Cancel the request coroutine itself: its coordinator
                                 // catches CancellationException and supersedes exactly
@@ -1005,7 +1014,9 @@ private fun ProductionThinQCredentialCard(
 
                     if (credentialState.present || credentialState.unlockFailed) {
                         TextButton(shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.heightIn(min = 48.dp),
                             enabled = !busy,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                             onClick = { confirmingRemoval = true },
                         ) { Text("Remove ThinQ PAT") }
                     }
@@ -1118,20 +1129,16 @@ private fun ProductionAccountCard(
     Column(Modifier.fillMaxWidth()) {
         InstrumentDisclosure("Google account", session?.let { it.displayName ?: it.email ?: it.uid }
             ?: "Google account: signed out", alwaysShowSummary = true, status = googleAccountStatus(session != null)) {
-            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
                 if (session != null) {
-                    Text("Account UID: ${session.uid}", style = MaterialTheme.typography.bodySmall)
-                    TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestChangeAccount) {
-                        Text("Switch Google account")
-                    }
-                    TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestClearCache) {
-                        Text("Clear local history cache")
-                    }
-                    TextButton(shape = MaterialTheme.shapes.small, enabled = !busy, onClick = controller::requestSignOut) {
-                        Text("Sign out of Google")
-                    }
+                    InstrumentFact("Account UID", session.uid)
+                    SettingsActionRow("Switch Google account", enabled = !busy, onClick = controller::requestChangeAccount)
+                    SettingsActionRow("Clear local history cache", enabled = !busy, onClick = controller::requestClearCache)
+                    SettingsActionRow("Sign out of Google", enabled = !busy, destructive = true,
+                        onClick = controller::requestSignOut)
                 } else {
-                    Text("Sign in from the Home screen to load Airchive history for this device.")
+                    Text("Sign in from the Home screen to load Airchive history for this device.",
+                        style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -1182,6 +1189,32 @@ private fun ProductionAccountCard(
                 }
             },
         )
+    }
+}
+
+/**
+ * One account action as an aligned, divided list row. A row that discards data or ends the session is
+ * tinted with the error role, so it is not mistaken for a neighbouring routine action.
+ */
+@Composable
+private fun SettingsActionRow(
+    label: String,
+    enabled: Boolean,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Text(label, Modifier.weight(1f), textAlign = TextAlign.Start)
     }
 }
 
