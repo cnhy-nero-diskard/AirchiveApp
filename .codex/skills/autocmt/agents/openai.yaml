@@ -1,0 +1,7 @@
+interface:
+  display_name: "Auto-commit"
+  short_description: "Incremental commits and guarded pushes"
+  default_prompt: "Use $autocmt status to report the branch and pending changes, or $autocmt checkpoint to commit and push them in coherent chunks."
+
+policy:
+  allow_implicit_invocation: true
