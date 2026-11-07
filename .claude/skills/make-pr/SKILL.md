@@ -33,7 +33,9 @@ host.
 
 `:androidApp:assembleDebugAndroidTest` compiles the test APK but does not execute
 it. When the branch touches androidApp Firebase code, `tests/firebase/firestore.rules`,
-or instrumentation tests, run them under the local emulator harness:
+or instrumentation tests, start the GPU-backed emulator with
+`scripts/test-emulator.sh start`, set the `ANDROID_SERIAL` it prints, and run
+them under the local emulator harness:
 
 ```powershell
 firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller --only auth,firestore "gradlew.bat :androidApp:connectedDebugAndroidTest"
