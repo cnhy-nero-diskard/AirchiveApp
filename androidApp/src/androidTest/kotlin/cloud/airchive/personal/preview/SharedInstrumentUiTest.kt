@@ -705,14 +705,16 @@ class SharedInstrumentUiTest {
             clickTab("Home")
             awaitNode { it.text?.toString() == "Device read 0 sec ago" }
             awaitNode { it.text?.toString() == "25" }
-            clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
-            awaitNode { it.text?.toString() == "26" }
 
+            // Hold the fake before the tap: the target is sent 1 s after the last change, which could
+            // otherwise complete before a hold placed after the tap.
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity {
                 fixture.set(it.shellFixture!!)
                 fixture.get().thinQGate.hold()
             }
+            clickNode(awaitNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitNode { it.text?.toString() == "26" }
             awaitTrue("the fake command reaches its deferred gate") {
                 fixture.get().counters.thinQCommandSubmissions.get() == 1
             }
@@ -732,13 +734,22 @@ class SharedInstrumentUiTest {
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Sending,
             )
 
+            // Home still shows the held command after the mode changes. Its "… confirmed." message replaces
+            // that row for only 3 s, which cannot be observed reliably through accessibility here, so check
+            // the lasting outcome instead: the command is confirmed once and the pending row is gone.
+            clickTab("Home")
+            awaitVisibleNode { it.text?.toString()?.startsWith("Sending target temperature ") == true }
             fixture.get().thinQGate.release()
             awaitTrue("the original command completes exactly once") {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
             }
-            clickTab("Home")
-            awaitNode { it.text?.toString()?.contains("confirmed") == true }
+            awaitTrue("Home no longer shows the pending command") {
+                instrumentation.uiAutomation.clearCache()
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.text?.toString()?.startsWith("Sending target temperature ") == true
+                } == null
+            }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
     }
@@ -1038,6 +1049,8 @@ class SharedInstrumentUiTest {
 
             val telemetryBeforeRefresh = AtomicInteger()
             scene.onActivity { telemetryBeforeRefresh.set(fixture.get().counters.telemetryReads.get()) }
+            // The manual history refresh action lives on the History overview card.
+            clickTab("History")
             clickText("Refresh history")
             awaitTrue("manual history refresh reaches the isolated telemetry fake") {
                 fixture.get().counters.telemetryReads.get() > telemetryBeforeRefresh.get()
@@ -1062,14 +1075,17 @@ class SharedInstrumentUiTest {
                 fixture.get().setThinQLiveReadTimestamp(fixture.get().clock.now())
             }
             clickText("Device")
-            awaitTrue("Device route entry performs its own live read") {
+            // Opening Device is presentation-only once this context has read (ThinQContextCoordinator
+            // performDeviceEntry); the explicit refresh control performs the new live read.
+            clickText("Refresh device state")
+            awaitTrue("the explicit device refresh performs its own live read") {
                 fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeDeviceEntry.get()
             }
             awaitTrue("the synthetic live read publishes its current state") {
                 fixture.get().thinQContext.liveStateController.state.value is
                     cloud.airchive.shared.data.thinq.ThinQLiveRefreshState.Current
             }
-            assertEquals("Device route reads use the controlled device-read clock",
+            assertEquals("device refreshes use the controlled device-read clock",
                 fixture.get().clock.now(), currentDeviceReadAt(fixture.get()))
             clickTab("Home")
 
