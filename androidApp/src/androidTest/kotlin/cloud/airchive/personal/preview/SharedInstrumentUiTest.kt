@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.SystemClock
 import android.graphics.Rect
+import android.view.Choreographer
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -16,6 +17,8 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.*
@@ -2825,6 +2828,21 @@ class SharedInstrumentUiTest {
         }
     }
 
+    private fun awaitComposedFrames(frames: Int = 2) {
+        val rendered = CountDownLatch(1)
+        instrumentation.runOnMainSync {
+            var remaining = frames
+            val callback = object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    remaining -= 1
+                    if (remaining <= 0) rendered.countDown() else Choreographer.getInstance().postFrameCallback(this)
+                }
+            }
+            Choreographer.getInstance().postFrameCallback(callback)
+        }
+        assertTrue("the UI renders $frames frames", rendered.await(5, TimeUnit.SECONDS))
+    }
+
     private fun selectShellDetail(
         scene: ActivityScenario<SharedInstrumentPreviewActivity>,
         detail: cloud.airchive.shared.InterfaceDetail,
@@ -2838,6 +2856,10 @@ class SharedInstrumentUiTest {
             }
             selected
         }
+        // The preference is a StateFlow read through collectAsState, so two selections that land before
+        // composition runs are conflated into one change and disclosure defaults never reset. Let
+        // composition adopt this selection before the helper returns, on every route.
+        awaitComposedFrames()
         // Selector copy exists only on Settings. Prefer its rendered label when
         // it is on the active route; otherwise settle the current route without
         // searching for a Settings-only string.
