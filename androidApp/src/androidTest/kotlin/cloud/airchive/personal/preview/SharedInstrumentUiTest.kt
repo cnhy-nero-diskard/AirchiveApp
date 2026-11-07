@@ -1162,7 +1162,7 @@ class SharedInstrumentUiTest {
 
             clickTab("Home")
             clickText("Continue with Google")
-            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            awaitVisibleNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
             awaitTrue("the fake history access check completes") {
                 var reads = 0
                 scene.onActivity { reads = it.shellFixture!!.counters.deviceIdentityReads.get() }
@@ -1182,7 +1182,8 @@ class SharedInstrumentUiTest {
             assertDisclosureState("Units and conversions", "Collapsed")
             assertTextAbsent("Period summary")
             assertTextAbsent("Elapsed five-minute slots:")
-            assertTextAbsent("Interval values retain their recorded units.")
+            // Unit explanation copy was split into detail rows (2ff256f); a closed section hides them all.
+            assertTextAbsent("Recorded units are preserved; recognized values are normalized to Wh for comparison.")
             // A manual override is permitted, and exposes the daily children.
             clickDisclosure("Daily record")
             assertDisclosureState("Daily record", "Expanded")
@@ -1269,7 +1270,9 @@ class SharedInstrumentUiTest {
             clickTab("Energy")
             awaitVisibleNode { it.text?.toString() == "Sampled five-minute interval energy" }
             awaitVisibleNode { it.text?.toString()?.startsWith("Elapsed five-minute slots:") == true }
-            awaitVisibleNode { it.text?.toString()?.startsWith("Interval values retain their recorded units.") == true }
+            awaitVisibleNode { it.text?.toString() == "Recorded units are preserved; recognized values are normalized to Wh for comparison." }
+            awaitVisibleNode { it.text?.toString() == "No conversion is guessed. These values are excluded from usable energy sums." }
+            awaitVisibleNode { it.text?.toString() == "An average over the measured interval, never instantaneous wattage." }
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
@@ -1308,7 +1311,7 @@ class SharedInstrumentUiTest {
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             awaitShellSettled(scene)
 
             clickTab("Settings")
@@ -1388,7 +1391,10 @@ class SharedInstrumentUiTest {
             scene.onActivity { fixture.set(it.shellFixture!!) }
             fixture.get().setThinQReadFailure(IllegalStateException("synthetic fake read failure"))
             clickText("Device")
-            awaitNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
+            // Opening Device is presentation-only once the context has read (ThinQContextCoordinator
+            // performDeviceEntry); only the explicit refresh control performs a new read.
+            clickText("Refresh device state")
+            awaitVisibleNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
             assertFalse(accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).contains("Current power consumption as of "))
             assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
 
@@ -1409,8 +1415,17 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Net daily power consumed" }
             awaitVisibleNode { it.text?.toString() == "Retry history loading" }
             assertTextPresent("Coverage and measurement details")
-            val energyTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
-            assertTrue(energyTree.indexOf("Net daily power consumed") < energyTree.indexOf("Offline history"))
+            // The summary must precede the offline-loading section. Only part of this long page is in the
+            // accessibility tree at once, so compare on-screen positions rather than snapshot text order:
+            // the summary is found first, and once Offline history is reached it is above that section or
+            // already scrolled out of the tree.
+            awaitVisibleNode { it.text?.toString() == "Net daily power consumed" }
+            val offlineHistory = awaitVisibleNode { it.text?.toString() == "Offline history" }
+            instrumentation.uiAutomation.clearCache()
+            val summaryNow = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == "Net daily power consumed" }
+            val offlineTop = Rect().also(offlineHistory::getBoundsInScreen).top
+            assertTrue("Net daily power consumed stays above Offline history",
+                summaryNow == null || Rect().also(summaryNow::getBoundsInScreen).bottom <= offlineTop)
 
             clickText("History")
             awaitVisibleNode { it.text?.toString() == "Recorded hours (newest first)" }
@@ -1437,7 +1452,7 @@ class SharedInstrumentUiTest {
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             awaitShellSettled(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
@@ -1480,39 +1495,60 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "Airchive" }
 
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.Offline())
+            // The refresh action now lives on the History overview card; Home only reports the status.
+            clickTab("History")
             clickText("Refresh history")
             awaitNode { it.text?.toString()?.contains("could not be reached. Showing cached history") == true }
             awaitShellSettled(scene)
-            clickText("History")
-            awaitNode { it.contentDescription?.toString()?.contains("21 Wh") == true }
-
+            // The retained reading now sits inside its hour row; open the hour to confirm the cached
+            // 21 Wh sample itself is still listed.
+            if (find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.contentDescription?.toString()?.startsWith("Sample at ") == true
+                } == null) expandFirstHistoryHour()
+            awaitTrue("the retained 21 Wh sample stays listed") {
+                instrumentation.uiAutomation.clearCache()
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.contentDescription?.toString()?.contains("21 Wh") == true
+                } != null
+            }
             clickTab("Home")
-            awaitNode { it.text?.toString() == "Airchive" }
+            awaitVisibleNode { it.text?.toString()?.contains("could not be reached. Showing cached history") == true }
+
+            // Already on Home; the status lookup scrolled it, so return to the heading.
+            awaitVisibleNode { it.text?.toString() == "Airchive" }
             awaitShellSettled(scene)
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.AccessDenied())
             val readsBeforeDenied = AtomicInteger()
             scene.onActivity { readsBeforeDenied.set(fixture.get().counters.telemetryReads.get()) }
-            clickText("Refresh history")
+            // After the offline failure the action reads "Retry history sync" until a sync succeeds.
+            clickTab("History")
+            clickText("Retry history sync")
             awaitTrue("the denied-history retry reaches the synthetic telemetry fake") {
                 fixture.get().counters.telemetryReads.get() > readsBeforeDenied.get()
             }
             try {
                 awaitNode { it.text?.toString()?.contains("access is pending or denied. Showing cached history") == true }
+                clickTab("Home")
+                awaitVisibleNode { it.text?.toString()?.contains("access is pending or denied. Showing cached history") == true }
             } catch (failure: AssertionError) {
                 throw AssertionError("history status=${visibleHistorySyncLabels()}", failure)
             }
 
             awaitShellSettled(scene)
             fixture.get().setTelemetryFailure(cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.RemoteFailure())
-            clickText("Refresh history")
+            clickTab("History")
+            clickText("Retry history sync")
             awaitNode { it.text?.toString()?.contains("last Airchive refresh failed. Showing cached history") == true }
             awaitShellSettled(scene)
+            clickTab("Home")
+            awaitVisibleNode { it.text?.toString()?.contains("last Airchive refresh failed. Showing cached history") == true }
 
             fixture.get().setTelemetryFailure(null)
             fixture.get().telemetryReadGate.hold()
             val readsBeforeLoading = AtomicInteger()
             scene.onActivity { readsBeforeLoading.set(fixture.get().counters.telemetryReads.get()) }
-            clickText("Refresh history")
+            clickTab("History")
+            clickText("Retry history sync")
             awaitTrue("the synthetic history operation is suspended in its loading gate") {
                 fixture.get().counters.telemetryReads.get() > readsBeforeLoading.get()
             }
@@ -1526,7 +1562,8 @@ class SharedInstrumentUiTest {
                 )
             }
             fixture.get().telemetryReadGate.release()
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            clickTab("Home")
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
         }
         clearFixturePreferences()
@@ -1537,7 +1574,7 @@ class SharedInstrumentUiTest {
         launchShell().use { scene ->
             clickText("Continue with Google")
             awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
-            awaitNode { it.text?.toString() == "History synced 0 sec ago" }
+            awaitVisibleNode { it.text?.toString() == "History synced 0 sec ago" }
             awaitShellSettled(scene)
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
@@ -1568,6 +1605,8 @@ class SharedInstrumentUiTest {
 
             clickText("History")
             awaitNode { it.text?.toString() == "3000 saved observations" }
+            // Samples now live inside collapsed hour rows; open the newest hour to reach its rows.
+            expandFirstHistoryHour()
             val firstRow = awaitNode {
                 it.contentDescription?.toString()?.startsWith("Sample at ") == true &&
                     it.contentDescription?.toString()?.contains("102999") == true
@@ -1587,6 +1626,16 @@ class SharedInstrumentUiTest {
             }
 
             scrollForward()
+            // The newest (in-progress) hour holds a single reading, so open an older hour to select a
+            // row that was reached by scrolling rather than the first viewport.
+            expandFirstHistoryHour()
+            awaitTrue("an older hour exposes a reading other than the newest row") {
+                instrumentation.uiAutomation.clearCache()
+                find(instrumentation.uiAutomation.rootInActiveWindow) {
+                    it.contentDescription?.toString()?.startsWith("Sample at ") == true &&
+                        it.contentDescription?.toString()?.contains("102999") != true
+                } != null
+            }
             val scrolledRow = awaitNode {
                 it.contentDescription?.toString()?.startsWith("Sample at ") == true &&
                     it.contentDescription?.toString()?.contains("102999") != true
@@ -1615,7 +1664,11 @@ class SharedInstrumentUiTest {
                 systemTheme(if (dark) "yes" else "no")
                 for ((route, name) in listOf(1 to "device", 2 to "energy", 3 to "history", 4 to "settings")) {
                     launch(dark = dark, route = route).use {
-                        awaitNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Net daily power consumed"; 3 -> "Sample status guide"; else -> "Google account" } }
+                        // Device details sits below the controls, outside the viewport and so outside the
+                        // accessibility tree, until the page scrolls. Scroll to find it, then return to the
+                        // top so the capture keeps framing the start of each route.
+                        awaitVisibleNode { it.text?.toString() == when(route) { 1 -> "Device details"; 2 -> "Net daily power consumed"; 3 -> "Sample status guide"; else -> "Google account" } }
+                        repeat(4) { scrollBackward() }
                         if (route == 1) awaitNode { it.text?.toString() == "25" }
                         instrumentation.waitForIdleSync()
                         instrumentation.uiAutomation.waitForIdle(250, 5_000)
@@ -1686,10 +1739,12 @@ class SharedInstrumentUiTest {
             signInAndConnectSyntheticThinQ(scene)
             clickTab("Home")
             awaitNode { it.text?.toString() == "Airchive" }
+            // The sampled reading sits below the thermostat dial, outside the first narrow viewport and
+            // so outside the accessibility tree; scroll just far enough to bring it into view.
+            awaitVisibleNode { it.text?.toString()?.contains("Current power consumption as of ") == true }
             val homeTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
             assertTrue("Home exposes the temperature reading: $homeTree", homeTree.contains("Set temperature"))
             assertTrue("Home exposes the sampled-energy reading: $homeTree", homeTree.contains("Current power consumption as of "))
-            assertTrue("the long sampled value stays complete: $homeTree", homeTree.contains("15.11"))
 
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val temperature = find(root) { it.text?.toString()?.contains("Set temperature") == true }
@@ -1702,6 +1757,11 @@ class SharedInstrumentUiTest {
                 temperatureBounds.width() / metrics.density < 300f && sampledBounds.width() / metrics.density < 300f)
             assertTrue("the two readings stack before the values shrink",
                 sampledBounds.top > temperatureBounds.top)
+            // The long value is "Today's net consumption", further down the page than the two readings
+            // compared above; scroll to it so its full text is in the tree.
+            awaitVisibleNode { it.text?.toString()?.contains("15.11") == true }
+            val valueTree = accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+            assertTrue("the long sampled value stays complete: $valueTree", valueTree.contains("15.11"))
             assertTrue("the current route exposes selected semantics", selectedDestination("Home"))
             val heading = awaitVisibleNode { it.text?.toString() == "Airchive" }
             val headingBounds = Rect().also(heading::getBoundsInScreen)
@@ -2294,7 +2354,7 @@ class SharedInstrumentUiTest {
         awaitVisibleNode { it.text?.toString() == "Verify and save securely" }
         setTextByHint("ThinQ Personal Access Token", SharedInstrumentShellFixture.SYNTHETIC_PAT_MARKER)
         clickText("Verify and save securely")
-        awaitNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
+        awaitVisibleNode { it.text?.toString()?.startsWith("The configured AC and profile were verified;") == true }
     }
 
     private fun inputMethodShown(): Boolean {
@@ -2359,6 +2419,9 @@ class SharedInstrumentUiTest {
     }
 
     private fun disclosureStateNow(title: String): String? {
+        // A toggle can reflow a long page; without dropping the client cache the pre-toggle state is
+        // served for seconds, which made the fallback taps below toggle an already-toggled section back.
+        instrumentation.uiAutomation.clearCache()
         var node = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString() == title }
             ?: return null
         while (node.stateDescription == null && node.parent != null) node = node.parent
@@ -2379,7 +2442,7 @@ class SharedInstrumentUiTest {
             scrollForward()
             header = disclosureHeader(title)
         }
-        val previous = header.stateDescription?.toString()
+        val previous = disclosureStateNow(title) ?: header.stateDescription?.toString()
             ?: throw AssertionError("$title disclosure has no state description")
         clickNode(header)
         if (waitForDisclosureTransition(title, previous)) return
@@ -2504,8 +2567,18 @@ class SharedInstrumentUiTest {
     }
 
     private fun assertTextAbsent(text: String) {
-        assertNull("$text should not be visible while its disclosure is collapsed",
-            find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString()?.contains(text) == true })
+        // The automation client can serve a pre-collapse node tree for a while, so poll with a cleared
+        // cache until the text is gone instead of trusting a single lookup.
+        val deadline = SystemClock.uptimeMillis() + 5_000
+        var found: AccessibilityNodeInfo?
+        do {
+            instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.clearCache()
+            found = find(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString()?.contains(text) == true }
+            if (found == null) return
+            SystemClock.sleep(50)
+        } while (SystemClock.uptimeMillis() < deadline)
+        assertNull("$text should not be visible while its disclosure is collapsed", found)
     }
 
     private fun accessibilitySnapshot(node: AccessibilityNodeInfo?): String {
@@ -2521,6 +2594,11 @@ class SharedInstrumentUiTest {
     }
 
     private fun awaitEditableFields(): List<AccessibilityNodeInfo> {
+        // The form may already be scrolled past its fields (narrow windows are taller), so look where
+        // we are, then return to the top before scanning forward, as awaitVisibleNode does.
+        instrumentation.waitForIdleSync()
+        editableNodes(instrumentation.uiAutomation.rootInActiveWindow).takeIf { it.size >= 2 }?.let { return it }
+        repeat(2) { scrollBackward() }
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
             instrumentation.waitForIdleSync()
@@ -2594,6 +2672,7 @@ class SharedInstrumentUiTest {
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
             instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.clearCache()
             find(instrumentation.uiAutomation.rootInActiveWindow, predicate)?.let { return it }
             SystemClock.sleep(50)
         }
@@ -2644,6 +2723,7 @@ class SharedInstrumentUiTest {
         repeat(2) { scrollBackward() }
         repeat(12) {
             instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.clearCache()
             find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
                 ?.takeIf { it.isVisibleToUser }
                 ?.let { return it }
@@ -2654,6 +2734,7 @@ class SharedInstrumentUiTest {
         // intermediate items are still discoverable.
         repeat(12) {
             instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.clearCache()
             find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
                 ?.takeIf { it.isVisibleToUser }
                 ?.let { return it }
