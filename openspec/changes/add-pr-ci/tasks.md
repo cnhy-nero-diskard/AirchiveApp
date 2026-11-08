@@ -52,7 +52,7 @@
 - [x] 4.2 Rewrite the version-bump mode in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to work through a `chore/bump-version-<name>` branch, a PR, and `gh pr merge --auto --merge`. Verify:
   - neither copy contains a direct `git push` to `main`
   - the two sections are identical
-- [ ] 4.3 Complete `docs/ci.md`. It covers:
+- [x] 4.3 Complete `docs/ci.md`. It covers:
   - what runs, and which check is required
   - the local command that reproduces `build`
   - lockfile updates and the lint baseline

@@ -20,6 +20,9 @@ Run the same build locally with:
   :androidApp:lintDebug
 ```
 
+The Gradle Wrapper allows 60 seconds for distribution downloads and retries
+three times with a 1-second initial backoff.
+
 The PR run uploads test and lint reports as an artifact named for the commit
 it tested.
 
@@ -58,17 +61,18 @@ classes run in these batches:
 
 | Batch | Instrumentation classes |
 | --- | --- |
-| `auth-and-task-units` | `GoogleSignInRequestTest`, `FirebaseOwnerIdentityExchangeTest`, `FirebaseTaskAwaitTest` |
-| `local-storage` | `AndroidEncryptedThinQCredentialStoreTest`, `AndroidInterfaceDetailPreferencesTest` |
-| `firebase-emulators` | `FirebaseOwnerIdentityEmulatorTest`, `FirebaseAirchiveTelemetryEmulatorTest` |
-| `process-restart` | `SharedInstrumentProcessRestartTest` |
-| `live-verification-skips` | `LiveOwnerAccessVerificationTest`, `LiveHistoryCacheVerificationTest` |
-| `shared-instrument-ui` | `SharedInstrumentUiTest` |
+| `auth-and-task-units` (3 classes) | `GoogleSignInRequestTest`, `FirebaseOwnerIdentityExchangeTest`, `FirebaseTaskAwaitTest` |
+| `local-storage` (2 classes) | `AndroidEncryptedThinQCredentialStoreTest`, `AndroidInterfaceDetailPreferencesTest` |
+| `firebase-emulators` (2 classes) | `FirebaseOwnerIdentityEmulatorTest`, `FirebaseAirchiveTelemetryEmulatorTest` |
+| `process-restart` (1 class) | `SharedInstrumentProcessRestartTest` |
+| `live-verification-skips` (2 classes) | `LiveOwnerAccessVerificationTest`, `LiveHistoryCacheVerificationTest` |
+| `shared-instrument-ui` (1 class) | `SharedInstrumentUiTest` |
 
-The workflow does not pass the live verification runner arguments. A guard
-fails if any workflow file mentions either opt-in argument. Each batch has a
-25-minute timeout. The JUnit summary reports executed, passed, failed, and
-skipped tests, names failures, and fails if any test failed or no tests ran.
+The six batches cover all 11 instrumentation classes. The workflow does not
+pass the live verification runner arguments. A guard fails if any workflow
+file mentions either opt-in argument. Each batch has a 25-minute timeout. The
+JUnit summary reports executed, passed, failed, and skipped test counts, names
+failures, and fails if any test failed or no tests ran.
 JUnit XML and logcat are uploaded as an artifact. The live verification classes
 must appear as skipped. After seven consecutive green scheduled runs, a
 follow-up change can promote instrumentation to a pre-merge check.
@@ -77,8 +81,9 @@ follow-up change can promote instrumentation to a pre-merge check.
 
 `codeql.yml` is an advisory Kotlin and Java scan on pull requests, `main`, and
 a weekly schedule. It is not part of the `required` merge check. Its manual
-`assembleDebug` build supports Kotlin source extraction; the current extraction
-status will be recorded here after the first CodeQL run.
+`assembleDebug` build supports Kotlin source extraction. The first attempt failed
+before build and extraction because Gradle distribution downloads returned HTTP 504;
+Kotlin extraction is therefore still unverified.
 
 ## Repository gate and emergency procedure
 
