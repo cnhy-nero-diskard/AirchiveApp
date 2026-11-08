@@ -31,7 +31,7 @@
   - validate them with `keytool`'s `:env` options
 
   It never creates a key. Verify through `test-release-scripts.sh`: a throwaway keystore passed via `--keystore` is rejected on fingerprint, and `security find-generic-password -s airchive-release-store-password` still finds nothing. Do not run it against the real keystore here (see 6.1).
-- [ ] 3.2 Add `scripts/release/release.sh <versionName>` per design §2 and §4:
+- [x] 3.2 Add `scripts/release/release.sh <versionName>` per design §2 and §4:
   - refuse on a dirty tree, HEAD not in `origin/main`, an existing local or remote tag, or a version-file mismatch
   - export Keychain passwords only to one `./gradlew --no-daemon --no-configuration-cache :androidApp:assembleRelease -Pairchive.buildCommit=<HEAD>` child
   - run `check-apk.sh`, then create and push `v<versionName>`

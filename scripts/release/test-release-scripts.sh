@@ -177,4 +177,128 @@ if [ -f "$temp_dir/security-calls.log" ]; then
 fi
 echo "PASS: wrong signing certificate rejected before Keychain access"
 
+make_release_test_repo() {
+  local label release_repo origin_repo shim_dir home_dir
+  label=$1
+  release_repo="$temp_dir/release-repo-$label"
+  origin_repo="$temp_dir/release-origin-$label.git"
+  shim_dir="$temp_dir/release-shims-$label"
+  home_dir="$temp_dir/release-home-$label"
+  mkdir -p "$release_repo" "$shim_dir" "$home_dir/.airchive" "$release_repo/config" "$release_repo/scripts/release" "$release_repo/androidApp"
+  git init --bare --initial-branch=main "$origin_repo" >/dev/null
+  git -C "$release_repo" init --initial-branch=main >/dev/null
+  git -C "$release_repo" config user.name "Airchive Release Fixture"
+  git -C "$release_repo" config user.email "airchive-fixture@example.invalid"
+  printf 'versionName=0.1.0\nversionCode=3\n' > "$release_repo/config/airchive-version.properties"
+  cp "$script_dir/release.sh" "$release_repo/scripts/release/release.sh"
+  cat > "$release_repo/scripts/release/check-apk.sh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  test -f "$1"
+  printf 'fixture APK check passed\n'
+fi
+EOF
+  cat > "$release_repo/gradlew" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$AIRCHIVE_RELEASE_TEST_ARGS"
+printf '%s\n%s\n' "$AIRCHIVE_RELEASE_STORE_PASSWORD" "$AIRCHIVE_RELEASE_KEY_PASSWORD" > "$AIRCHIVE_RELEASE_TEST_ENV"
+mkdir -p androidApp/build/outputs/apk/release
+printf 'fixture APK bytes\n' > androidApp/build/outputs/apk/release/androidApp-release.apk
+EOF
+  cat > "$shim_dir/security" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *airchive-release-store-password*) printf 'fixture-store-password\n' ;;
+  *airchive-release-key-password*) printf 'fixture-key-password\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$AIRCHIVE_RELEASE_TEST_GH_ARGS"
+EOF
+  chmod +x "$release_repo/scripts/release/release.sh" "$release_repo/scripts/release/check-apk.sh" "$release_repo/gradlew" "$shim_dir/security" "$shim_dir/gh"
+  : > "$home_dir/.airchive/airchive-release.jks"
+  printf 'Fixture release notes.\n' > "$temp_dir/release-notes-$label.md"
+  git -C "$release_repo" add config scripts gradlew
+  git -C "$release_repo" commit -m "test: prepare release fixture" >/dev/null
+  git -C "$release_repo" remote add origin "$origin_repo"
+  git -C "$release_repo" push -u origin main >/dev/null 2>&1
+  RELEASE_TEST_REPO=$release_repo
+  RELEASE_TEST_ORIGIN=$origin_repo
+  RELEASE_TEST_SHIMS=$shim_dir
+  RELEASE_TEST_HOME=$home_dir
+  RELEASE_TEST_LABEL=$label
+}
+
+run_release_test() {
+  local output
+  if output=$(cd "$RELEASE_TEST_REPO" && \
+    PATH="$RELEASE_TEST_SHIMS:$PATH" \
+    HOME="$RELEASE_TEST_HOME" USER=fixture \
+    AIRCHIVE_RELEASE_TEST_ARGS="$temp_dir/gradle-args-$RELEASE_TEST_LABEL" \
+    AIRCHIVE_RELEASE_TEST_ENV="$temp_dir/gradle-env-$RELEASE_TEST_LABEL" \
+    AIRCHIVE_RELEASE_TEST_GH_ARGS="$temp_dir/gh-args-$RELEASE_TEST_LABEL" \
+    ./scripts/release/release.sh "$@" 2>&1); then
+    printf '%s\n' "$output"
+    return 0
+  fi
+  printf '%s\n' "$output"
+  return 1
+}
+
+expect_release_refusal() {
+  local label expected output
+  label=$1
+  expected=$2
+  shift 2
+  if output=$(run_release_test "$@" 2>&1); then
+    echo "FAIL: release preflight '$label' unexpectedly passed" >&2
+    exit 1
+  fi
+  case "$output" in
+    *"$expected"*) ;;
+    *)
+      echo "FAIL: release preflight '$label' did not report '$expected'" >&2
+      printf '%s\n' "$output" >&2
+      exit 1
+      ;;
+  esac
+  printf 'PASS: release preflight %s\n' "$label"
+}
+
+make_release_test_repo dirty
+printf 'uncommitted fixture change\n' > "$RELEASE_TEST_REPO/untracked.txt"
+expect_release_refusal "dirty tree" "Working tree is dirty" 0.1.0 --notes-file "$temp_dir/release-notes-dirty.md"
+
+make_release_test_repo outside-main
+git -C "$RELEASE_TEST_REPO" commit --allow-empty -m "test: create unmerged release head" >/dev/null
+expect_release_refusal "HEAD outside origin/main" "HEAD is not contained in origin/main" 0.1.0 --notes-file "$temp_dir/release-notes-outside-main.md"
+
+make_release_test_repo local-tag
+git -C "$RELEASE_TEST_REPO" tag v0.1.0
+expect_release_refusal "local tag exists" "already exists locally" 0.1.0 --notes-file "$temp_dir/release-notes-local-tag.md"
+
+make_release_test_repo remote-tag
+git --git-dir="$RELEASE_TEST_ORIGIN" tag v0.1.0 refs/heads/main
+expect_release_refusal "remote tag exists" "already exists on origin" 0.1.0 --notes-file "$temp_dir/release-notes-remote-tag.md"
+
+make_release_test_repo version-mismatch
+expect_release_refusal "version file mismatch" "does not match config/airchive-version.properties" 9.9.9 --notes-file "$temp_dir/release-notes-version-mismatch.md"
+
+make_release_test_repo successful-build
+if ! run_release_test 0.1.0 --notes-file "$temp_dir/release-notes-successful-build.md" >/dev/null; then
+  echo "FAIL: valid release fixture did not complete" >&2
+  exit 1
+fi
+if grep -E 'fixture-(store|key)-password' "$temp_dir/gradle-args-successful-build"; then
+  echo "FAIL: signing password appeared in Gradle arguments" >&2
+  exit 1
+fi
+grep -q '^fixture-store-password$' "$temp_dir/gradle-env-successful-build"
+grep -q '^fixture-key-password$' "$temp_dir/gradle-env-successful-build"
+grep -q -- '--draft' "$temp_dir/gh-args-successful-build"
+grep -q -- '--notes-file' "$temp_dir/gh-args-successful-build"
+echo "PASS: release Gradle receives signing passwords only through its environment"
+
 echo "All release APK checks passed."
