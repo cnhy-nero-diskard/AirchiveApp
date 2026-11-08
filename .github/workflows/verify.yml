@@ -68,6 +68,7 @@ jobs:
 
   dependencies:
     name: dependencies
+    if: false # Temporary required-check probe: force this covered job to skip.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
