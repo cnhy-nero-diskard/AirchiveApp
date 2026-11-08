@@ -6,7 +6,7 @@
   - `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug` passes
   - `aapt dump badging` on the debug APK shows `versionCode='2' versionName='0.1.0-debug'`
   - `./gradlew :androidApp:assembleDebug -Pairchive.versionCode=9` fails and names `config/airchive-version.properties`
-- [ ] 1.2 Embed the build commit as `<meta-data android:name="cloud.airchive.build.commit">` through a manifest placeholder. Release builds take it from `-Pairchive.buildCommit` and fail before signing unless it is 40 lowercase hex characters. Debug builds use `dev`. Verify:
+- [x] 1.2 Embed the build commit as `<meta-data android:name="cloud.airchive.build.commit">` through a manifest placeholder. Release builds take it from `-Pairchive.buildCommit` and fail before signing unless it is 40 lowercase hex characters. Debug builds use `dev`. Verify:
   - `aapt dump xmltree <debug apk> AndroidManifest.xml` shows `dev`
   - `./gradlew :androidApp:assembleRelease` with no commit fails with the commit message, not the signing-preflight message
 

@@ -72,6 +72,12 @@ val airchiveVersionName = airchiveVersionProperties.map { properties ->
 if (providers.gradleProperty("airchive.versionCode").isPresent) {
     error("The airchive.versionCode override has been removed; edit config/airchive-version.properties instead.")
 }
+val releaseBuildCommit = providers.gradleProperty("airchive.buildCommit").orNull
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+    require(releaseBuildCommit?.matches(Regex("[0-9a-f]{40}")) == true) {
+        "Release builds require -Pairchive.buildCommit with a full 40-character lowercase commit hash."
+    }
+}
 
 /** Renders a value as a safe Kotlin string literal for a BuildConfig field. */
 fun buildConfigStringLiteral(value: String): String = "\"" +
@@ -168,6 +174,7 @@ android {
         targetSdk = 36
         versionCode = airchiveVersionCode.get()
         versionName = airchiveVersionName.get()
+        manifestPlaceholders["airchiveBuildCommit"] = "dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "AIRCHIVE_FIREBASE_PROJECT_ID", "\"${airchiveConfigValue("firebase.projectId")}\"")
@@ -230,6 +237,7 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = false
+            manifestPlaceholders["airchiveBuildCommit"] = releaseBuildCommit.orEmpty()
             if (hasPrivateReleaseSigning) {
                 signingConfig = signingConfigs.getByName("privateRelease")
             }

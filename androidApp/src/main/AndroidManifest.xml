@@ -6,6 +6,9 @@
         android:label="Airchive"
         android:theme="@style/Theme.Airchive"
         android:supportsRtl="true">
+        <meta-data
+            android:name="cloud.airchive.build.commit"
+            android:value="${airchiveBuildCommit}" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
