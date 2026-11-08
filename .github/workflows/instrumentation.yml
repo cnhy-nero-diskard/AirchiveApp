@@ -76,9 +76,7 @@ jobs:
           disable-animations: true
           disable-spellchecker: true
           disable-linux-hw-accel: false
-          script: |
-            firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller \
-              --only auth,firestore "bash scripts/ci/run_instrumentation_batches.sh"
+          script: firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller --only auth,firestore "bash scripts/ci/run_instrumentation_batches.sh"
 
       - name: Summarize instrumentation results
         if: always()
