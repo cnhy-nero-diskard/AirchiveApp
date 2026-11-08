@@ -173,5 +173,5 @@ The asset name is `airchive-<versionName>-<versionCode>.apk`.
 
 ## Open Questions
 
-- Whether to add a tag ruleset that protects `v*` from deletion before the first publication. Immutable releases already protect published tags.
-- SBOM and provenance format, if wanted later.
+- **Resolved (default):** no `v*` tag ruleset. Immutable releases protect published tags, and tags for unpublished drafts are deliberately disposable (dry run). This can be revisited without changing the design.
+- **Deferred:** SBOM and provenance format, if wanted later.
