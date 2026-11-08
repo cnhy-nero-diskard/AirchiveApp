@@ -121,6 +121,13 @@ android {
     namespace = "cloud.airchive.personal"
     compileSdk = 36
 
+    lint {
+        baseline = file("lint-baseline.xml")
+        warningsAsErrors = true
+        abortOnError = true
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
+    }
+
     buildFeatures {
         buildConfig = true
     }
