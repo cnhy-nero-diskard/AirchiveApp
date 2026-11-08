@@ -95,3 +95,24 @@ jobs:
         run: >-
           python3 scripts/ci/osv_policy.py check-results osv-results.json
           --scan-outcome '${{ steps.osv_scan.outcome }}'
+
+  required:
+    name: required
+    needs: [build, dependencies]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report verification results
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
+        run: |
+          {
+            printf 'Build: `%s`\n' "$BUILD_RESULT"
+            printf 'Dependencies: `%s`\n' "$DEPENDENCIES_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$BUILD_RESULT" != "success" || "$DEPENDENCIES_RESULT" != "success" ]]; then
+            echo 'Required verification failed because at least one covered job did not succeed.' >&2
+            exit 1
+          fi
