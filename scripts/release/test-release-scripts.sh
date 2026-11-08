@@ -174,7 +174,7 @@ make_unsigned_apk two-signers cloud.airchive.personal "$name" "$code" "$commit" 
   --v1-signer-name fixture-two \
   --ks-pass "pass:$fixture_password" --key-pass "pass:$fixture_password" \
   --out "$temp_dir/two-signers.apk" "$temp_dir/two-signers-unsigned.apk" >/dev/null
-expect_failure "APK with two signers rejected" "intentionally missing diagnostic" \
+expect_failure "APK with two signers rejected" "exactly one signer certificate" \
   check_apk_with_pin "$temp_dir/two-signers.apk" "$name" "$code" "$commit" "$fixture_pin"
 
 make_unsigned_apk wrong-package cloud.airchive.invalid "$name" "$code" "$commit" false
