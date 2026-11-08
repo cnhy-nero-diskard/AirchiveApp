@@ -62,23 +62,35 @@ are separate operations. Do only what the user requested.
 
 ## Mode B — Android version bump
 
-1. Resolve the requested version. If the user only says "bump" or "release", ask
+1. Resolve the requested version. If the user only says “bump” or “release,” ask
    for the target version or major/minor/patch intent; do not invent a release.
-2. Use a clean `main` checkout (or its existing worktree), fetch and fast-forward.
-   Do not switch another worktree's branch or discard user changes.
-3. Inspect `androidApp/build.gradle.kts`: the default version code is the fallback
-   on `releaseVersionCode` (overridable by `airchive.versionCode`), while version
-   name is in `android.defaultConfig`. Increase the default code monotonically and
-   update `versionName` for the requested release. Do not modify the validation
-   logic or assume the override increments the checked-in default.
-4. Run `.\gradlew.bat :shared:testAndroidHostTest :androidApp:assembleDebug` and
-   review `git diff --check`. Stage only the version file and any explicitly
-   requested release notes, then commit `chore: bump version to <version>`.
-   Report the commit; push only if the user authorized publishing that bump.
-5. There is no `scripts/bump-tag.ps1`/`.sh` workflow here. Do not invent one,
-   create/push tags, or claim a CI release was triggered.
-
-For an explicitly requested signed build or same-key phone update, read
-`docs/android-release.md` and use `scripts/release/Invoke-AirchiveRelease.ps1`.
-Keep keystores and DPAPI credentials outside Git. Do not collect passwords in
-chat, print secrets, uninstall the app, clear data, or send AC commands.
+2. Ensure a clean working tree, fetch `origin`, fast-forward local `main`, and
+   create `chore/bump-version-<name>` from it. Use a lowercase, URL-safe version
+   label for `<name>` (for example, `0.2.0`):
+   ```bash
+   git switch main
+   git pull --ff-only
+   git switch -c chore/bump-version-<name>
+   ```
+3. Edit `versionName` in `androidApp/build.gradle.kts` and increase the default
+   `airchive.versionCode` monotonically. Run the host tests and debug assembly
+   (`./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug`, or
+   `./gradlew.bat` with the same tasks on Windows) and review `git diff --check`.
+4. Stage only the version file and any explicitly requested release notes, then
+   commit and push the feature branch:
+   ```bash
+   git add androidApp/build.gradle.kts
+   git commit -m "chore: bump version to <version>"
+   git push --set-upstream origin chore/bump-version-<name>
+   ```
+5. Open a pull request targeting `main` with a clear summary, inspect its checks
+   with `gh pr checks <number>`, and queue the required merge:
+   ```bash
+   gh pr create --base main --head chore/bump-version-<name> \
+     --title "chore: bump version to <version>" --body "Bump the Android app version."
+   gh pr merge <number> --auto --merge
+   ```
+   Do not merge around pending or failing checks.
+6. Verify whether GitHub merged the PR or only queued auto-merge, and report its
+   URL, status, and the version. Signed release builds are separate and use
+   `scripts/release/Invoke-AirchiveRelease.ps1` with the private signing setup.

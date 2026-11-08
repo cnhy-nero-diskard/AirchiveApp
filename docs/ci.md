@@ -84,8 +84,9 @@ status will be recorded here after the first CodeQL run.
 
 The `main-gate.json` ruleset requires a pull request and the `required` check
 with zero approvals and no bypass actors. The existing `default` ruleset is
-unchanged. Integration `1144995` is the installed integration identified during
-the repository audit; it is not a bypass actor on the new gate.
+unchanged. Integration `1144995` is the OpenAI **ChatGPT Codex Connector**
+(`chatgpt-codex-connector`) installation identified on the existing ruleset; it
+is not a bypass actor on the new gate.
 
 If verification must be bypassed during an outage, disable the `main` gate
 ruleset, land the change through a pull request, then re-enable the ruleset.

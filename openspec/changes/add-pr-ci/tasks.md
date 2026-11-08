@@ -22,7 +22,7 @@
   - a failing host test makes `required` fail
   - a covered job forced to skip makes `required` fail
   - a documentation-only change still produces the `required` check
-- [ ] 2.4 Check least privilege. Verify:
+- [x] 2.4 Check least privilege. Verify:
   - each run's "GITHUB_TOKEN Permissions" log shows only read access
   - `grep -rn -E 'pull_request_target|secrets\.' .github/workflows` returns nothing
   - every `uses:` line references a full commit SHA
@@ -44,12 +44,12 @@
 
 ## 4. Gate definition, tooling, and docs
 
-- [ ] 4.1 Add `.github/rulesets/main-gate.json` per design §7. Verify `jq` confirms all of:
+- [x] 4.1 Add `.github/rulesets/main-gate.json` per design §7. Verify `jq` confirms all of:
   - `bypass_actors` is `[]`
   - the single required context is `required` with `integration_id` 15368
   - `strict_required_status_checks_policy` is false
   - the `pull_request` rule has 0 required approvals
-- [ ] 4.2 Rewrite the version-bump mode in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to work through a `chore/bump-version-<name>` branch, a PR, and `gh pr merge --auto --merge`. Verify:
+- [x] 4.2 Rewrite the version-bump mode in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to work through a `chore/bump-version-<name>` branch, a PR, and `gh pr merge --auto --merge`. Verify:
   - neither copy contains a direct `git push` to `main`
   - the two sections are identical
 - [ ] 4.3 Complete `docs/ci.md`. It covers:

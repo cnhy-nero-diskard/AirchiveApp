@@ -104,24 +104,40 @@ gh pr merge <number> --auto --merge --delete-branch
 - If any required check fails, the PR stays blocked: report the failure instead of
   retrying with an immediate (non-`--auto`) merge.
 
-## Mode B — Bump the app version
+## Mode B — Android version bump
 
-1. Ensure a clean working tree, then:
+1. Resolve the requested version. If the user only says “bump” or “release,” ask
+   for the target version or major/minor/patch intent; do not invent a release.
+2. Ensure a clean working tree, fetch `origin`, fast-forward local `main`, and
+   create `chore/bump-version-<name>` from it. Use a lowercase, URL-safe version
+   label for `<name>` (for example, `0.2.0`):
    ```bash
-   git checkout main
+   git switch main
    git pull --ff-only
+   git switch -c chore/bump-version-<name>
    ```
-2. Bump the version: edit `versionName` in `androidApp/build.gradle.kts` and/or
-   raise the `airchive.versionCode` default (currently `2`) so the next build
-   carries the new code. Commit and push:
+3. Edit `versionName` in `androidApp/build.gradle.kts` and increase the default
+   `airchive.versionCode` monotonically. Run the host tests and debug assembly
+   (`./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug`, or
+   `./gradlew.bat` with the same tasks on Windows) and review `git diff --check`.
+4. Stage only the version file and any explicitly requested release notes, then
+   commit and push the feature branch:
    ```bash
    git add androidApp/build.gradle.kts
-   git commit -m "chore: bump version to <name> (<code>)"
-   git push
+   git commit -m "chore: bump version to <version>"
+   git push --set-upstream origin chore/bump-version-<name>
    ```
-3. Report the new version. Signed release builds are produced separately via
-   `scripts/release/Invoke-AirchiveRelease.ps1` (requires the private signing
-   setup from `Setup-AirchiveSigning.ps1`); the bump only versions the code.
+5. Open a pull request targeting `main` with a clear summary, inspect its checks
+   with `gh pr checks <number>`, and queue the required merge:
+   ```bash
+   gh pr create --base main --head chore/bump-version-<name> \
+     --title "chore: bump version to <version>" --body "Bump the Android app version."
+   gh pr merge <number> --auto --merge
+   ```
+   Do not merge around pending or failing checks.
+6. Verify whether GitHub merged the PR or only queued auto-merge, and report its
+   URL, status, and the version. Signed release builds are separate and use
+   `scripts/release/Invoke-AirchiveRelease.ps1` with the private signing setup.
 
 ## Guardrails
 
