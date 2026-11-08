@@ -241,12 +241,14 @@ class SharedInstrumentUiTest {
         initiallySignedIn: Boolean = false,
         suspendInitialAccessCheck: Boolean = false,
         initialOfflineAccessCheck: Boolean = false,
+        retainFixtureForRecreation: Boolean = false,
     ) = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
             .putExtra("shell", true)
             .putExtra("fixture_signed_in", initiallySignedIn)
             .putExtra("fixture_suspend_access", suspendInitialAccessCheck)
-            .putExtra("fixture_offline_access", initialOfflineAccessCheck),
+            .putExtra("fixture_offline_access", initialOfflineAccessCheck)
+            .putExtra("retain_fixture_for_recreation", retainFixtureForRecreation),
     )
 
     /**
@@ -674,6 +676,83 @@ class SharedInstrumentUiTest {
             awaitNode { it.text?.toString() == "26" }
             SystemClock.sleep(1_100)
             scene.onActivity { assertEquals(0, it.shellFixture!!.counters.thinQCommandSubmissions.get()) }
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun temperatureDraftShowsNotSentWhenAnotherCommandTakesTheSlot() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShell(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitNode { it.text?.toString() == "26" }
+
+            val dispatch = AtomicReference<cloud.airchive.shared.data.thinq.AcCommandDispatchResult>()
+            scene.onActivity {
+                val activeFixture = it.shellFixture!!
+                activeFixture.thinQGate.hold()
+                dispatch.set(activeFixture.thinQContext.dispatchCommand(
+                    cloud.airchive.shared.contract.thinq.AcCommand.SetPower(
+                        activeFixture.clock.now(), true,
+                    ),
+                    activeFixture.thinQContext.contextKey.value,
+                ))
+            }
+            assertEquals(cloud.airchive.shared.data.thinq.AcCommandDispatchResult.Scheduled, dispatch.get())
+            awaitVisibleNode { it.text?.toString()?.startsWith("Sending power") == true }
+            awaitVisibleNode { it.text?.toString() == "Not sent · choose again to send" }
+            assertEquals("the competing command owns the one available slot", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+            fixture.get().thinQGate.release()
+            awaitTrue("the original power command completes") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
+            }
+            SystemClock.sleep(1_100)
+            assertEquals("the rejected temperature draft is never retried", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun pendingCommandAndGraphSurviveActivityRecreation() {
+        clearFixturePreferences()
+        launchShell(retainFixtureForRecreation = true).use { scene ->
+            prepareConfiguredShell(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity {
+                fixture.set(it.shellFixture!!)
+                fixture.get().thinQGate.hold()
+            }
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitVisibleNode { it.text?.toString()?.startsWith("Sending target temperature ") == true }
+            awaitTrue("the graph-owned command is suspended in the fake port") {
+                fixture.get().counters.thinQCommandSubmissions.get() == 1 &&
+                    fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Sending
+            }
+
+            scene.recreate()
+            awaitVisibleNode { it.text?.toString()?.startsWith("Sending target temperature ") == true }
+            val increase = awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" }
+            assertFalse("a second tap is disabled while the original command is pending", increase.isEnabled)
+            val bounds = Rect().also(increase::getBoundsInScreen)
+            assertTrue(uiDevice.click(bounds.centerX(), bounds.centerY()))
+            SystemClock.sleep(1_100)
+            scene.onActivity {
+                assertSame("Activity recreation rebinds to the process-owned fixture", fixture.get(), it.shellFixture)
+            }
+            assertEquals("the second tap did not submit another command", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+
+            fixture.get().thinQGate.release()
+            awaitTrue("the original command completes after its gate is released") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
+            }
+            assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
         }
         clearFixturePreferences()
     }

@@ -6,12 +6,12 @@ import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
 import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
 import cloud.airchive.personal.data.firebase.FirebaseOwnerFirestore
-import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
 import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.ProductionAirchiveApp
 import cloud.airchive.shared.ProductionConfigBlockedScreen
@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
 
     private var coordinator: ProductionHistoryCoordinator? = null
     private var accountController: ProductionAccountController? = null
-    private var thinQGraph: AndroidProductionThinQGraph? = null
+    private var airchiveApplication: AirchiveApplication? = null
     private var thinQBindings: ProductionThinQBindings? = null
     private var controllerScope: CoroutineScope? = null
     private var activeRefreshJob: Job? = null
@@ -92,12 +92,13 @@ class MainActivity : ComponentActivity() {
             val activeCoordinator = coordinator
             val activeAccountController = accountController
             if (activeCoordinator != null && activeAccountController != null) {
+                val graph = airchiveApplication?.thinQGraph?.collectAsState()?.value
                 ProductionAirchiveApp(
                     coordinator = activeCoordinator,
                     accountController = activeAccountController,
                     onManualRefresh = ::onManualRefresh,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                    thinQBindings = thinQBindings,
+                    thinQBindings = graph?.bindings() ?: thinQBindings,
                     interfacePreferences = interfacePreferences,
                 )
             } else {
@@ -112,7 +113,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val activeCoordinator = coordinator ?: return
-        val graph = thinQGraph ?: return
+        val app = airchiveApplication ?: return
         foregroundHistoryJob = lifecycleScope.launch {
             activeCoordinator.session.collectLatest { session ->
                 if (session == null) return@collectLatest
@@ -137,24 +138,27 @@ class MainActivity : ComponentActivity() {
             }
         }
         foregroundDeviceJob = lifecycleScope.launch {
-            graph.coordinator.contextKey.collectLatest { context ->
-                if (context.ownerUid == null) return@collectLatest
-                if (deviceScheduleKey != context) {
-                    deviceScheduleKey = context
-                    deviceBackoff = ForegroundRefreshBackoff()
-                    // Home entry performs the first read; do not duplicate it.
-                    deviceNextAt = SystemClock.elapsedRealtime() + ForegroundRefreshBackoff.BASE_MILLIS
-                }
-                while (true) {
-                    delay((deviceNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-                    var failed = false
-                    val result = try {
-                        graph.coordinator.refreshScheduledState(context)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) { failed = true; null }
-                    failed = failed || result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
-                    deviceNextAt = SystemClock.elapsedRealtime() + deviceBackoff.nextDelay(failed)
+            app.thinQGraph.collectLatest { graph ->
+                graph ?: return@collectLatest
+                graph.coordinator.contextKey.collectLatest { context ->
+                    if (context.ownerUid == null) return@collectLatest
+                    if (deviceScheduleKey != context) {
+                        deviceScheduleKey = context
+                        deviceBackoff = ForegroundRefreshBackoff()
+                        // Home entry performs the first read; do not duplicate it.
+                        deviceNextAt = SystemClock.elapsedRealtime() + ForegroundRefreshBackoff.BASE_MILLIS
+                    }
+                    while (true) {
+                        delay((deviceNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+                        var failed = false
+                        val result = try {
+                            graph.coordinator.refreshScheduledState(context)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) { failed = true; null }
+                        failed = failed || result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
+                        deviceNextAt = SystemClock.elapsedRealtime() + deviceBackoff.nextDelay(failed)
+                    }
                 }
             }
         }
@@ -188,13 +192,13 @@ class MainActivity : ComponentActivity() {
         activeRefreshJob = null
         controllerScope?.cancel()
         controllerScope = null
-        thinQGraph?.close()
-        thinQGraph = null
         thinQBindings = null
         super.onDestroy()
     }
 
     private fun buildProductionGraph(configuration: OwnerAuthConfiguration.Ready) {
+        val processGraphOwner = application as AirchiveApplication
+        airchiveApplication = processGraphOwner
         // Reuse one database per process rather than opening a new connection
         // pool on every Activity recreation. No Activity/Context is retained.
         val database = synchronized(MainActivity::class.java) {
@@ -213,12 +217,10 @@ class MainActivity : ComponentActivity() {
             firestoreProvider = ownerFirestore::get,
         )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        val productionThinQGraph = AndroidProductionThinQGraph(
-            context = applicationContext,
-            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
-            // Lifecycle partition (task 2.1): owner/project/device + generation.
+        // The graph and its command owner survive Activity recreation. A
+        // successful OwnerTransition is the only path that replaces it.
+        val productionThinQGraph = processGraphOwner.getOrCreateThinQGraph(
             ownerUid = configuration.identity.currentSession?.uid,
-            projectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
         )
         val productionCoordinator = ProductionHistoryCoordinator(
             identity = configuration.identity,
@@ -245,7 +247,7 @@ class MainActivity : ComponentActivity() {
                 // Invalidate before the account controller clears the PAT or
                 // changes Firebase identity. The session observer below remains
                 // the backstop for external identity changes.
-                productionThinQGraph.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                processGraphOwner.thinQGraph.value?.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
             },
             afterOwnerTransition = { session ->
                 val ownerBeforeAction = explicitlyTransitioningOwnerUid
@@ -255,15 +257,16 @@ class MainActivity : ComponentActivity() {
                 // A new UID is rebound only by OwnerTransition after Firestore
                 // and the previous owner's partition have also been cleared.
                 if (session != null && session.uid == ownerBeforeAction) {
-                    productionThinQGraph.onOwnerChanged(session.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                    processGraphOwner.thinQGraph.value?.onOwnerChanged(session.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
                 }
             },
         )
 
+        var transitionGraph = productionThinQGraph
         val ownerTransition = OwnerTransition(
             local = local,
             credentialStore = productionThinQGraph.credentialStore,
-            thinQ = productionThinQGraph.coordinator,
+            thinQ = transitionGraph.coordinator,
             documentCache = ownerFirestore,
             firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
             configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
@@ -280,7 +283,13 @@ class MainActivity : ComponentActivity() {
                 if (previous?.uid != next?.uid) {
                     activeRefreshJob?.cancel()
                     activeRefreshJob = null
-                    ownerTransition.onSessionChanged(previous, next)
+                    val failure = ownerTransition.onSessionChanged(previous, next)
+                    if (failure == null && previous?.uid != next?.uid && previous != null) {
+                        processGraphOwner.replaceThinQGraph(transitionGraph, next?.uid)?.let { replacement ->
+                            transitionGraph = replacement
+                            ownerTransition.bindThinQContextCoordinator(replacement.coordinator)
+                        }
+                    }
                 }
                 previous = next
             }
@@ -288,7 +297,6 @@ class MainActivity : ComponentActivity() {
 
         coordinator = productionCoordinator
         accountController = productionAccountController
-        thinQGraph = productionThinQGraph
         thinQBindings = productionThinQGraph.bindings()
         controllerScope = scope
     }

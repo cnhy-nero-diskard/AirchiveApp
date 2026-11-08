@@ -147,7 +147,7 @@ class KtorThinQClient(
         return ThinQPayloads.liveState(deviceId, payload, profile.preferredTemperatureUnit, nowEpochMillis())
     }
 
-    override suspend fun setState(command: AcCommand): CommandOutcome {
+    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
         val base = commandBase(command)
         val ctx = try {
             currentCredentialContext()
@@ -162,13 +162,14 @@ class KtorThinQClient(
         } catch (_: Exception) {
             return base.failed(CommandFailure.UNKNOWN, "ThinQ credential state could not be read.")
         }
-        return setStateWithContext(command, ctx, base)
+        return setStateWithContext(command, ctx, base, guard)
     }
 
     private suspend fun setStateWithContext(
         command: AcCommand,
         ctx: CredentialContext,
         base: CommandOutcome = commandBase(command),
+        guard: suspend () -> Boolean = { true },
     ): CommandOutcome {
         val deviceId = configuredDeviceId
         // The fresh profile is the source of truth for which values are legal;
@@ -182,6 +183,16 @@ class KtorThinQClient(
         }
         val body = controlBody(profile, command)
             ?: return base.failed(CommandFailure.INVALID_REQUEST, "Profile does not permit this value.")
+
+        // The profile read may suspend while the owner removes or replaces the
+        // credential. Recheck the tap-time lifecycle context at the final
+        // boundary before any control request can leave this process.
+        if (!guard()) {
+            return base.failed(
+                CommandFailure.NOT_SENT,
+                "Not sent because the owner or ThinQ credential changed before control submission.",
+            )
+        }
 
         // POST control with x-conditional-control: true. A 2xx is "accepted",
         // nothing more; the confirm step below decides CONFIRMED vs UNCONFIRMED.
@@ -327,7 +338,8 @@ class KtorThinQClient(
         override suspend fun listDevices(): List<ThinQDevice> = listDevicesWithContext(context)
         override suspend fun profile(deviceId: String): ThinQDeviceProfile = profileWithContext(deviceId, context)
         override suspend fun liveState(deviceId: String): ThinQLiveState = liveStateWithContext(deviceId, context)
-        override suspend fun setState(command: AcCommand): CommandOutcome = setStateWithContext(command, context)
+        override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome =
+            setStateWithContext(command, context, guard = guard)
     }
 
     private enum class SuccessMode { REQUIRE_RESPONSE, IGNORE_BODY }
@@ -551,6 +563,7 @@ class KtorThinQClient(
         CommandFailure.NETWORK -> "could not be reached."
         CommandFailure.DEVICE_UNAVAILABLE -> "reports the device unavailable."
         CommandFailure.TIMEOUT -> "did not answer in time."
+        CommandFailure.NOT_SENT -> "was not sent because its owner or credential context changed."
         CommandFailure.UNKNOWN -> "returned an unexpected error."
     }
 

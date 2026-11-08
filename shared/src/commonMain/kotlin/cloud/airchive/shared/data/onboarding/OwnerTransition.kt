@@ -22,7 +22,7 @@ fun interface OwnerDocumentCache {
 class OwnerTransition(
     private val local: LocalHistoryPort,
     private val credentialStore: ThinQCredentialStore,
-    private val thinQ: ThinQContextCoordinator,
+    thinQ: ThinQContextCoordinator,
     private val documentCache: OwnerDocumentCache,
     private val firebaseProjectId: String,
     private val configuredDeviceId: String,
@@ -30,6 +30,13 @@ class OwnerTransition(
     private val serializedAction: suspend (suspend () -> OwnerSettingsActionFailure?) -> OwnerSettingsActionFailure? = { action -> action() },
     private val reportOutcome: suspend (OwnerSettingsActionFailure?) -> Unit = {},
 ) {
+
+    private var thinQ = thinQ
+
+    /** Rebinds after a successful owner cleanup replaces the process graph. */
+    fun bindThinQContextCoordinator(coordinator: ThinQContextCoordinator) {
+        thinQ = coordinator
+    }
 
     /** Owners remain queued until all cleanup steps succeed. */
     private val pendingOwners = linkedMapOf<String, OwnerSession>()

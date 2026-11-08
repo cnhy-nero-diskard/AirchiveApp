@@ -702,10 +702,10 @@ private class CountingThinQClient(
         return delegate.liveState(deviceId)
     }
 
-    override suspend fun setState(command: AcCommand): CommandOutcome {
+    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
         counters.thinQCommandSubmissions.incrementAndGet()
         gate.awaitTurn()
-        return delegate.setState(command)
+        return delegate.setState(command, guard)
     }
 }
 

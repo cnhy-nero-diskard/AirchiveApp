@@ -569,6 +569,7 @@ private fun failureText(failure: CommandFailure?, simulated: Boolean): String {
             CommandFailure.NETWORK -> "the in-memory command call did not respond."
             CommandFailure.TIMEOUT -> "the simulated command timed out. Refresh state before retrying."
             CommandFailure.DEVICE_UNAVAILABLE -> "the simulated device is unavailable."
+            CommandFailure.NOT_SENT -> "the command was not sent because its control context changed."
             CommandFailure.UNKNOWN, null -> "the outcome is uncertain. Refresh state before acting again."
         }
     }
@@ -588,6 +589,8 @@ private fun failureText(failure: CommandFailure?, simulated: Boolean): String {
         "ThinQ did not answer in time; the command may or may not have been sent. It was not resent — refresh state before acting again."
     CommandFailure.DEVICE_UNAVAILABLE ->
         "The AC is offline or unavailable. Try again when it is reachable."
+    CommandFailure.NOT_SENT ->
+        "Not sent because the owner or ThinQ credential changed while checking the profile. Review current state before sending another command."
     CommandFailure.UNKNOWN, null ->
         "The command could not be confirmed. Nothing was automatically resent — refresh state before acting again."
     }

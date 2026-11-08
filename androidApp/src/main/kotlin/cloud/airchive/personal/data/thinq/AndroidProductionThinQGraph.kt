@@ -10,7 +10,7 @@ import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
 import cloud.airchive.shared.data.thinq.ThinQCredentialRemovalOutcome
 import cloud.airchive.shared.data.thinq.ThinQLiveStateController
 import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
-import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,13 +45,13 @@ class AndroidProductionThinQGraph(
     private val configuredDeviceId: String = BuildConfig.AIRCHIVE_DEVICE_ID,
     ownerUid: String? = null,
     projectId: String = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+    val credentialStore: AndroidEncryptedThinQCredentialStore = AndroidEncryptedThinQCredentialStore(context.applicationContext),
+    engine: HttpClientEngine,
 ) : AutoCloseable {
-
-    val credentialStore = AndroidEncryptedThinQCredentialStore(context.applicationContext)
     private val activeOwnerUid = MutableStateFlow(ownerUid)
 
     private val client = KtorThinQClient(
-        engine = CIO.create(),
+        engine = engine,
         credentialStore = credentialStore,
         configuredDeviceId = configuredDeviceId,
         temperatureStepOverride = BuildConfig.AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE.toDoubleOrNull(),
@@ -127,7 +127,11 @@ class AndroidProductionThinQGraph(
         if (ownerUid != null) coordinator.onOwnerChanged(ownerUid, projectId)
     }
 
-    fun bindings(): ProductionThinQBindings = coordinator.bindings()
+    private val sharedBindings: ProductionThinQBindings by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        coordinator.bindings()
+    }
+
+    fun bindings(): ProductionThinQBindings = sharedBindings
 
     /** Call after confirmed PAT removal/sign-out so profile-derived controls disappear immediately. */
     suspend fun clearCachedDeviceProfile() {

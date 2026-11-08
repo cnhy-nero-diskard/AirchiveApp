@@ -132,9 +132,16 @@ class FakeThinQClient(
         return live.copy(observedAtEpochMillis = liveReadTimestampEpochMillis)
     }
 
-    override suspend fun setState(command: AcCommand): CommandOutcome {
-        commandCounter += 1
+    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
         val outcome = baseOutcome(command)
+        if (!guard()) {
+            return outcome.copy(
+                status = CommandStatus.FAILED,
+                failure = CommandFailure.NOT_SENT,
+                message = "Not sent because the owner or ThinQ credential changed before control submission.",
+            )
+        }
+        commandCounter += 1
 
         failWith?.let { failure ->
             return outcome.copy(status = CommandStatus.FAILED, failure = failure, message = failure.name)

@@ -554,7 +554,14 @@ class AcCommandControllerTest {
             entered.await()
         }
 
-        override suspend fun setState(command: AcCommand): CommandOutcome {
+        override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
+            if (!guard()) {
+                return testOutcome(TEST_DEVICE_ID, command).copy(
+                    status = CommandStatus.FAILED,
+                    failure = CommandFailure.NOT_SENT,
+                    message = "Not sent because the owner or ThinQ credential changed before control submission.",
+                )
+            }
             setStateCalls += command
             activeCommands += 1
             if (activeCommands > maxActiveCommands) maxActiveCommands = activeCommands

@@ -557,7 +557,7 @@ class ThinQLiveStateControllerTest {
 
         override suspend fun listDevices(): List<ThinQDevice> { otherMethodCalls++; throw UnsupportedOperationException("listDevices is not used by the controller") }
         override suspend fun profile(deviceId: String): ThinQDeviceProfile { otherMethodCalls++; throw UnsupportedOperationException("profile is not used by the controller") }
-        override suspend fun setState(command: AcCommand): CommandOutcome { otherMethodCalls++; throw UnsupportedOperationException("setState is not used by the controller") }
+        override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome { otherMethodCalls++; throw UnsupportedOperationException("setState is not used by the controller") }
     }
 
     /** Suspends inside liveState until the caller cancels, then lets cancellation propagate. */
@@ -597,6 +597,6 @@ class ThinQLiveStateControllerTest {
     private abstract class ThinQPortStub : ThinQPort {
         override suspend fun listDevices(): List<ThinQDevice> = throw UnsupportedOperationException()
         override suspend fun profile(deviceId: String): ThinQDeviceProfile = throw UnsupportedOperationException()
-        override suspend fun setState(command: AcCommand): CommandOutcome = throw UnsupportedOperationException()
+        override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome = throw UnsupportedOperationException()
     }
 }

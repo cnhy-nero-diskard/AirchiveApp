@@ -245,7 +245,7 @@ class AcCommandController(
                 } ?: return AcCommandSubmitResult.IgnoredStaleContext
             }
             if (!lifecycle.isCurrentContext(captured)) return AcCommandSubmitResult.IgnoredStaleContext
-            operationPort.setState(command)
+            operationPort.setState(command) { lifecycle.isCurrentContext(captured) }
         } catch (cancelled: CancellationException) {
             // The command may have gone out before cancellation was observed:
             // replace Sending with Unconfirmed (unless the context ended —

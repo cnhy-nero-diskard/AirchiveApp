@@ -208,7 +208,7 @@ fun SharedInstrumentPanel(
     profile: ThinQDeviceProfile?,
     commandState: AcCommandUiState = AcCommandUiState.Idle,
     deviceName: String = "Air conditioner",
-    onCommand: ((AcCommand) -> Unit)? = null,
+    onCommand: ((AcCommand) -> AcCommandDispatchResult?)? = null,
     onRefresh: () -> Unit = {},
     onEnergy: () -> Unit = {},
     onSetup: (() -> Unit)? = null,
@@ -242,6 +242,9 @@ fun SharedInstrumentPanel(
     var pendingTemperature by remember(snapshot.partition, temperatureContextKey, capability) {
         mutableStateOf<TemperatureDraft?>(null)
     }
+    var notSentTemperature by remember(snapshot.partition, temperatureContextKey, capability) {
+        mutableStateOf<TemperatureDraft?>(null)
+    }
     val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
     val draftResolution = resolveTemperatureDraft(draft, observed, capability)
     val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
@@ -254,13 +257,21 @@ fun SharedInstrumentPanel(
     LaunchedEffect(draftResolution.status) {
         // Once observed, the selected value is no longer a draft. Later AC
         // changes must appear in the single setpoint readout too.
-        if (draftResolution.status == TemperatureDraftStatus.MATCHES_OBSERVATION) updateDraft(null)
+        if (draftResolution.status == TemperatureDraftStatus.MATCHES_OBSERVATION) {
+            updateDraft(null)
+            notSentTemperature = null
+        }
     }
     val latestOnCommand by rememberUpdatedState(onCommand)
     val latestNow by rememberUpdatedState(nowEpochMillis)
     LaunchedEffect(pendingTemperature, enabled, draftResolution.status) {
         val pending = pendingTemperature ?: return@LaunchedEffect
-        if (!enabled || !draftResolution.canApply) {
+        if (!enabled) {
+            pendingTemperature = null
+            notSentTemperature = pending
+            return@LaunchedEffect
+        }
+        if (!draftResolution.canApply) {
             pendingTemperature = null
             return@LaunchedEffect
         }
@@ -268,7 +279,10 @@ fun SharedInstrumentPanel(
         // Consume before dispatch: failure, ambiguous acceptance, and subsequent
         // state reads must never re-arm this request or retry it automatically.
         pendingTemperature = null
-        latestOnCommand?.invoke(AcCommand.SetTargetTemperature(latestNow, pending.value, pending.unit))
+        val dispatchResult = latestOnCommand?.invoke(
+            AcCommand.SetTargetTemperature(latestNow, pending.value, pending.unit),
+        )
+        notSentTemperature = if (dispatchResult == AcCommandDispatchResult.Scheduled) null else pending
     }
     fun stepTemperature(increase: Boolean) {
         val base = selected?.takeIf { it in allowed }
@@ -278,6 +292,7 @@ fun SharedInstrumentPanel(
         val next = allowed.getOrNull(allowed.indexOf(base) + if (increase) 1 else -1) ?: return
         val nextDraft = TemperatureDraft(next, capability!!.unit)
         updateDraft(nextDraft)
+        notSentTemperature = null
         pendingTemperature = nextDraft
     }
     val controlBase = selected?.takeIf { it in allowed } ?: observed?.takeIf { it in allowed }
@@ -341,6 +356,7 @@ fun SharedInstrumentPanel(
                     )
                     val targetStatus = when {
                         pendingTemperature != null -> "Sending in 1 second…"
+                        notSentTemperature != null -> "Not sent · choose again to send"
                         draftResolution.canApply -> "Selected target · not confirmed"
                         observed == null -> "Suggested target · not read from AC"
                         live !is ThinQLiveRefreshState.Current -> "Last observed target"

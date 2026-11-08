@@ -19,9 +19,9 @@
 
 ## 4. Command send safety
 
-- [ ] 4.1 Add a pre-send guard to the operation port (`setState(command, guard)`). Call it in `KtorThinQClient` after the profile read and before the POST, and update the fakes. Verify with a coordinator + MockEngine test that suspends `/profile`, removes the credential, and asserts zero `/control` requests and a "not sent" outcome.
-- [ ] 4.2 Add `AirchiveApplication`, owning `AndroidProductionThinQGraph`, the credential store, and the HTTP engine. `MainActivity` binds to it and no longer closes it in `onDestroy`; the graph is closed only by the owner transition. Verify with an instrumented test: dispatch against a suspended fake port, `scenario.recreate()`, then assert the pending status is shown and a second tap sends nothing.
-- [ ] 4.3 Label a temperature draft whose one-second send did not start (busy slot or stale context) as "Not sent". Verify with a host test that occupies the slot during the pause.
+- [x] 4.1 Add a pre-send guard to the operation port (`setState(command, guard)`). Call it in `KtorThinQClient` after the profile read and before the POST, and update the fakes. Verify with a coordinator + MockEngine test that suspends `/profile`, removes the credential, and asserts zero `/control` requests and a "not sent" outcome.
+- [x] 4.2 Add `AirchiveApplication`, owning `AndroidProductionThinQGraph`, the credential store, and the HTTP engine. `MainActivity` binds to it and no longer closes it in `onDestroy`; the graph is closed only by the owner transition. Verify with an instrumented test: dispatch against a suspended fake port, `scenario.recreate()`, then assert the pending status is shown and a second tap sends nothing.
+- [x] 4.3 Label a temperature draft whose one-second send did not start (busy slot or stale context) as "Not sent". Verify with a host test that occupies the slot during the pause.
 
 ## 5. Truthful outcomes, failures, and selectors
 

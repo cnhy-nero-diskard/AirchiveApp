@@ -50,7 +50,15 @@ interface ThinQPort {
      * timeouts surface as [CommandStatus.UNCONFIRMED] and are never auto-resent.
      * A rejected command never writes anything back to telemetry.
      */
-    suspend fun setState(command: AcCommand): CommandOutcome
+    suspend fun setState(command: AcCommand): CommandOutcome = setState(command) { true }
+
+    /**
+     * Submits after rechecking the command's captured lifecycle context at the
+     * adapter's last safe point. Implementations that read a profile before a
+     * POST must call [guard] after that read and immediately before the POST.
+     * A false result is a definitive not-sent outcome, never an ambiguous send.
+     */
+    suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome
 }
 
 /** One device as listed by LG. */
@@ -195,6 +203,8 @@ enum class CommandFailure {
     TIMEOUT,
 
     DEVICE_UNAVAILABLE,
+    /** The captured owner/credential context changed before control was posted. */
+    NOT_SENT,
     UNKNOWN,
 }
 
