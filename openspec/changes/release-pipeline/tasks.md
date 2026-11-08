@@ -56,7 +56,7 @@
   - generates the manifest, uploads it as an artifact in a dry run, and otherwise attaches it to the draft and publishes with `make_latest=true`
 
   Verify that `grep -n 'secrets\.' .github/workflows/release-publish.yml` is empty and every `uses:` is a full SHA. End-to-end verification is task 6.2.
-- [ ] 4.3 With the owner's confirmation, enable immutable releases and create the `release` environment allowing only `v*` tags. Verify with `gh api repos/{owner}/{repo}/environments/release` showing the tag policy, and with the repository settings showing immutable releases on.
+- [x] 4.3 With the owner's confirmation, enable immutable releases and create the `release` environment allowing only `v*` tags. Verify with `gh api repos/{owner}/{repo}/environments/release` showing the tag policy, and with the repository settings showing immutable releases on.
 
 ## 5. Runbook and skills
 
