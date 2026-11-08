@@ -105,8 +105,8 @@ and production history. No ThinQ token was entered and no AC command was sent.
   server acceptance.
 - The iOS scaffold and adapter boundaries are documented in `iosApp/README.md`.
   Its launcher shows an explicit setup-required screen, not demo device data.
-  Project wiring was checked from source files; iOS compilation/signing/device
-  verification were not tested on Windows.
+  Project wiring was checked from source files; iOS compilation, signing, and
+  device verification remain unvalidated.
 - Android's production ThinQ path now uses the Keystore-backed runtime credential
   flow and profile-gated controls; `docs/thinq-control.md` documents its status.
   The live-control task remains unaccepted until deliberate real-AC actions are
@@ -114,8 +114,8 @@ and production history. No ThinQ token was entered and no AC command was sent.
 
 ### Repeatable checks
 
-```powershell
-.\gradlew.bat :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
+```sh
+./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
 openspec validate add-personal-airchive-mobile-app --strict
 git diff --check
 ```
@@ -129,11 +129,10 @@ app's history. Its second test requires a populated production cache and checks
 the real Activity while Firestore networking is disabled, then restores SDK
 networking. It sends no Firestore write, ThinQ operation, sign-in, or sign-out.
 
-```powershell
-$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-& $adb -s <phone-serial> install -r -t androidApp\build\outputs\apk\androidTest\debug\androidApp-debug-androidTest.apk
-& $adb -s <phone-serial> shell am instrument -w -e class cloud.airchive.personal.data.firebase.LiveHistoryCacheVerificationTest -e airchive.liveHistoryCheck true -e airchive.expectedOwnerUid <verified-uid> -e airchive.expectedDeviceId <verified-device-id> cloud.airchive.personal.test/androidx.test.runner.AndroidJUnitRunner
-& $adb -s <phone-serial> uninstall cloud.airchive.personal.test
+```sh
+adb -s <phone-serial> install -r -t androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
+adb -s <phone-serial> shell am instrument -w -e class cloud.airchive.personal.data.firebase.LiveHistoryCacheVerificationTest -e airchive.liveHistoryCheck true -e airchive.expectedOwnerUid <verified-uid> -e airchive.expectedDeviceId <verified-device-id> cloud.airchive.personal.test/androidx.test.runner.AndroidJUnitRunner
+adb -s <phone-serial> uninstall cloud.airchive.personal.test
 ```
 
 Client options must be configured locally and the debug signing certificate
@@ -150,9 +149,9 @@ OAuth2.0" error. The Mac debug package and certificate were registered on
 2026-11-04, and its generated Firebase configuration includes an Android OAuth
 client matching the package and certificate.
 
-## Windows-host verification
+## Host verification record
 
-The shared and Android build checks pass on this host:
+The shared and Android build checks passed on the earlier development host:
 
 - `:shared:testAndroidHostTest`: **310 tests passed**, with no failures/errors.
 - `:androidApp:assembleDebug` and `:androidApp:assembleDebugAndroidTest`:
