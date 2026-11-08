@@ -1,4 +1,5 @@
 import java.io.File
+import java.io.StringReader
 import java.util.Properties
 
 plugins {
@@ -53,6 +54,25 @@ fun airchiveConfigValue(key: String): String = requireNotNull(airchiveConfig.get
 fun airchiveConfigValueOrBlank(key: String): String =
     airchiveConfig.getProperty(key)?.trim().orEmpty()
 
+val airchiveVersionFile = rootProject.layout.projectDirectory.file("config/airchive-version.properties")
+val airchiveVersionProperties = providers.fileContents(airchiveVersionFile).asText.map { contents ->
+    Properties().apply { load(StringReader(contents)) }
+}
+val airchiveVersionCode = airchiveVersionProperties.map { properties ->
+    requireNotNull(properties.getProperty("versionCode")?.trim()?.toIntOrNull()) {
+        "Invalid versionCode in config/airchive-version.properties."
+    }.also { require(it > 0) { "versionCode in config/airchive-version.properties must be positive." } }
+}
+val airchiveVersionName = airchiveVersionProperties.map { properties ->
+    require(!properties.getProperty("versionName").isNullOrBlank()) {
+        "Missing versionName in config/airchive-version.properties."
+    }
+    properties.getProperty("versionName").trim()
+}
+if (providers.gradleProperty("airchive.versionCode").isPresent) {
+    error("The airchive.versionCode override has been removed; edit config/airchive-version.properties instead.")
+}
+
 /** Renders a value as a safe Kotlin string literal for a BuildConfig field. */
 fun buildConfigStringLiteral(value: String): String = "\"" +
     value
@@ -88,12 +108,6 @@ val signingStorePath = if (hasStudioReleaseSigning) {
 } else {
     releaseSigningEnvironment.getValue("AIRCHIVE_RELEASE_STORE_FILE")
 }
-val releaseVersionCode = providers.gradleProperty("airchive.versionCode").orNull?.let { raw ->
-    val parsed = requireNotNull(raw.toIntOrNull()) { "airchive.versionCode must be a positive integer." }
-    require(parsed > 0) { "airchive.versionCode must be a positive integer." }
-    parsed
-} ?: 2
-
 val verifyPrivateReleaseSigning = tasks.register("verifyPrivateReleaseSigning") {
     group = "verification"
     description = "Checks that private release signing is configured without printing credential values."
@@ -152,8 +166,8 @@ android {
         applicationId = "cloud.airchive.personal"
         minSdk = 26
         targetSdk = 36
-        versionCode = releaseVersionCode
-        versionName = "0.1.0"
+        versionCode = airchiveVersionCode.get()
+        versionName = airchiveVersionName.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "AIRCHIVE_FIREBASE_PROJECT_ID", "\"${airchiveConfigValue("firebase.projectId")}\"")
