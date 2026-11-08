@@ -28,13 +28,7 @@ read-only audit; nothing is deleted or changed without an explicit, confirmed pl
 
 ### 1. Scan (read-only — always first)
 
-If `scripts/Invoke-HousekeepingScan.ps1` exists, prefer it for deterministic checks:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Invoke-HousekeepingScan.ps1 -RepoRoot <repo-root>
-```
-
-Otherwise collect the same data manually:
+Use repository tooling when available; otherwise collect the same data manually:
 
 ```powershell
 # Candidate AirchiveApp artifacts; verify status and active use before classifying

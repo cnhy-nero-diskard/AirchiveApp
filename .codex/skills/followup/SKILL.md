@@ -135,10 +135,11 @@ For each in-scope or picked comment:
 4. Verify before committing:
    ```bash
     .\gradlew.bat :shared:testAndroidHostTest :androidApp:assembleDebug
-    powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1
+    shellcheck scripts/release/*.sh
+    scripts/release/test-release-scripts.sh
     ```
 
-    The Gradle checks cover Kotlin/Android changes; the PowerShell smoke checks apply
+    The Gradle checks cover Kotlin/Android changes; the release-script checks apply
     when release automation changes. For Firebase integration, inspect
     `androidApp/src/androidTest/`, `firebase.test.json`, and `tests/firebase/firestore.rules`
     before selecting emulator checks. Never send real ThinQ commands or use production

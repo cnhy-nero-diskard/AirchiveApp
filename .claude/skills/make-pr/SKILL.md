@@ -62,8 +62,9 @@ Run what the branch touches, on Windows:
 Plus, conditionally:
 
 - `scripts/release/` changed:
-  ```powershell
-  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/Test-ReleaseAutomation.ps1
+  ```sh
+  shellcheck scripts/release/*.sh
+  scripts/release/test-release-scripts.sh
   ```
 - androidApp Firebase code or `tests/firebase/firestore.rules` changed: the
   emulator harness in step 2.

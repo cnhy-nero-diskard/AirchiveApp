@@ -22,8 +22,9 @@ An existing signed release cannot be replaced by a differently signed debug APK.
 Never uninstall, clear data, downgrade, or bypass signature checks to make installation
 work: local Room history and the Android Keystore ThinQ credential must be preserved.
 If the phone has a release installation, stop and offer a same-key release update
-using `docs/android-release.md` and `scripts/release/Invoke-AirchiveRelease.ps1`.
-Obtain authorization for that alternative and its version code before running it.
+using `docs/android-release.md` and `scripts/release/release.sh --install <serial>`.
+The release path requires an existing installation, pinned signer, and lower
+version code; it does not remove app data.
 
 ## Workflow
 

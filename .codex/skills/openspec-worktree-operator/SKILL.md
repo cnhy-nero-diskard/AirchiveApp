@@ -123,7 +123,8 @@ AirchiveApp-specific validation and safety:
 - For Kotlin/Android changes use
   `.\gradlew.bat :shared:testAndroidHostTest :androidApp:assembleDebug` inside the worktree.
 - For release-script changes also run
-  `powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1`.
+  `shellcheck scripts/release/*.sh` and
+  `scripts/release/test-release-scripts.sh`.
 - Do not copy private signing files, DPAPI credential stores, Firebase service
   configuration, or ThinQ credentials into the worktree. Consult `docs/android-release.md`
   only when an explicitly requested release operation needs it.
