@@ -193,10 +193,7 @@ make_release_test_repo() {
   cp "$script_dir/release.sh" "$release_repo/scripts/release/release.sh"
   cat > "$release_repo/scripts/release/check-apk.sh" <<'EOF'
 #!/usr/bin/env bash
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  test -f "$1"
-  printf 'fixture APK check passed\n'
-fi
+find_build_tools() { printf '%s\n' "$ANDROID_HOME/build-tools/36.0.0"; }
 EOF
   cat > "$release_repo/gradlew" <<'EOF'
 #!/usr/bin/env bash
@@ -229,6 +226,10 @@ EOF
   RELEASE_TEST_SHIMS=$shim_dir
   RELEASE_TEST_HOME=$home_dir
   RELEASE_TEST_LABEL=$label
+  RELEASE_TEST_ANDROID_HOME=
+  RELEASE_TEST_INSTALLED_APK=
+  RELEASE_TEST_INSTALLED_CERT=
+  RELEASE_TEST_INSTALLED_CODE=
 }
 
 run_release_test() {
@@ -236,6 +237,11 @@ run_release_test() {
   if output=$(cd "$RELEASE_TEST_REPO" && \
     PATH="$RELEASE_TEST_SHIMS:$PATH" \
     HOME="$RELEASE_TEST_HOME" USER=fixture \
+    ANDROID_HOME="$RELEASE_TEST_ANDROID_HOME" \
+    AIRCHIVE_RELEASE_TEST_INSTALLED_APK="$RELEASE_TEST_INSTALLED_APK" \
+    AIRCHIVE_RELEASE_TEST_INSTALLED_CERT="$RELEASE_TEST_INSTALLED_CERT" \
+    AIRCHIVE_RELEASE_TEST_INSTALLED_CODE="$RELEASE_TEST_INSTALLED_CODE" \
+    AIRCHIVE_RELEASE_TEST_ADB_LOG="$temp_dir/adb-log-$RELEASE_TEST_LABEL" \
     AIRCHIVE_RELEASE_TEST_ARGS="$temp_dir/gradle-args-$RELEASE_TEST_LABEL" \
     AIRCHIVE_RELEASE_TEST_ENV="$temp_dir/gradle-env-$RELEASE_TEST_LABEL" \
     AIRCHIVE_RELEASE_TEST_GH_ARGS="$temp_dir/gh-args-$RELEASE_TEST_LABEL" \
@@ -245,6 +251,38 @@ run_release_test() {
   fi
   printf '%s\n' "$output"
   return 1
+}
+
+make_install_test_tools() {
+  local sdk_dir
+  sdk_dir="$temp_dir/android-sdk-$RELEASE_TEST_LABEL"
+  mkdir -p "$sdk_dir/platform-tools" "$sdk_dir/build-tools/36.0.0"
+  cat > "$sdk_dir/platform-tools/adb" <<'EOF'
+#!/usr/bin/env bash
+case "$3" in
+  get-state) printf 'device\n' ;;
+  shell)
+    case "$4" in
+      dumpsys) printf 'Package [cloud.airchive.personal] versionCode=%s targetSdk=36\n' "$AIRCHIVE_RELEASE_TEST_INSTALLED_CODE" ;;
+      pm) printf 'package:/data/app/cloud.airchive.personal/base.apk\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  pull) cp "$AIRCHIVE_RELEASE_TEST_INSTALLED_APK" "$5" ;;
+  install) printf '%s\n' "$*" >> "$AIRCHIVE_RELEASE_TEST_ADB_LOG" ;;
+  *) exit 1 ;;
+esac
+EOF
+  cat > "$sdk_dir/build-tools/36.0.0/apksigner" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "verify" ]; then
+  printf 'Signer #1 certificate SHA-256 digest: %s\n' "$AIRCHIVE_RELEASE_TEST_INSTALLED_CERT"
+else
+  exit 1
+fi
+EOF
+  chmod +x "$sdk_dir/platform-tools/adb" "$sdk_dir/build-tools/36.0.0/apksigner"
+  RELEASE_TEST_ANDROID_HOME=$sdk_dir
 }
 
 expect_release_refusal() {
@@ -300,5 +338,73 @@ grep -q '^fixture-key-password$' "$temp_dir/gradle-env-successful-build"
 grep -q -- '--draft' "$temp_dir/gh-args-successful-build"
 grep -q -- '--notes-file' "$temp_dir/gh-args-successful-build"
 echo "PASS: release Gradle receives signing passwords only through its environment"
+
+make_release_test_repo missing-install-serial
+expect_release_refusal "missing install serial before build" "requires an explicit device serial before any build is started" --install
+if [ -f "$temp_dir/gradle-args-missing-install-serial" ]; then
+  echo "FAIL: missing install serial reached Gradle" >&2
+  exit 1
+fi
+
+make_release_test_repo equal-installed-code
+make_install_test_tools
+RELEASE_TEST_INSTALLED_CODE=3
+RELEASE_TEST_INSTALLED_CERT=2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202
+RELEASE_TEST_INSTALLED_APK="$temp_dir/installed-equal.apk"
+printf 'fixture installed APK\n' > "$RELEASE_TEST_INSTALLED_APK"
+expect_release_refusal "equal installed version" "is not lower than new versionCode" --install emulator-fixture
+if [ -f "$temp_dir/adb-log-equal-installed-code" ]; then
+  echo "FAIL: equal installed version reached adb install" >&2
+  exit 1
+fi
+
+make_release_test_repo higher-installed-code
+make_install_test_tools
+RELEASE_TEST_INSTALLED_CODE=4
+RELEASE_TEST_INSTALLED_CERT=2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202
+RELEASE_TEST_INSTALLED_APK="$temp_dir/installed-higher.apk"
+printf 'fixture installed APK\n' > "$RELEASE_TEST_INSTALLED_APK"
+expect_release_refusal "higher installed version" "is not lower than new versionCode" --install emulator-fixture
+if [ -f "$temp_dir/adb-log-higher-installed-code" ]; then
+  echo "FAIL: higher installed version reached adb install" >&2
+  exit 1
+fi
+
+make_release_test_repo wrong-installed-signer
+make_install_test_tools
+RELEASE_TEST_INSTALLED_CODE=2
+RELEASE_TEST_INSTALLED_CERT=4f63921348804435d78cdf523a165927804de3264e2b427f5c8e53b97eb38818
+RELEASE_TEST_INSTALLED_APK="$temp_dir/installed-wrong-signer.apk"
+printf 'fixture installed APK\n' > "$RELEASE_TEST_INSTALLED_APK"
+expect_release_refusal "installed APK with another signer" "does not use the pinned Airchive release identity" --install emulator-fixture
+if [ -f "$temp_dir/adb-log-wrong-installed-signer" ]; then
+  echo "FAIL: different signer reached adb install" >&2
+  exit 1
+fi
+
+make_release_test_repo successful-install
+make_install_test_tools
+RELEASE_TEST_INSTALLED_CODE=2
+RELEASE_TEST_INSTALLED_CERT=2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202
+RELEASE_TEST_INSTALLED_APK="$temp_dir/installed-valid.apk"
+printf 'fixture installed APK\n' > "$RELEASE_TEST_INSTALLED_APK"
+if ! run_release_test --install emulator-fixture >/dev/null; then
+  echo "FAIL: valid checked install did not complete" >&2
+  exit 1
+fi
+forbidden_install_pattern=$(printf 'un%s|%s%s' install pm ' clear')
+if [ "$(wc -l < "$temp_dir/adb-log-successful-install" | tr -d ' ')" -ne 1 ] || \
+  ! grep -q 'install -r ' "$temp_dir/adb-log-successful-install" || \
+  grep -E "$forbidden_install_pattern" "$temp_dir/adb-log-successful-install"; then
+  echo "FAIL: install path did not use only adb install -r" >&2
+  cat "$temp_dir/adb-log-successful-install" >&2
+  exit 1
+fi
+echo "PASS: checked install uses only adb install -r"
+if grep -nE "$forbidden_install_pattern" "$script_dir"/*.sh; then
+  echo "FAIL: a release script contains an app-removal or package-data-wipe command" >&2
+  exit 1
+fi
+echo "PASS: release scripts contain no app-removal or package-data-wipe command"
 
 echo "All release APK checks passed."
