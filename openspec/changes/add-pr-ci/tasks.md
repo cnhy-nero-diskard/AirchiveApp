@@ -12,7 +12,7 @@
 
 ## 2. Required verification workflow
 
-- [ ] 2.1 Add the `build` job in `.github/workflows/verify.yml` (design §1–2), triggered on `pull_request` to `main` and `push` to `main` with no path filters, with `contents: read`, SHA-pinned actions, Temurin 25, the explicit SDK install, `setup-gradle`, and the single `--continue` invocation. Verify on the branch's PR that:
+- [x] 2.1 Add the `build` job in `.github/workflows/verify.yml` (design §1–2), triggered on `pull_request` to `main` and `push` to `main` with no path filters, with `contents: read`, SHA-pinned actions, Temurin 25, the explicit SDK install, `setup-gradle`, and the single `--continue` invocation. Verify on the branch's PR that:
   - the run executes all shared host tests
   - it uploads test and lint reports that identify the commit
 - [ ] 2.2 Add the `dependencies` job: OSV-Scanner over the lockfiles, failing on high or critical advisories, with a committed exceptions config that requires a reason and expiry for each entry. Verify:
