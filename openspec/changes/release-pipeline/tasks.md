@@ -12,7 +12,7 @@
 
 ## 2. Shared APK check script
 
-- [ ] 2.1 Add `scripts/release/check-apk.sh` (bash 3.2, macOS and Linux) per design §5. It finds the newest `build-tools` under `ANDROID_HOME`, takes the APK plus expected name, code and commit, reports every failed check, exits non-zero on any failure, and prints SHA-256 and size on success. The pinned certificate is fixed in the entry point. Only an internal function used by tests takes a different pin. Verify `bash -n` and `shellcheck` pass.
+- [x] 2.1 Add `scripts/release/check-apk.sh` (bash 3.2, macOS and Linux) per design §5. It finds the newest `build-tools` under `ANDROID_HOME`, takes the APK plus expected name, code and commit, reports every failed check, exits non-zero on any failure, and prints SHA-256 and size on success. The pinned certificate is fixed in the entry point. Only an internal function used by tests takes a different pin. Verify `bash -n` and `shellcheck` pass.
 - [ ] 2.2 Add `scripts/release/test-release-scripts.sh` covering `check-apk.sh` with fixtures generated at test time and never committed:
   - the debug APK (debuggable, other signer) fails
   - an APK with two signers fails
