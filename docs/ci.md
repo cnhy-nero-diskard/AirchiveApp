@@ -97,6 +97,15 @@ and the `required` check with zero approvals and no bypass actors. The existing
 **ChatGPT Codex Connector** (`chatgpt-codex-connector`) installation identified
 on the existing ruleset; it is not a bypass actor on the new gate.
 
+The `main-gate` ruleset is active as ruleset ID `26794798`. Secret scanning
+and push protection are enabled in repository settings. Non-provider
+patterns remain disabled because this repository is user-owned; GitHub
+currently lists generic-pattern scanning as available for organization-owned
+repositories on GitHub Team with GitHub Secret Protection. See [GitHub's
+eligibility documentation](https://docs.github.com/en/code-security/how-tos/secure-your-secrets/detect-secret-leaks/enabling-secret-scanning-for-generic-patterns).
+If the repository moves to an eligible organization, enable that setting
+and update this note.
+
 If verification must be bypassed during an outage, disable the `main` gate
 ruleset, land the change through a pull request, then re-enable the ruleset.
 Record the disable and re-enable window in that pull request.
