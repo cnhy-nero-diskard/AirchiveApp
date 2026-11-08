@@ -24,7 +24,7 @@
 
 ## 3. Mac signing setup and release script
 
-- [ ] 3.1 Add `scripts/release/setup-signing.sh` per design §2:
+- [x] 3.1 Add `scripts/release/setup-signing.sh` per design §2:
   - set `~/.airchive` to `700` and the keystore to `600`
   - require the certificate SHA-256 to equal the pin before prompting
   - store both passwords with `security add-generic-password -U … -w` (prompting, never as arguments)

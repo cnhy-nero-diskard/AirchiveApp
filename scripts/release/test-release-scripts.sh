@@ -151,4 +151,30 @@ sign_fixture "$temp_dir/wrong-commit-unsigned.apk" "$temp_dir/wrong-commit.apk" 
 expect_failure "wrong commit rejected" "embedded commit is '1123456789abcdef0123456789abcdef01234567'" \
   check_apk_with_pin "$temp_dir/wrong-commit.apk" "$name" "$code" "$commit" "$fixture_pin"
 
+keytool -genkeypair -noprompt -keystore "$temp_dir/wrong-release-key.jks" \
+  -storetype JKS -storepass "$fixture_password" -keypass "$fixture_password" \
+  -alias airchive-release -dname "CN=Wrong Airchive Test Fixture" \
+  -keyalg RSA -keysize 2048 -validity 2 >/dev/null 2>&1
+mkdir -p "$temp_dir/security-shim"
+cat > "$temp_dir/security-shim/security" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AIRCHIVE_SECURITY_SHIM_LOG"
+exit 97
+EOF
+chmod +x "$temp_dir/security-shim/security"
+if PATH="$temp_dir/security-shim:$PATH" \
+  AIRCHIVE_SECURITY_SHIM_LOG="$temp_dir/security-calls.log" \
+  "$script_dir/setup-signing.sh" --keystore "$temp_dir/wrong-release-key.jks" \
+  > "$temp_dir/setup-output.log" 2>&1; then
+  echo "FAIL: signing setup accepted a keystore with another certificate" >&2
+  exit 1
+fi
+grep -q 'does not match the pinned Airchive release identity' "$temp_dir/setup-output.log"
+if [ -f "$temp_dir/security-calls.log" ]; then
+  echo "FAIL: signing setup called security before rejecting the certificate pin" >&2
+  cat "$temp_dir/security-calls.log" >&2
+  exit 1
+fi
+echo "PASS: wrong signing certificate rejected before Keychain access"
+
 echo "All release APK checks passed."
