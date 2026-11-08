@@ -21,7 +21,7 @@ Run the same build locally with:
 ```
 
 The Gradle Wrapper allows 60 seconds for distribution downloads and retries
-three times with a 1-second initial backoff.
+four times with a 5-second initial backoff that doubles between attempts.
 
 The PR run uploads test and lint reports as an artifact named for the commit
 it tested.
