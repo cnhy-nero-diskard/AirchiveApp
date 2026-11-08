@@ -26,6 +26,7 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
     companion object {
         /** Test-only result of scanning the just-created saved-state parcel for the synthetic PAT marker. */
         @Volatile var lastSavedStateContainsSyntheticPatMarker: Boolean = false
+        @Volatile var retainedShellFixtureForRecreation: SharedInstrumentShellFixture? = null
     }
 
     var submittedCommands = 0
@@ -48,7 +49,15 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
             // over fake owner/history/credential/verifier/ThinQ ports with a
             // controlled clock. This branch constructs no production Firebase,
             // Android Keystore credential or Ktor/CIO graph.
-            val fixture = SharedInstrumentShellFixture(applicationContext)
+            val retainedFixture = if (intent.getBooleanExtra("retain_fixture_for_recreation", false)) {
+                retainedShellFixtureForRecreation.also { retainedShellFixtureForRecreation = null }
+            } else null
+            val fixture = retainedFixture ?: SharedInstrumentShellFixture(
+                    context = applicationContext,
+                    initiallySignedIn = intent.getBooleanExtra("fixture_signed_in", false),
+                    suspendInitialAccessCheck = intent.getBooleanExtra("fixture_suspend_access", false),
+                    initialOfflineAccessCheck = intent.getBooleanExtra("fixture_offline_access", false),
+                )
             shellFixture = fixture
             setContent { fixture.Shell() }
             return
@@ -66,7 +75,15 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
                 true, TemperatureCapability(18.0, 30.0, 1.0, TemperatureUnit.CELSIUS),
                 listOf(AcOperatingMode.FAN, AcOperatingMode.DRY), listOf(FanSpeed.LOW, FanSpeed.HIGH),
             )) }
-            var state by remember { mutableStateOf(ThinQLiveState("preview-ac", now - 20_000, true, 25.0, AcOperatingMode.FAN, FanSpeed.HIGH, currentTemperature = 28.5)) }
+            var state by remember {
+                mutableStateOf(
+                    ThinQLiveState(
+                        "preview-ac", now - 20_000, true, 25.0, AcOperatingMode.FAN,
+                        if (intent.getBooleanExtra("unknown_fan", false)) FanSpeed.AUTO else FanSpeed.HIGH,
+                        currentTemperature = 28.5,
+                    ),
+                )
+            }
             val stale = intent.getBooleanExtra("stale", false)
             AirchiveTheme(dark = intent.getBooleanExtra("dark", false)) {
                 var route by remember { mutableStateOf(intent.getIntExtra("route", 0)) }
@@ -93,6 +110,7 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
                                     is AcCommand.SetMode -> state.copy(mode = request.mode)
                                     is AcCommand.SetFanSpeed -> state.copy(fanSpeed = request.speed)
                                 }
+                                cloud.airchive.shared.data.thinq.AcCommandDispatchResult.Scheduled
                             },
                         )
                         Text("History synced 2 min ago", style = MaterialTheme.typography.bodySmall)
@@ -104,7 +122,13 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        shellFixture?.close()
+        val fixture = shellFixture
+        if (intent.getBooleanExtra("retain_fixture_for_recreation", false) && !isFinishing) {
+            retainedShellFixtureForRecreation = fixture
+        } else {
+            retainedShellFixtureForRecreation = null
+            fixture?.close()
+        }
         shellFixture = null
         super.onDestroy()
     }

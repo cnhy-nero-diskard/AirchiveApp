@@ -121,7 +121,14 @@ internal class ScriptedThinQPort(private val deviceId: String = TEST_DEVICE_ID) 
         return onLiveState?.invoke() ?: testLive(deviceId)
     }
 
-    override suspend fun setState(command: AcCommand): CommandOutcome {
+    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
+        if (!guard()) {
+            return testOutcome(deviceId, command).copy(
+                status = cloud.airchive.shared.contract.thinq.CommandStatus.FAILED,
+                failure = cloud.airchive.shared.contract.thinq.CommandFailure.NOT_SENT,
+                message = "Not sent because the owner or ThinQ credential changed before control submission.",
+            )
+        }
         commandCalls++
         return onSetState?.invoke(command) ?: testOutcome(deviceId, command)
     }
@@ -197,9 +204,9 @@ internal class CountingCredentialStore(
     var clearCalls: Int = 0
         private set
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         saveCalls += 1
-        return delegate.save(rawToken, accountCountry)
+        return delegate.save(rawToken, accountCountry, ownerUid)
     }
 
     override suspend fun clear() {

@@ -80,7 +80,12 @@ import kotlinx.coroutines.launch
  * `KtorThinQClient`/CIO engine or Room database is opened. The androidTest
  * smoke test asserts those artifacts stay absent while this shell renders.
  */
-class SharedInstrumentShellFixture(context: Context) {
+class SharedInstrumentShellFixture(
+    context: Context,
+    initiallySignedIn: Boolean = false,
+    suspendInitialAccessCheck: Boolean = false,
+    initialOfflineAccessCheck: Boolean = false,
+) {
 
     /** Injectable controlled clock replacing the shell's system clock reads. */
     val clock = ControlledFixtureClock(FIXTURE_NOW_EPOCH_MILLIS)
@@ -95,7 +100,9 @@ class SharedInstrumentShellFixture(context: Context) {
     val thinQGate = DeferredResponseGate()
 
     /** Deferred-response gate for fake history reads, used to observe loading UI. */
-    val telemetryReadGate = DeferredResponseGate()
+    val telemetryReadGate = DeferredResponseGate().apply {
+        if (suspendInitialAccessCheck) hold()
+    }
 
     /** Deferred-response gate for the fake PAT verification round trip. */
     val credentialVerificationGate = DeferredResponseGate()
@@ -109,10 +116,23 @@ class SharedInstrumentShellFixture(context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private val ownerIdentity =
-        CountingOwnerIdentity(MutableFixtureOwnerIdentity(), counters, ownerSignInGate)
+    private val ownerIdentity = CountingOwnerIdentity(
+        MutableFixtureOwnerIdentity(
+            initialSession = if (initiallySignedIn) OwnerSession(
+                uid = INITIAL_OWNER_UID,
+                displayName = "Synthetic owner",
+                email = "$INITIAL_OWNER_UID@example.invalid",
+                signedInAtEpochMillis = FIXTURE_NOW_EPOCH_MILLIS,
+            ) else null,
+        ),
+        counters,
+        ownerSignInGate,
+    )
+    private val fakeTelemetry = FakeAirchiveTelemetry(FIXTURE_NOW_EPOCH_MILLIS).apply {
+        if (initialOfflineAccessCheck) failWith = cloud.airchive.shared.contract.telemetry.TelemetryReadFailure.Offline()
+    }
     private val telemetry = CountingTelemetry(
-        FakeAirchiveTelemetry(FIXTURE_NOW_EPOCH_MILLIS), counters, telemetryReadGate,
+        fakeTelemetry, counters, telemetryReadGate,
     )
     private val localHistory = CountingLocalHistory(FakeLocalHistory(), counters)
     private val credentialStore = CountingCredentialStore(FakeThinQCredentialStore(), counters)
@@ -257,6 +277,10 @@ class SharedInstrumentShellFixture(context: Context) {
         thinQ.setReadFailure(failure)
     }
 
+    fun setThinQReadFailureKind(failure: cloud.airchive.shared.data.thinq.ThinQReadFailure?) {
+        thinQ.setReadFailure(failure)
+    }
+
     /** Replaces only the synthetic client's verified profile for task-3.2 journeys. */
     fun setThinQProfileForTest(profile: ThinQDeviceProfile) {
         thinQ.setProfile(profile)
@@ -285,6 +309,11 @@ class SharedInstrumentShellFixture(context: Context) {
     /** Injects a synthetic history adapter failure; callers use typed safe failures. */
     fun setTelemetryFailure(failure: Throwable?) {
         telemetry.setFailure(failure)
+    }
+
+    /** Runs the same access-checked refresh used by MainActivity's foreground loop. */
+    fun runCheckedRefreshForTest() {
+        scope.launch { coordinator.refreshAfterAccessCheck(clock.now()) }
     }
 
     /** Releases the coordinator's session-observation scope; call from onDestroy. */
@@ -322,7 +351,7 @@ class SharedInstrumentShellFixture(context: Context) {
         val history = session?.let { owner ->
             localHistory.observe(coordinator.partitionFor(owner)).first()
         }
-        val credential = credentialStore.observe().first()
+        val credential = credentialStore.observe(session?.uid).first()
         return listOf(
             "credential-state=$credential",
             "history-snapshot=$history",
@@ -343,6 +372,9 @@ class SharedInstrumentShellFixture(context: Context) {
 
         /** Synthetic project id used for every fixture history partition. */
         const val FIXTURE_PROJECT_ID = "airchive-fixture-project"
+
+        /** Initial signed-in owner used only by access-restore instrumentation cases. */
+        const val INITIAL_OWNER_UID = "shell-fixture-initial-owner"
 
         /** Fixed clock baseline so all rendered ages are deterministic. */
         const val FIXTURE_NOW_EPOCH_MILLIS = 1_750_000_000_000L
@@ -454,8 +486,8 @@ private class CountingOwnerIdentity(
 }
 
 /** Switchable Google-session fake used only by isolated shell tests. */
-private class MutableFixtureOwnerIdentity : OwnerIdentityPort {
-    private val session = MutableStateFlow<OwnerSession?>(null)
+private class MutableFixtureOwnerIdentity(initialSession: OwnerSession? = null) : OwnerIdentityPort {
+    private val session = MutableStateFlow(initialSession)
     private var nextSession = FakeOwnerIdentity.DEFAULT_SESSION
 
     override val currentSession: OwnerSession? get() = session.value
@@ -626,6 +658,12 @@ private class CountingThinQClient(
         fake.failReadsWith = failure
     }
 
+    fun setReadFailure(failure: cloud.airchive.shared.data.thinq.ThinQReadFailure?) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.setReadFailure(failure)
+    }
+
     fun setProfile(profile: ThinQDeviceProfile) {
         val fake = delegate as? FakeThinQClient
             ?: error("The fixture ThinQ client is not the expected fake")
@@ -674,10 +712,10 @@ private class CountingThinQClient(
         return delegate.liveState(deviceId)
     }
 
-    override suspend fun setState(command: AcCommand): CommandOutcome {
+    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome {
         counters.thinQCommandSubmissions.incrementAndGet()
         gate.awaitTurn()
-        return delegate.setState(command)
+        return delegate.setState(command, guard)
     }
 }
 
@@ -688,17 +726,20 @@ private class CountingCredentialStore(
     val delegateTypeName: String get() = delegate.javaClass.simpleName
 
     override val clientId: String get() = delegate.clientId
-    override fun observe(): Flow<ThinQCredentialState> = delegate.observe()
+    override fun observe(ownerUid: String?): Flow<ThinQCredentialState> = delegate.observe(ownerUid)
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         counters.credentialSaves.incrementAndGet()
-        return delegate.save(rawToken, accountCountry)
+        return delegate.save(rawToken, accountCountry, ownerUid)
     }
 
-    override suspend fun readToken(): String? {
+    override suspend fun readToken(ownerUid: String?): String? {
         counters.credentialTokenReads.incrementAndGet()
-        return delegate.readToken()
+        return delegate.readToken(ownerUid)
     }
+
+    override suspend fun migrateLegacyCredential(ownerUid: String): Boolean =
+        delegate.migrateLegacyCredential(ownerUid)
 
     override suspend fun clear() {
         counters.credentialClears.incrementAndGet()

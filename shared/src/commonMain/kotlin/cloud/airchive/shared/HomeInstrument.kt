@@ -87,7 +87,9 @@ internal fun ProductionHomeInstrument(
     val commandSlotOccupied = commandSlot != AcCommandSlotState.Idle
     val neutralCommandBusy = commandSlotIsNeutralBusy(commandSlot, contextKey)
     var entrySettled by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
-    var entryReadFailed by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
+    var entryReadFailureKind by remember(bindings, history.partition, credential, hasSession, contextKey) {
+        mutableStateOf<ThinQRefreshFailureKind?>(null)
+    }
     var reading by remember(bindings, history.partition, credential, hasSession, contextKey) { mutableStateOf(false) }
     val now by produceState(nowProvider()) {
         while (true) { value = nowProvider(); delay(30_000) }
@@ -95,7 +97,7 @@ internal fun ProductionHomeInstrument(
     suspend fun refresh(forceProfileRefresh: Boolean = false) {
         if (reading) return
         reading = true
-        entryReadFailed = false
+        entryReadFailureKind = null
         try {
             val entryBindings = bindings ?: return
             // Route entry reuses a valid same-context publication; only the
@@ -107,7 +109,7 @@ internal fun ProductionHomeInstrument(
             } else {
                 entryBindings.onDeviceOpened()
             }
-            entryReadFailed = result == ThinQEntryResult.Failed
+            entryReadFailureKind = (result as? ThinQEntryResult.Failed)?.failureKind
             // A superseded read must not settle: the new context's remembered
             // state and LaunchedEffect take over as soon as the key changes.
             entrySettled = result != ThinQEntryResult.Superseded
@@ -115,7 +117,7 @@ internal fun ProductionHomeInstrument(
             throw cancelled
         } catch (_: Exception) {
             entrySettled = true
-            entryReadFailed = true
+            entryReadFailureKind = ThinQRefreshFailureKind.UNKNOWN
         } finally {
             reading = false
         }
@@ -129,6 +131,18 @@ internal fun ProductionHomeInstrument(
     val presentationReady = canRead && contextKey != null && publication?.contextKey == contextKey
     val entryReadComplete = presentationReady && homeEntryReady(
         ThinQEntryResult.Success, contextKey, bindings?.contextKey?.value, live, profile,
+    )
+    val readFailureKind = when {
+        !presentationReady && entryReadFailureKind != null -> entryReadFailureKind
+        live is ThinQLiveRefreshState.Stale -> live.errorKind
+        live is ThinQLiveRefreshState.Unavailable -> live.errorKind
+        live is ThinQLiveRefreshState.Current -> null
+        else -> entryReadFailureKind
+    }
+    val replaceTokenAction = readFailureKind in setOf(
+        ThinQRefreshFailureKind.INVALID_CREDENTIAL,
+        ThinQRefreshFailureKind.INVALID_TOKEN,
+        ThinQRefreshFailureKind.NO_CONTROL_AUTHORITY,
     )
     SharedInstrumentPanel(
         snapshot = history, nowEpochMillis = now, showEnergy = !comfortOnly,
@@ -145,8 +159,9 @@ internal fun ProductionHomeInstrument(
             // publication; navigation/detail recomposition never resends it.
             bindings.dispatchCommand(request, contextKey)
         } else null,
+        onSetup = if (!canRead || replaceTokenAction) onSettings else null,
+        setupActionLabel = if (replaceTokenAction) "Replace token" else "Open Settings",
         onRefresh = { scope.launch { refresh(forceProfileRefresh = true) } }, onEnergy = onEnergy,
-        onSetup = if (!canRead) onSettings else null,
         refreshing = reading,
         commandSlotOccupied = commandSlotOccupied,
         neutralCommandBusy = neutralCommandBusy,
@@ -158,9 +173,8 @@ internal fun ProductionHomeInstrument(
             !canRead -> "Connect ThinQ in Settings to read and control your AC."
             !presentationReady && !entrySettled -> "Reading device state… Controls will appear after verification."
             presentationReady && live is ThinQLiveRefreshState.Loading -> null
-            live is ThinQLiveRefreshState.Stale || live is ThinQLiveRefreshState.Unavailable ||
-                (!presentationReady && entryReadFailed) -> "The device read failed. Check the connection and retry."
-            !entryReadComplete -> "Device profile unavailable. Retry the device read."
+            readFailureKind != null -> instrumentReadFailureMessage(readFailureKind)
+            !entryReadComplete -> "Device profile could not be verified. Refresh device state to try again."
             else -> null
         },
     )
@@ -189,6 +203,33 @@ internal fun homeEntryReady(
     live.canIssueCommands &&
     live.state.deviceId == profile.deviceId
 
+/** User-facing read cause and recovery wording, independent of interface detail. */
+internal fun instrumentReadFailureMessage(kind: ThinQRefreshFailureKind): String = when (kind) {
+    ThinQRefreshFailureKind.INVALID_CREDENTIAL,
+    ThinQRefreshFailureKind.INVALID_TOKEN ->
+        "ThinQ rejected this token. Replace the ThinQ PAT to restore device access."
+    ThinQRefreshFailureKind.NO_CONTROL_AUTHORITY ->
+        "This ThinQ token lacks control authority. Replace the ThinQ PAT to control the AC."
+    ThinQRefreshFailureKind.DEVICE_UNAVAILABLE ->
+        "The AC is offline or unavailable. Check its power and network, then refresh device state."
+    ThinQRefreshFailureKind.RATE_LIMITED ->
+        "ThinQ is rate-limiting device reads. Wait before refreshing."
+    ThinQRefreshFailureKind.NETWORK,
+    ThinQRefreshFailureKind.TIMEOUT ->
+        "Could not reach ThinQ. Check your connection, then refresh device state."
+    ThinQRefreshFailureKind.WRONG_ACCOUNT ->
+        "The configured AC is not available to this ThinQ account. Check the account and region."
+    ThinQRefreshFailureKind.NO_CREDENTIAL ->
+        "Connect a ThinQ PAT in Settings to read and control your AC."
+    ThinQRefreshFailureKind.UNSUPPORTED_COUNTRY ->
+        "ThinQ account country is not supported. Check the account country in Settings."
+    ThinQRefreshFailureKind.MALFORMED_RESPONSE,
+    ThinQRefreshFailureKind.TRANSIENT,
+    ThinQRefreshFailureKind.INVALID_REQUEST,
+    ThinQRefreshFailureKind.UNKNOWN ->
+        "ThinQ could not read the AC. Refresh device state to try again."
+}
+
 /** Keep the last observed power visible while refreshing or recovering. */
 internal fun instrumentPowerLabel(live: ThinQLiveRefreshState): String {
     val label = when (live.knownLiveState()?.powerOn) {
@@ -208,10 +249,11 @@ fun SharedInstrumentPanel(
     profile: ThinQDeviceProfile?,
     commandState: AcCommandUiState = AcCommandUiState.Idle,
     deviceName: String = "Air conditioner",
-    onCommand: ((AcCommand) -> Unit)? = null,
+    onCommand: ((AcCommand) -> AcCommandDispatchResult?)? = null,
     onRefresh: () -> Unit = {},
     onEnergy: () -> Unit = {},
     onSetup: (() -> Unit)? = null,
+    setupActionLabel: String = "Open Settings",
     setupMessage: String? = null,
     refreshing: Boolean = false,
     showEnergy: Boolean = true,
@@ -242,6 +284,9 @@ fun SharedInstrumentPanel(
     var pendingTemperature by remember(snapshot.partition, temperatureContextKey, capability) {
         mutableStateOf<TemperatureDraft?>(null)
     }
+    var notSentTemperature by remember(snapshot.partition, temperatureContextKey, capability) {
+        mutableStateOf<TemperatureDraft?>(null)
+    }
     val draft = if (onTemperatureDraftChange != null) temperatureDraft else localDraft
     val draftResolution = resolveTemperatureDraft(draft, observed, capability)
     val fallbackSetpoint = remember(capability) { defaultTemperatureSetpoint(capability) }
@@ -254,13 +299,21 @@ fun SharedInstrumentPanel(
     LaunchedEffect(draftResolution.status) {
         // Once observed, the selected value is no longer a draft. Later AC
         // changes must appear in the single setpoint readout too.
-        if (draftResolution.status == TemperatureDraftStatus.MATCHES_OBSERVATION) updateDraft(null)
+        if (draftResolution.status == TemperatureDraftStatus.MATCHES_OBSERVATION) {
+            updateDraft(null)
+            notSentTemperature = null
+        }
     }
     val latestOnCommand by rememberUpdatedState(onCommand)
     val latestNow by rememberUpdatedState(nowEpochMillis)
     LaunchedEffect(pendingTemperature, enabled, draftResolution.status) {
         val pending = pendingTemperature ?: return@LaunchedEffect
-        if (!enabled || !draftResolution.canApply) {
+        if (!enabled) {
+            pendingTemperature = null
+            notSentTemperature = pending
+            return@LaunchedEffect
+        }
+        if (!draftResolution.canApply) {
             pendingTemperature = null
             return@LaunchedEffect
         }
@@ -268,7 +321,10 @@ fun SharedInstrumentPanel(
         // Consume before dispatch: failure, ambiguous acceptance, and subsequent
         // state reads must never re-arm this request or retry it automatically.
         pendingTemperature = null
-        latestOnCommand?.invoke(AcCommand.SetTargetTemperature(latestNow, pending.value, pending.unit))
+        val dispatchResult = latestOnCommand?.invoke(
+            AcCommand.SetTargetTemperature(latestNow, pending.value, pending.unit),
+        )
+        notSentTemperature = if (dispatchResult == AcCommandDispatchResult.Scheduled) null else pending
     }
     fun stepTemperature(increase: Boolean) {
         val base = selected?.takeIf { it in allowed }
@@ -278,6 +334,7 @@ fun SharedInstrumentPanel(
         val next = allowed.getOrNull(allowed.indexOf(base) + if (increase) 1 else -1) ?: return
         val nextDraft = TemperatureDraft(next, capability!!.unit)
         updateDraft(nextDraft)
+        notSentTemperature = null
         pendingTemperature = nextDraft
     }
     val controlBase = selected?.takeIf { it in allowed } ?: observed?.takeIf { it in allowed }
@@ -341,6 +398,7 @@ fun SharedInstrumentPanel(
                     )
                     val targetStatus = when {
                         pendingTemperature != null -> "Sending in 1 second…"
+                        notSentTemperature != null -> "Not sent · choose again to send"
                         draftResolution.canApply -> "Selected target · not confirmed"
                         observed == null -> "Suggested target · not read from AC"
                         live !is ThinQLiveRefreshState.Current -> "Last observed target"
@@ -431,7 +489,7 @@ fun SharedInstrumentPanel(
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
-            if (onSetup != null) TextButton(onClick = onSetup) { Text("Open Settings") }
+            if (onSetup != null) TextButton(onClick = onSetup) { Text(setupActionLabel) }
             else if ((!enabled || !showEnergy || commandState is AcCommandUiState.Unconfirmed || commandState is AcCommandUiState.Failed) && commandState !is AcCommandUiState.Sending) {
                 TextButton(onClick = onRefresh, enabled = !refreshing) { Text(if (refreshing) "Reading device state…" else "Refresh device state") }
             }
@@ -757,8 +815,8 @@ internal fun <T> SteppedChoice(
                     val sliderInset = (stopCellWidth / 2 - thumbRadius).coerceAtLeast(0.dp)
                     val sliderColors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        activeTickColor = MaterialTheme.colorScheme.onPrimary,
+                        activeTrackColor = if (index >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        activeTickColor = if (index >= 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline,
                         inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
                         inactiveTickColor = MaterialTheme.colorScheme.outline,
                         disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .38f),
@@ -770,12 +828,14 @@ internal fun <T> SteppedChoice(
                     val tickColor = if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
                     val accessibleState = when {
                         changed -> "Selected ${selection?.let(label) ?: "unknown"}; current value ${current?.let(label) ?: "unknown"}, not confirmed"
+                        current == null -> "Current value unknown; not settable here"
+                        current !in options -> "Current ${label(current)}; not settable here"
                         liveIsCurrent && current != null -> "Current confirmed value ${label(current)}"
                         else -> "Last observed value ${current?.let(label) ?: "unknown"}"
                     }
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Slider(
-                            value = index.coerceAtLeast(0).toFloat(),
+                            value = index.takeIf { it >= 0 }?.toFloat() ?: 0.5f,
                             onValueChange = { raw ->
                                 val nextIndex = raw.roundToInt().coerceIn(0, options.lastIndex)
                                 if (enabled && nextIndex != lastHapticIndex) {
@@ -794,12 +854,14 @@ internal fun <T> SteppedChoice(
                                 stateDescription = accessibleState
                             },
                             thumb = {
-                                Box(
-                                    Modifier.size(28.dp)
-                                        .shadow(2.dp, CircleShape)
-                                        .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
-                                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
-                                )
+                                if (index >= 0) {
+                                    Box(
+                                        Modifier.size(28.dp)
+                                            .shadow(2.dp, CircleShape)
+                                            .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f), CircleShape)
+                                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                    )
+                                }
                             },
                             track = { sliderState ->
                                 SliderDefaults.Track(
@@ -838,9 +900,26 @@ internal fun <T> SteppedChoice(
                                 )
                             }
                         }
+                        if (selection == null) {
+                            val currentLabel = current?.let(label)
+                            Text(
+                                currentLabel?.let { "Current $it · not settable here" }
+                                    ?: "Current value unknown · not settable here",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                     }
                 }
             } else if (selection == null) {
+                val currentLabel = current?.let(label)
+                Text(
+                    currentLabel?.let { "Current $it · not settable here" }
+                        ?: "Current value unknown · not settable here",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 TextButton(onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     selection = options.single()

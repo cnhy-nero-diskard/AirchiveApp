@@ -412,8 +412,8 @@ private class FailOnSaveCredentialStore(
     var throwOnSave: Throwable? = null,
 ) : ThinQCredentialStore by delegate {
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         throwOnSave?.let { throw it }
-        return failSaveWith?.let { SaveThinQResult.Failure(it) } ?: delegate.save(rawToken, accountCountry)
+        return failSaveWith?.let { SaveThinQResult.Failure(it) } ?: delegate.save(rawToken, accountCountry, ownerUid)
     }
 }

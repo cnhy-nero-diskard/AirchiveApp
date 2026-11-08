@@ -24,7 +24,7 @@ All candidate images show the same synthetic scenario, explicitly labeled Previe
 
 Energy shows Today sampled energy 1.24 kWh, with a coverage warning and visible chart gaps. A separate Yesterday LG finalized daily total is 3.18 kWh. Dates use Asia/Manila; no energy total is described as instantaneous power or as a completed total for today. History sync age is separate from live-read and sample ages. These values are illustrative, not actual energy readings.
 
-Every concept retains Home, Device, Energy, History, and Settings. Two comparably weighted sections fit in the first phone viewport. Supported actions remain Material-shaped native controls. Setpoint changes require an explicit Apply and retain pending versus confirmed states. A design image does not validate accessibility, touch targets, or real-device behavior.
+Every concept retains Home, Device, Energy, History, and Settings. Two comparably weighted sections fit in the first phone viewport. Supported actions remain Material-shaped native controls. After the last deliberate setpoint step, the app waits one second before sending; further steps restart the pause. Pending and confirmed states remain distinct. A design image does not validate accessibility, touch targets, or real-device behavior.
 
 ## Comparison
 

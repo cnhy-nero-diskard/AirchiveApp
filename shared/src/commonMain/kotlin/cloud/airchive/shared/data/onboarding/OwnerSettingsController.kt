@@ -177,7 +177,7 @@ class OwnerSettingsController(
             "ThinQ credential replacement requires a signed-in owner session."
         }
         val result = try {
-            credentialSetup.setup(rawToken, country)
+            credentialSetup.setup(rawToken, country, ownerUid = identity.currentSession?.uid)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
@@ -185,7 +185,9 @@ class OwnerSettingsController(
             // into its typed reason; only an unexpected path could reach here,
             // and it must still become a stable typed failure carrying the
             // preserved masked credential — never an exception message.
-            ThinQCredentialSetupResult.Failure.RemoteFailure(observeCredentialSafely())
+            ThinQCredentialSetupResult.Failure.RemoteFailure(
+                observeCredentialSafely(identity.currentSession?.uid.orEmpty()),
+            )
         }
         _state.value = snapshot()
         result
@@ -343,7 +345,7 @@ class OwnerSettingsController(
         val partition = partitionFor(session)
         return OwnerSettingsState(
             session = session,
-            credential = if (session == null) null else observeCredentialSafely(),
+            credential = if (session == null) null else observeCredentialSafely(session.uid),
             history = if (session == null || partition == null) null else observeHistorySafely(partition),
             confirmStep = current.confirmStep,
             lastActionResult = current.lastActionResult,
@@ -357,8 +359,8 @@ class OwnerSettingsController(
         )
     }
 
-    private suspend fun observeCredentialSafely(): ThinQCredentialState = try {
-        credentialStore.observe().first()
+    private suspend fun observeCredentialSafely(ownerUid: String): ThinQCredentialState = try {
+        credentialStore.observe(ownerUid).first()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {
@@ -520,4 +522,10 @@ enum class OwnerSettingsActionFailure {
 
     /** The identity port could not end the session after its data was cleared. */
     SIGN_OUT_FAILED,
+
+    /** The Firebase document cache could not be reset after its owner changed. */
+    FIRESTORE_CACHE_CLEAR_FAILED,
+
+    /** An owner changed outside Settings and one or more cleanup steps failed. */
+    OWNER_TRANSITION_CLEANUP_FAILED,
 }

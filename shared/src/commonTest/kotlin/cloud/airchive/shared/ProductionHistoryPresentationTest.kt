@@ -72,6 +72,9 @@ class ProductionHistoryPresentationTest {
     @Test
     fun accessMessagesAreRealAndNeverSimulated() {
         assertEquals(true, productionAccessMessage(OwnerAccessState.SignedOut).contains("signed out"))
+        assertEquals("Checking history access…", productionAccessMessage(
+            OwnerAccessState.AccessPending(owner, CHECKING_HISTORY_ACCESS_CODE),
+        ))
         assertTrue(productionAccessMessage(OwnerAccessState.AccessPending(owner, "ACCESS_DENIED")).contains("pending"))
         assertTrue(productionAccessMessage(OwnerAccessState.AccessCheckFailed(owner, "OFFLINE")).contains("verified"))
         val authorized = productionAccessMessage(OwnerAccessState.Authorized(owner, DeviceIdentity(deviceId = "ac-1")))

@@ -11,7 +11,7 @@ Porcelain surfaces, slate typography, restrained cobalt actions, tabular readout
 | Option | What changes | Tradeoff |
 | --- | --- | --- |
 | Original registers | Original identity reference; two generous stacked registers | Large readings crowd context; original chart is not a numerically consistent fixture |
-| Balanced registers | Smaller readouts, separate Mode and Fan speed rows, Apply temperature beside its task | Familiar structure; control section still attracts more attention |
+| Balanced registers | Smaller readouts, separate Mode and Fan speed rows, temperature submission beside its task | Familiar structure; control section still attracts more attention |
 | Shared instrument | Equal readouts in a common first row, one continuous panel | Best balance at a glance; must stack at enlarged text or narrow widths |
 
 Owner decision: Shared Instrument approved on 2026-10-24 with instruction to continue with that layout.
@@ -36,7 +36,7 @@ Typography: one Roboto-compatible native sans through Material roles; tabular nu
 
 ## Interaction decisions for implementation
 
-- Label the adjustable value as Set temperature. Minus/plus edit a draft; explicit Apply temperature sends one command. While editing, show the last confirmed value separately. Applying a draft does not change Mode or Fan speed.
+- Label the adjustable value as Set temperature. Minus/plus edit a draft; after the last deliberate step, wait one second and send the final value once. Each additional step restarts the pause. Keep the last confirmed value distinct from the draft. Temperature adjustment does not change Mode or Fan speed.
 - Mode and Fan speed are separate profile-supported selection controls. Surface only real writable choices. Power sends its own explicit command; pending UI must not claim the requested value was confirmed.
 - Sending disables conflicting controls. Distinguish request accepted, observed confirmed, failed, and unconfirmed. Keep the last confirmed state on ambiguity and offer a fresh state read; never automatically resend.
 - A stale or unavailable live read keeps historical context visible and disables controls with a nearby explanation. Offline energy history does not imply live device access.
@@ -67,4 +67,4 @@ Resolved: the owner approved Shared Instrument and requested continuation. The i
 
 ## Implementation handoff, 2026-10-24
 
-Shared Instrument is implemented in HomeInstrument.kt, using AirchiveTheme.kt across the production app. The paired readouts, explicit draft/apply action, supported selectors, three-hour recorded-energy groups, gaps/partial coverage, separate LG finalized total and usable-sample freshness are native Compose UI. Independent review cleared the six listed application fixes. Debug build, lint, 313 shared tests, native control tests and light/dark/large-text captures passed. DESIGN.md records implemented tokens. See .impeccable/review/final-verification.md for capture paths and limits, including the outstanding exact-pixel gate. Physical-phone signed-in acceptance was not rerun. No real AC command was sent.
+Shared Instrument is implemented in HomeInstrument.kt, using AirchiveTheme.kt across the production app. The paired readouts, one-second paused temperature send, supported selectors, three-hour recorded-energy groups, gaps/partial coverage, separate LG finalized total and usable-sample freshness are native Compose UI. Independent review cleared the six listed application fixes. Debug build, lint, 313 shared tests, native control tests and light/dark/large-text captures passed. DESIGN.md records implemented tokens. See .impeccable/review/final-verification.md for capture paths and limits, including the outstanding exact-pixel gate. Physical-phone signed-in acceptance was not rerun. No real AC command was sent.

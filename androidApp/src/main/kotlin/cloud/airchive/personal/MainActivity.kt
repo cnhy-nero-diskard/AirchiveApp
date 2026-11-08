@@ -6,11 +6,12 @@ import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreference
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
 import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
-import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
+import cloud.airchive.personal.data.firebase.FirebaseOwnerFirestore
 import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.ProductionAirchiveApp
 import cloud.airchive.shared.ProductionConfigBlockedScreen
@@ -18,11 +19,11 @@ import cloud.airchive.shared.data.local.AirchiveDatabase
 import cloud.airchive.shared.data.local.RoomLocalHistoryPort
 import cloud.airchive.shared.data.local.openAirchiveDatabase
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
+import cloud.airchive.shared.data.onboarding.OwnerTransition
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.ProductionRefreshOutcome
 import cloud.airchive.shared.data.sync.ForegroundRefreshBackoff
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
 
     private var coordinator: ProductionHistoryCoordinator? = null
     private var accountController: ProductionAccountController? = null
-    private var thinQGraph: AndroidProductionThinQGraph? = null
+    private var airchiveApplication: AirchiveApplication? = null
     private var thinQBindings: ProductionThinQBindings? = null
     private var controllerScope: CoroutineScope? = null
     private var activeRefreshJob: Job? = null
@@ -91,12 +92,13 @@ class MainActivity : ComponentActivity() {
             val activeCoordinator = coordinator
             val activeAccountController = accountController
             if (activeCoordinator != null && activeAccountController != null) {
+                val graph = airchiveApplication?.thinQGraph?.collectAsState()?.value
                 ProductionAirchiveApp(
                     coordinator = activeCoordinator,
                     accountController = activeAccountController,
                     onManualRefresh = ::onManualRefresh,
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                    thinQBindings = thinQBindings,
+                    thinQBindings = graph?.bindings() ?: thinQBindings,
                     interfacePreferences = interfacePreferences,
                 )
             } else {
@@ -111,7 +113,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val activeCoordinator = coordinator ?: return
-        val graph = thinQGraph ?: return
+        val app = airchiveApplication ?: return
         foregroundHistoryJob = lifecycleScope.launch {
             activeCoordinator.session.collectLatest { session ->
                 if (session == null) return@collectLatest
@@ -136,24 +138,27 @@ class MainActivity : ComponentActivity() {
             }
         }
         foregroundDeviceJob = lifecycleScope.launch {
-            graph.coordinator.contextKey.collectLatest { context ->
-                if (context.ownerUid == null) return@collectLatest
-                if (deviceScheduleKey != context) {
-                    deviceScheduleKey = context
-                    deviceBackoff = ForegroundRefreshBackoff()
-                    // Home entry performs the first read; do not duplicate it.
-                    deviceNextAt = SystemClock.elapsedRealtime() + ForegroundRefreshBackoff.BASE_MILLIS
-                }
-                while (true) {
-                    delay((deviceNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-                    var failed = false
-                    val result = try {
-                        graph.coordinator.refreshScheduledState(context)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) { failed = true; null }
-                    failed = failed || result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
-                    deviceNextAt = SystemClock.elapsedRealtime() + deviceBackoff.nextDelay(failed)
+            app.thinQGraph.collectLatest { graph ->
+                graph ?: return@collectLatest
+                graph.coordinator.contextKey.collectLatest { context ->
+                    if (context.ownerUid == null) return@collectLatest
+                    if (deviceScheduleKey != context) {
+                        deviceScheduleKey = context
+                        deviceBackoff = ForegroundRefreshBackoff()
+                        // Home entry performs the first read; do not duplicate it.
+                        deviceNextAt = SystemClock.elapsedRealtime() + ForegroundRefreshBackoff.BASE_MILLIS
+                    }
+                    while (true) {
+                        delay((deviceNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+                        var failed = false
+                        val result = try {
+                            graph.coordinator.refreshScheduledState(context)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) { failed = true; null }
+                        failed = failed || result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
+                        deviceNextAt = SystemClock.elapsedRealtime() + deviceBackoff.nextDelay(failed)
+                    }
                 }
             }
         }
@@ -187,13 +192,13 @@ class MainActivity : ComponentActivity() {
         activeRefreshJob = null
         controllerScope?.cancel()
         controllerScope = null
-        thinQGraph?.close()
-        thinQGraph = null
         thinQBindings = null
         super.onDestroy()
     }
 
     private fun buildProductionGraph(configuration: OwnerAuthConfiguration.Ready) {
+        val processGraphOwner = application as AirchiveApplication
+        airchiveApplication = processGraphOwner
         // Reuse one database per process rather than opening a new connection
         // pool on every Activity recreation. No Activity/Context is retained.
         val database = synchronized(MainActivity::class.java) {
@@ -204,17 +209,18 @@ class MainActivity : ComponentActivity() {
         }
         val local = RoomLocalHistoryPort(database)
         val auth = configuration.identity.firebaseAuth
+        val ownerFirestore = synchronized(MainActivity::class.java) {
+            historyFirestore ?: FirebaseOwnerFirestore(auth.app).also { historyFirestore = it }
+        }
         val telemetry = FirebaseAirchiveTelemetry.fromBuildConfig(
             auth = auth,
-            firestore = FirebaseFirestore.getInstance(auth.app),
+            firestoreProvider = ownerFirestore::get,
         )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        val productionThinQGraph = AndroidProductionThinQGraph(
-            context = applicationContext,
-            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
-            // Lifecycle partition (task 2.1): owner/project/device + generation.
+        // The graph and its command owner survive Activity recreation. A
+        // successful OwnerTransition is the only path that replaces it.
+        val productionThinQGraph = processGraphOwner.getOrCreateThinQGraph(
             ownerUid = configuration.identity.currentSession?.uid,
-            projectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
         )
         val productionCoordinator = ProductionHistoryCoordinator(
             identity = configuration.identity,
@@ -225,22 +231,10 @@ class MainActivity : ComponentActivity() {
             scope = scope,
         )
 
-        // Cancel any in-flight refresh the moment the owner session changes
-        // (sign-out, account switch, or Firebase session restore settle) and
-        // invalidate the ThinQ lifecycle context with it, so the previous
-        // owner's readings/profile/command feedback can never reappear
-        // (OpenSpec deliver-shared-instrument-ui task 2.1).
-        lifecycleScope.launch {
-            productionCoordinator.session.collect {
-                activeRefreshJob?.cancel()
-                activeRefreshJob = null
-                productionThinQGraph.onOwnerChanged(it?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
-            }
-        }
-
         // The account controller's destructive transitions run under the same
         // lock as refresh runs, so a clear/sign-out never races an in-flight
         // refresh that could re-populate the partition being removed.
+        var explicitlyTransitioningOwnerUid: String? = null
         val productionAccountController = ProductionAccountController(
             identity = configuration.identity,
             local = local,
@@ -249,27 +243,66 @@ class MainActivity : ComponentActivity() {
             serializedAction = { action -> productionCoordinator.runExclusive(action) },
             credentialStore = productionThinQGraph.credentialStore,
             beforeOwnerTransition = {
+                explicitlyTransitioningOwnerUid = configuration.identity.currentSession?.uid
                 // Invalidate before the account controller clears the PAT or
                 // changes Firebase identity. The session observer below remains
                 // the backstop for external identity changes.
-                productionThinQGraph.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                processGraphOwner.thinQGraph.value?.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
             },
             afterOwnerTransition = { session ->
-                // If cleanup/sign-in fails and the old owner remains active,
-                // re-bind only after the prior context has been cleared; the
-                // next Home entry must perform a fresh matching read.
-                productionThinQGraph.onOwnerChanged(session?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                val ownerBeforeAction = explicitlyTransitioningOwnerUid
+                explicitlyTransitioningOwnerUid = null
+                // If identity did not change (for example, Firebase sign-out
+                // failed after local cleanup), restore that now-empty context.
+                // A new UID is rebound only by OwnerTransition after Firestore
+                // and the previous owner's partition have also been cleared.
+                if (session != null && session.uid == ownerBeforeAction) {
+                    processGraphOwner.thinQGraph.value?.onOwnerChanged(session.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                }
             },
         )
 
+        var transitionGraph = productionThinQGraph
+        val ownerTransition = OwnerTransition(
+            local = local,
+            credentialStore = productionThinQGraph.credentialStore,
+            thinQ = transitionGraph.coordinator,
+            documentCache = ownerFirestore,
+            firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+            currentSession = { configuration.identity.currentSession },
+            serializedAction = { action -> productionCoordinator.runExclusive(action) },
+            reportOutcome = productionAccountController::reportOwnerTransitionOutcome,
+        )
+
+        // Every identity change reaches the same serialized cleanup path,
+        // including Firebase sign-out/session replacement outside Settings.
+        lifecycleScope.launch {
+            var previous = productionCoordinator.session.value
+            productionCoordinator.session.collect { next ->
+                if (previous?.uid != next?.uid) {
+                    activeRefreshJob?.cancel()
+                    activeRefreshJob = null
+                    val failure = ownerTransition.onSessionChanged(previous, next)
+                    if (failure == null && previous?.uid != next?.uid && previous != null) {
+                        processGraphOwner.replaceThinQGraph(transitionGraph, next?.uid)?.let { replacement ->
+                            transitionGraph = replacement
+                            ownerTransition.bindThinQContextCoordinator(replacement.coordinator)
+                        }
+                    }
+                }
+                previous = next
+            }
+        }
+
         coordinator = productionCoordinator
         accountController = productionAccountController
-        thinQGraph = productionThinQGraph
         thinQBindings = productionThinQGraph.bindings()
         controllerScope = scope
     }
 
     private companion object {
         var historyDatabase: AirchiveDatabase? = null
+        var historyFirestore: FirebaseOwnerFirestore? = null
     }
 }

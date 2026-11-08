@@ -118,13 +118,14 @@ class ThinQCredentialSetupCoordinator(
     suspend fun setup(
         rawToken: String,
         country: String,
+        ownerUid: String? = null,
         commitGate: ThinQSetupCommitGate? = null,
     ): ThinQCredentialSetupResult {
         val normalizedCountry = country.trim().uppercase()
         if (rawToken.isBlank() || !COUNTRY_PATTERN.matches(normalizedCountry)) {
             // Input never reached the verifier or the store; the observable
             // credential is exactly what it was.
-            return expose(ThinQCredentialSetupResult.Failure.MalformedInput(currentCredential()), commitGate)
+            return expose(ThinQCredentialSetupResult.Failure.MalformedInput(currentCredential(ownerUid)), commitGate)
         }
         val request = ThinQCredentialVerificationRequest(
             rawToken = rawToken,
@@ -132,7 +133,7 @@ class ThinQCredentialSetupCoordinator(
             clientId = credentialStore.clientId,
             expectedDeviceId = configuredDeviceId,
         )
-        val priorCredential = currentCredential()
+        val priorCredential = currentCredential(ownerUid)
         val verification = try {
             verifier.verify(request)
         } catch (cancelled: CancellationException) {
@@ -151,7 +152,7 @@ class ThinQCredentialSetupCoordinator(
                     // The only outcome that reaches the commit gate: its save
                     // and result are final for this attempt (a same-context
                     // save failure is a committed, honest failure).
-                    persist(request, verification.device, verification.profile, priorCredential, commitGate)
+                    persist(request, verification.device, verification.profile, priorCredential, ownerUid, commitGate)
                 } else {
                     expose(ThinQCredentialSetupResult.Failure.WrongAccount(priorCredential), commitGate)
                 }
@@ -208,10 +209,11 @@ class ThinQCredentialSetupCoordinator(
         device: ThinQDevice,
         profile: ThinQDeviceProfile,
         priorCredential: ThinQCredentialState,
+        ownerUid: String?,
         commitGate: ThinQSetupCommitGate?,
     ): ThinQCredentialSetupResult {
         val commit: suspend () -> ThinQCredentialSetupResult = {
-            persistVerified(request, device, profile, priorCredential)
+            persistVerified(request, device, profile, priorCredential, ownerUid)
         }
         return if (commitGate == null) commit() else commitGate.commitVerifiedCandidate(commit)
     }
@@ -222,9 +224,10 @@ class ThinQCredentialSetupCoordinator(
         device: ThinQDevice,
         profile: ThinQDeviceProfile,
         priorCredential: ThinQCredentialState,
+        ownerUid: String?,
     ): ThinQCredentialSetupResult {
         val saved = try {
-            credentialStore.save(request.rawToken, request.accountCountry)
+            credentialStore.save(request.rawToken, request.accountCountry, ownerUid)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
@@ -234,7 +237,7 @@ class ThinQCredentialSetupCoordinator(
             is SaveThinQResult.Success -> ThinQCredentialSetupResult.Success(
                 device = device,
                 profile = profile,
-                credential = currentCredentialOr(priorCredential),
+                credential = currentCredentialOr(priorCredential, ownerUid),
             )
 
             is SaveThinQResult.Failure -> when (saved.reason) {
@@ -252,8 +255,8 @@ class ThinQCredentialSetupCoordinator(
     }
 
     /** The store's current observable masked credential; never the plaintext. */
-    private suspend fun currentCredential(): ThinQCredentialState = try {
-        credentialStore.observe().first()
+    private suspend fun currentCredential(ownerUid: String?): ThinQCredentialState = try {
+        credentialStore.observe(ownerUid).first()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {
@@ -264,8 +267,11 @@ class ThinQCredentialSetupCoordinator(
      * Reads the post-save observable credential, falling back to [fallback]
      * only if the store itself cannot be observed (the save still succeeded).
      */
-    private suspend fun currentCredentialOr(fallback: ThinQCredentialState): ThinQCredentialState = try {
-        credentialStore.observe().first()
+    private suspend fun currentCredentialOr(
+        fallback: ThinQCredentialState,
+        ownerUid: String?,
+    ): ThinQCredentialState = try {
+        credentialStore.observe(ownerUid).first()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {

@@ -4,6 +4,7 @@ import cloud.airchive.shared.contract.history.CoveredRange
 import cloud.airchive.shared.contract.history.HistoryPartition
 import cloud.airchive.shared.contract.history.SyncMetadata
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
+import cloud.airchive.shared.contract.owner.OwnerAccessState
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInFailure
 import cloud.airchive.shared.contract.owner.SignInResult
@@ -240,6 +241,23 @@ class ProductionHistoryCoordinatorTest {
         assertEquals("ACCESS_DENIED", outcome.code)
         assertEquals(1, telemetry.reads) // device identity, no history pages
         assertEquals("ACCESS_DENIED", local.observe(partitionFor(ownerA)).first().sync?.lastError)
+    }
+
+    @Test
+    fun checkedRefreshPublishesOfflineFailureThenLaterAuthorizedAccess(): Unit = runBlocking {
+        val telemetry = CountingTelemetry(FakeAirchiveTelemetry(nowEpochMillis = nowEpochMillis)).apply {
+            failWith = TelemetryReadFailure.Offline()
+        }
+        val coordinator = coordinator(TestOwnerIdentity(ownerA), telemetry)
+
+        val failed = coordinator.refreshAfterAccessCheck(nowEpochMillis)
+        assertIs<ProductionRefreshOutcome.RefreshFailed>(failed)
+        assertEquals(OwnerAccessState.AccessCheckFailed(ownerA, "OFFLINE"), coordinator.checkedAccessState.value)
+
+        telemetry.failWith = null
+        coordinator.refreshAfterAccessCheck(nowEpochMillis + 60_000L)
+        assertIs<OwnerAccessState.Authorized>(coordinator.checkedAccessState.value)
+        assertEquals(ownerA.uid, (coordinator.checkedAccessState.value as OwnerAccessState.Authorized).session.uid)
     }
 
     @Test

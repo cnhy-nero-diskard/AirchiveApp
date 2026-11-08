@@ -48,6 +48,8 @@ data class ProductionThinQBindings(
      * newer context.
      */
     val setupCredential: suspend (rawToken: String, country: String) -> ThinQSetupOutcome,
+    /** Binds a legacy credential only after the matching owner passes access checks. */
+    val prepareCredentialForOwner: suspend (ownerUid: String) -> Boolean = { false },
     /**
      * Explicit cancel-attempt hook (task 2.4) for setup-form/route
      * cancellation: supersedes only the in-flight setup attempt, which can

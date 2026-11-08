@@ -3,10 +3,12 @@ package cloud.airchive.shared.data.thinq
 import cloud.airchive.shared.contract.thinq.AcCommand
 import cloud.airchive.shared.contract.thinq.AcOperatingMode
 import cloud.airchive.shared.contract.thinq.CommandFailure
+import cloud.airchive.shared.contract.thinq.CommandOutcome
 import cloud.airchive.shared.contract.thinq.CommandStatus
 import cloud.airchive.shared.contract.thinq.FanSpeed
 import cloud.airchive.shared.contract.thinq.TemperatureUnit
 import cloud.airchive.shared.contract.thinq.ThinQCredentialVerificationRequest
+import cloud.airchive.shared.contract.thinq.ThinQPort
 import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import io.ktor.client.engine.mock.MockEngine
@@ -28,7 +30,10 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 /**
  * Deterministic wire tests for [KtorThinQClient] driven by Ktor's MockEngine
@@ -58,6 +63,7 @@ class KtorThinQClientTest {
         requests: MutableList<HttpRequestData>,
         store: FakeThinQCredentialStore = FakeThinQCredentialStore(stableClientId),
         temperatureStepOverride: Double? = null,
+        ownerUidProvider: () -> String? = { null },
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ): KtorThinQClient {
         val engine = MockEngine { request ->
@@ -70,6 +76,7 @@ class KtorThinQClientTest {
             configuredDeviceId = deviceId,
             nowEpochMillis = { fixedNow },
             temperatureStepOverride = temperatureStepOverride,
+            ownerUidProvider = ownerUidProvider,
         )
     }
 
@@ -93,6 +100,20 @@ class KtorThinQClientTest {
 
     private fun requestBody(request: HttpRequestData): String =
         (request.body as? TextContent)?.text.orEmpty()
+
+    @Test
+    fun credentialContextToStringMasksThePat() {
+        val context = KtorThinQClient.CredentialContext(
+            token = pat,
+            country = "PH",
+            clientId = stableClientId,
+        )
+
+        val rendered = context.toString()
+        assertFalse(rendered.contains(pat), "the raw PAT must never appear in CredentialContext.toString()")
+        assertFalse(rendered.contains(pat.dropLast(4)), "the PAT prefix must not leak")
+        assertTrue(rendered.contains("•••• ${pat.takeLast(4)}"), "only a masked suffix may be shown")
+    }
 
     // ------------------------------------------------------------- fixtures
 
@@ -280,6 +301,62 @@ class KtorThinQClientTest {
             "every step uses the captured credential, never the replacement saved afterward",
         )
         assertEquals(replacementPat, store.readToken(), "the replacement remains stored for later operations")
+        thinq.close()
+    }
+
+    @Test
+    fun removingCredentialDuringProfileReadStopsBeforeControlPostAndReturnsNotSent() = runBlocking {
+        val requests = mutableListOf<HttpRequestData>()
+        val profileReadEntered = CompletableDeferred<Unit>()
+        val releaseProfileRead = CompletableDeferred<Unit>()
+        val store = FakeThinQCredentialStore(stableClientId).apply {
+            save(pat, "PH", ownerUid = "owner-a")
+        }
+        val thinq = client(requests, store, ownerUidProvider = { "owner-a" }) { request ->
+            when (request.url.encodedPath) {
+                "/devices/ac-device-1/profile" -> {
+                    profileReadEntered.complete(Unit)
+                    releaseProfileRead.await()
+                    jsonOk(profileJson)
+                }
+                "/devices/ac-device-1/control" -> error("the removed credential must never reach /control")
+                else -> error("Unexpected ThinQ request after credential removal: ${request.url.encodedPath}")
+            }
+        }
+        var capturedOutcome: CommandOutcome? = null
+        val recordingPort = object : ThinQPort by thinq {
+            override suspend fun captureOperationContext(): ThinQPort {
+                val captured = thinq.captureOperationContext()
+                return object : ThinQPort by captured {
+                    override suspend fun setState(command: AcCommand, guard: suspend () -> Boolean): CommandOutcome =
+                        captured.setState(command, guard).also { capturedOutcome = it }
+                }
+            }
+        }
+        val coordinator = ThinQContextCoordinator(
+            credentialStore = store,
+            thinQ = recordingPort,
+            verifier = thinq,
+            configuredDeviceId = deviceId,
+            ownerUid = "owner-a",
+            projectId = "owner-guard-test-project",
+            commandScope = this,
+        )
+        val command = AcCommand.SetPower(REQUESTED_AT, powerOn = false)
+
+        assertEquals(AcCommandDispatchResult.Scheduled, coordinator.dispatchCommand(command, coordinator.contextKey.value))
+        withTimeout(5_000L) { profileReadEntered.await() }
+        val removal = coordinator.removeCredential()
+        assertTrue(removal.removed, "credential removal succeeds while the profile GET is suspended")
+        releaseProfileRead.complete(Unit)
+        withTimeout(5_000L) {
+            coordinator.commandController.slotState.first { it == AcCommandSlotState.Idle }
+        }
+
+        assertEquals(0, requests.count { it.url.encodedPath == "/devices/ac-device-1/control" })
+        assertEquals(CommandStatus.FAILED, capturedOutcome?.status)
+        assertEquals(CommandFailure.NOT_SENT, capturedOutcome?.failure)
+        assertTrue(capturedOutcome?.message.orEmpty().contains("Not sent"))
         thinq.close()
     }
 

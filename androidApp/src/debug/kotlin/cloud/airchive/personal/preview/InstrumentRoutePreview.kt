@@ -68,12 +68,12 @@ internal fun InstrumentRoutePreview(route: Int, history: HistorySnapshot, now: L
                     if (live.state.value is ThinQLiveRefreshState.Current) {
                         ThinQEntryResult.Success
                     } else {
-                        ThinQEntryResult.Failed
+                        ThinQEntryResult.Failed(cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind.UNKNOWN)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    ThinQEntryResult.Failed
+                    ThinQEntryResult.Failed(cloud.airchive.shared.data.thinq.ThinQRefreshFailureKind.UNKNOWN)
                 }
             },
             refreshLiveState = { live.refresh() },

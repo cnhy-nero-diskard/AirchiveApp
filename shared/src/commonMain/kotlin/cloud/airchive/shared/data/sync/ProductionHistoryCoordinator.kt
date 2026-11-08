@@ -76,6 +76,10 @@ class ProductionHistoryCoordinator(
     private val _session = MutableStateFlow<OwnerSession?>(identity.currentSession)
     val session: StateFlow<OwnerSession?> = _session.asStateFlow()
 
+    /** Latest session-bound access result from a checked refresh entry point. */
+    private val _checkedAccessState = MutableStateFlow<OwnerAccessState?>(null)
+    val checkedAccessState: StateFlow<OwnerAccessState?> = _checkedAccessState.asStateFlow()
+
     /** True while any foreground/manual/bootstrap sync run is in flight. */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -100,6 +104,7 @@ class ProductionHistoryCoordinator(
             identity.observeSession().collect { updated ->
                 sessionRevision += 1
                 _session.value = updated
+                _checkedAccessState.value = null
             }
         }
     }
@@ -149,13 +154,15 @@ class ProductionHistoryCoordinator(
 
     private suspend fun checkedRefresh(nowEpochMillis: Long, manual: Boolean): ProductionRefreshOutcome {
         val session = identity.currentSession ?: return ProductionRefreshOutcome.SignedOut
-        return when (val checked = access.restore()) {
+        val checked = access.restore()
+        if (identity.currentSession?.uid != session.uid) return ProductionRefreshOutcome.StaleSession
+        _checkedAccessState.value = checked
+        return when (checked) {
             is OwnerAccessState.Authorized -> {
-                if (identity.currentSession?.uid != checked.session.uid) return ProductionRefreshOutcome.StaleSession
+                if (checked.session.uid != session.uid) return ProductionRefreshOutcome.StaleSession
                 refresh(nowEpochMillis, manual)
             }
             else -> {
-                if (identity.currentSession?.uid != session.uid) return ProductionRefreshOutcome.StaleSession
                 val code = when (checked) {
                     is OwnerAccessState.AccessPending -> checked.safeErrorCode
                     is OwnerAccessState.AccessCheckFailed -> checked.safeErrorCode

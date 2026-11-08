@@ -245,7 +245,7 @@ class AcCommandController(
                 } ?: return AcCommandSubmitResult.IgnoredStaleContext
             }
             if (!lifecycle.isCurrentContext(captured)) return AcCommandSubmitResult.IgnoredStaleContext
-            operationPort.setState(command)
+            operationPort.setState(command) { lifecycle.isCurrentContext(captured) }
         } catch (cancelled: CancellationException) {
             // The command may have gone out before cancellation was observed:
             // replace Sending with Unconfirmed (unless the context ended —
@@ -480,11 +480,7 @@ sealed interface AcCommandUiState {
     /** The port rejected the command with a stable, secret-free [CommandFailure]. */
     data class Failed(val outcome: CommandOutcome) : AcCommandUiState
 
-    /**
-     * The command may or may not have taken effect (timeout, network ambiguity,
-     * cancellation, or a non-matching fresh state read). Never auto-resent;
-     * the owner is asked to refresh state before acting again.
-     */
+    /** The command may have taken effect, but a fresh state read did not confirm it. */
     data class Unconfirmed(val outcome: CommandOutcome) : AcCommandUiState
 }
 

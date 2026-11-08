@@ -11,7 +11,7 @@ Settings > **Interface detail** offers **Simple** (the default, including absent
 
 Changing the choice resets disclosure expansion to the selected mode's defaults. Explicit state-dependent expansion, such as history access needing attention, still applies. Task/action disclosures, including Account actions, remain collapsed by default in both modes and can be opened manually.
 
-Both modes preserve headings, controls, readings, measurement units, freshness, coverage, warnings, failure feedback, recovery actions and confirmations. Detailed explains measurement meaning and technical context; Simple keeps that optional context reachable. Temperature drafts, explicit Apply, supported-capability and current-state command gates, and uncertain command outcomes retain their existing behavior. Switching modes sends no AC command and adds no telemetry fetch or live device read.
+Both modes preserve headings, controls, readings, measurement units, freshness, coverage, warnings, failure feedback, recovery actions and confirmations. Detailed explains measurement meaning and technical context; Simple keeps that optional context reachable. Temperature drafts use a one-second pause after the last deliberate step before sending; supported-capability and current-state command gates and uncertain command outcomes remain visible in both modes. Switching modes sends no AC command and adds no telemetry fetch or live device read.
 
 Android saves this nonsecret, installation-wide choice in private SharedPreferences, independently of owner history/cache and the protected ThinQ PAT. MainActivity supplies the persistent adapter. Callers without a platform adapter receive an in-memory fallback; that fallback does not promise persistence across app instances.
 

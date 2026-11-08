@@ -447,5 +447,6 @@ private fun CommandFailure.toRefreshFailureKind(): ThinQRefreshFailureKind = whe
     CommandFailure.NETWORK -> ThinQRefreshFailureKind.NETWORK
     CommandFailure.TIMEOUT -> ThinQRefreshFailureKind.TIMEOUT
     CommandFailure.DEVICE_UNAVAILABLE -> ThinQRefreshFailureKind.DEVICE_UNAVAILABLE
+    CommandFailure.NOT_SENT -> ThinQRefreshFailureKind.UNKNOWN
     CommandFailure.UNKNOWN -> ThinQRefreshFailureKind.UNKNOWN
 }

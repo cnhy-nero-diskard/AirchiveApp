@@ -16,13 +16,17 @@ import kotlin.time.Clock
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -197,7 +201,7 @@ class ThinQContextCoordinator(
                 // The transition first moves this key to ownerUid=null; never
                 // dispatch the outgoing owner's PAT from that unowned context.
                 hasCredential = contextKey.ownerUid != null &&
-                    !credentialStore.readToken().isNullOrBlank(),
+                    !credentialStore.readToken(contextKey.ownerUid).isNullOrBlank(),
             )
         }
 
@@ -206,7 +210,7 @@ class ThinQContextCoordinator(
         if (!snapshot.hasCredential) {
             // Distinguish "no credential yet" from "the protected key is lost":
             // the latter invalidates so no in-flight old-context result can land.
-            val state = credentialStore.observe().first()
+            val state = credentialStore.observe(snapshot.contextKey.ownerUid).first()
             if (state.unlockFailed || state.present) {
                 invalidateForProtectedKeyLoss()
                 return ThinQEntryResult.Unavailable
@@ -230,7 +234,8 @@ class ThinQContextCoordinator(
             val result = when (retainedLive) {
                 is ThinQLiveRefreshState.Current ->
                     if (retainedLive.state.deviceId == configuredDeviceId) ThinQEntryResult.Success else null
-                is ThinQLiveRefreshState.Stale, is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed
+                is ThinQLiveRefreshState.Stale -> ThinQEntryResult.Failed(retainedLive.errorKind)
+                is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed(retainedLive.errorKind)
                 is ThinQLiveRefreshState.Loading -> ThinQEntryResult.Unavailable
                 ThinQLiveRefreshState.NotRead -> null
             }
@@ -249,9 +254,11 @@ class ThinQContextCoordinator(
             } ?: return ThinQEntryResult.Superseded
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             clearDeviceProfileIfCurrent(captured)
-            return if (lifecycle.isCurrent(captured)) ThinQEntryResult.Failed else ThinQEntryResult.Superseded
+            return if (lifecycle.isCurrent(captured)) {
+                ThinQEntryResult.Failed(classifyRefreshFailure(failure))
+            } else ThinQEntryResult.Superseded
         }
         if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
 
@@ -271,36 +278,36 @@ class ThinQContextCoordinator(
                 operationPort.listDevices().firstOrNull { it.deviceId == configuredDeviceId }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 // The UI sees no verified capability and the live controller's
                 // safe error classification; raw LG/exception text is omitted.
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Failed
+                return ThinQEntryResult.Failed(classifyRefreshFailure(failure))
             }
             if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
             if (device == null) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.WRONG_ACCOUNT)
             }
             if (device.online == false) {
                 if (!publishDeviceProfile(captured, device, profile = null)) {
                     return ThinQEntryResult.Superseded
                 }
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.DEVICE_UNAVAILABLE)
             }
 
             val profile = try {
                 operationPort.profile(configuredDeviceId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Failed
+                return ThinQEntryResult.Failed(classifyRefreshFailure(failure))
             }
             if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
             if (profile.deviceId != configuredDeviceId) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.WRONG_ACCOUNT)
             }
             if (!publishDeviceProfile(captured, device, profile)) {
                 return ThinQEntryResult.Superseded
@@ -324,9 +331,8 @@ class ThinQContextCoordinator(
                 live.state.deviceId == verifiedProfile.deviceId ->
                 ThinQEntryResult.Success
 
-            live is ThinQLiveRefreshState.Stale ||
-                live is ThinQLiveRefreshState.Unavailable ->
-                ThinQEntryResult.Failed
+            live is ThinQLiveRefreshState.Stale -> ThinQEntryResult.Failed(live.errorKind)
+            live is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed(live.errorKind)
 
             else -> ThinQEntryResult.Unavailable
         }
@@ -462,7 +468,12 @@ class ThinQContextCoordinator(
             }
         }
         val result = try {
-            credentialSetup.setup(rawToken, country, gate)
+            credentialSetup.setup(
+                rawToken = rawToken,
+                country = country,
+                ownerUid = attempt.contextKey.ownerUid,
+                commitGate = gate,
+            )
         } catch (cancelled: CancellationException) {
             // Cancellation of the route/caller supersedes precisely this
             // attempt before propagating, even when the verifier is uncooperative.
@@ -523,6 +534,12 @@ class ThinQContextCoordinator(
         lifecycle.invalidateOwner(ownerUid, projectId) { clearPresentationUnderBoundary() }
     }
 
+    /** Binds an upgrade-era credential only after this owner passes access checks. */
+    suspend fun prepareCredentialForOwner(ownerUid: String): Boolean {
+        if (lifecycle.current().ownerUid != ownerUid) return false
+        return credentialStore.migrateLegacyCredential(ownerUid)
+    }
+
     /**
      * Protected-key loss detected from the observable credential state. Only
      * `unlockFailed` is handled here: removal/replacement/sign-out always go
@@ -542,7 +559,7 @@ class ThinQContextCoordinator(
      */
     fun startCredentialStateObservation(scope: CoroutineScope): Job =
         scope.launch {
-            credentialStore.observe().collect { state -> onCredentialState(state) }
+            credentialStateFlow().collect { state -> onCredentialState(state) }
         }
 
     // ------------------------------------------------------------------
@@ -588,13 +605,14 @@ class ThinQContextCoordinator(
 
     /** Platform bindings over this coordinator; see [ProductionThinQBindings]. */
     fun bindings(): ProductionThinQBindings = ProductionThinQBindings(
-        credentialState = credentialStore.observe(),
+        credentialState = credentialStateFlow(),
         clientId = credentialStore.clientId,
         contextKey = contextKey,
         deviceProfile = mutableDeviceProfile,
         liveStateController = liveStateController,
         commandController = commandController,
         setupCredential = ::setupCredentialDetailed,
+        prepareCredentialForOwner = ::prepareCredentialForOwner,
         cancelSetupAttempt = ::cancelSetupAttempt,
         onDeviceOpened = ::onDeviceOpened,
         refreshDeviceProfile = ::refreshDeviceProfile,
@@ -603,6 +621,12 @@ class ThinQContextCoordinator(
         clearCachedDeviceProfile = ::clearCachedDeviceProfile,
         dispatchCommand = ::dispatchCommand,
     )
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun credentialStateFlow() = lifecycle.key
+        .map { it.ownerUid }
+        .distinctUntilChanged()
+        .flatMapLatest { ownerUid -> credentialStore.observe(ownerUid) }
 
     private data class EntrySnapshot(
         val contextKey: ThinQContextKey,

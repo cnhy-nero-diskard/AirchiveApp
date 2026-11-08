@@ -44,7 +44,7 @@ class ProductionContextFenceTest {
         // The entry callback merely returning is never readiness.
         assertFalse(homeEntryReady(null, activeKey, activeKey, current, profile), "no result is not ready")
         assertFalse(
-            homeEntryReady(ThinQEntryResult.Failed, activeKey, activeKey, current, profile),
+            homeEntryReady(ThinQEntryResult.Failed(), activeKey, activeKey, current, profile),
             "a failed read is never ready",
         )
         assertFalse(
