@@ -92,6 +92,7 @@ class KtorThinQClient(
     private val credentialStore: ThinQCredentialStore,
     private val configuredDeviceId: String,
     private val temperatureStepOverride: Double? = null,
+    private val ownerUidProvider: () -> String? = { null },
     private val nowEpochMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) : ThinQPort, ThinQCredentialVerifier {
 
@@ -319,9 +320,10 @@ class KtorThinQClient(
     private enum class SuccessMode { REQUIRE_RESPONSE, IGNORE_BODY }
 
     private suspend fun currentCredentialContext(): CredentialContext {
-        val token = credentialStore.readToken()
+        val ownerUid = ownerUidProvider()
+        val token = credentialStore.readToken(ownerUid)
         val state = try {
-            credentialStore.observe().first()
+            credentialStore.observe(ownerUid).first()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

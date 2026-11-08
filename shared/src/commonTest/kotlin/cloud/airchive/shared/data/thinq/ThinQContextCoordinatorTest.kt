@@ -39,7 +39,7 @@ import kotlinx.coroutines.withTimeout
  */
 class ThinQContextCoordinatorTest {
 
-    private class Fixture(ownerUid: String? = "owner-a") {
+    private class Fixture(private val ownerUid: String? = "owner-a") {
         val store = FakeThinQCredentialStore()
         val port = ScriptedThinQPort()
 
@@ -53,7 +53,7 @@ class ThinQContextCoordinatorTest {
         )
 
         suspend fun seedCredential(token: String = SEED_TOKEN) {
-            store.save(token, "PH")
+            store.save(token, "PH", ownerUid)
         }
     }
 
@@ -224,7 +224,7 @@ class ThinQContextCoordinatorTest {
         val ownerB = OwnerSession("transition-owner-b", signedInAtEpochMillis = 2L)
         val identity = SwitchingIdentity(ownerA, ownerB)
         val store = FakeThinQCredentialStore()
-        store.save(SEED_TOKEN, "PH")
+        store.save(SEED_TOKEN, "PH", ownerA.uid)
         val localDelegate = FakeLocalHistory()
         val clearEntered = CompletableDeferred<Unit>()
         val allowClear = CompletableDeferred<Unit>()

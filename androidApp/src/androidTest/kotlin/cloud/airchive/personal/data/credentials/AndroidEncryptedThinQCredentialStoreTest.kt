@@ -11,9 +11,13 @@ import cloud.airchive.shared.data.local.RoomLocalHistoryPort
 import cloud.airchive.shared.data.local.openAirchiveDatabase
 import cloud.airchive.shared.contract.credentials.SaveThinQResult
 import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.security.KeyStore
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -70,26 +74,72 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun saveThenReopen_returnsSameToken() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
-        assertEquals(TOKEN_A, store.readToken())
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
+        assertEquals(TOKEN_A, store.readToken(OWNER_A))
 
         // A brand-new store over the same install (same noBackupFilesDir and
         // Keystore) must decrypt the persisted record.
         val reopened = store()
-        assertEquals(TOKEN_A, reopened.readToken())
+        assertEquals(TOKEN_A, reopened.readToken(OWNER_A))
     }
 
     @Test
     fun saveReplacingToken_olderTokenNoLongerReadable() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH))
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH, OWNER_A))
 
-        assertEquals("only the newest token must decrypt", TOKEN_B, store.readToken())
-        val state = store.observe().first()
+        assertEquals("only the newest token must decrypt", TOKEN_B, store.readToken(OWNER_A))
+        val state = store.observe(OWNER_A).first()
         val credential = state.credential!!
         assertEquals(maskOf(TOKEN_B), credential.maskedToken)
         assertEquals(COUNTRY_PH, credential.accountCountry)
+    }
+
+    @Test
+    fun ownerBinding_sameOwnerCanRead_otherOwnerGetsAbsentAndRecordIsDeleted() = runBlocking {
+        val store = store()
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
+
+        assertEquals(TOKEN_A, store.readToken(OWNER_A))
+        assertNull(store.readToken(OWNER_B))
+        assertFalse("a mismatched owner read deletes the old credential record", credentialFile().exists())
+        assertFalse(store.observe(OWNER_B).first().present)
+    }
+
+    @Test
+    fun legacyRecord_migratesOnlyAfterOwnerIsAuthorized() = runBlocking {
+        writeLegacyRecord(TOKEN_A)
+        val store = store()
+
+        assertFalse("legacy credential is not visible before binding", store.observe(OWNER_A).first().present)
+        assertTrue(store.migrateLegacyCredential(OWNER_A))
+        assertEquals(TOKEN_A, store.readToken(OWNER_A))
+        assertEquals(
+            "legacy record is atomically rewritten in the owner-bound format",
+            2,
+            credentialFile().inputStream().use { java.io.DataInputStream(it).readInt() },
+        )
+    }
+
+    @Test
+    fun legacyMigrationFailure_discardsUnboundRecordAndFallsBackToAbsent() = runBlocking {
+        writeLegacyRecord(TOKEN_A)
+        val bytes = credentialFile().readBytes()
+        val input = java.io.DataInputStream(bytes.inputStream())
+        input.readInt()
+        val ivLength = input.readInt()
+        input.skipBytes(ivLength)
+        val ciphertextLength = input.readInt()
+        val ciphertextOffset = 4 + 4 + ivLength + 4
+        bytes[ciphertextOffset + ciphertextLength - 1] = (bytes[ciphertextOffset + ciphertextLength - 1].toInt() xor 1).toByte()
+        credentialFile().writeBytes(bytes)
+
+        val store = store()
+        assertFalse(store.migrateLegacyCredential(OWNER_A))
+        assertFalse("unbound ciphertext is discarded when it cannot be migrated", credentialFile().exists())
+        assertNull(store.readToken(OWNER_A))
+        assertFalse(store.observe(OWNER_A).first().present)
     }
 
     // --- observable state is masked only -------------------------------------
@@ -97,9 +147,9 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun observe_neverExposesPlaintextToken() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH))
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH, OWNER_A))
 
-        val state = store.observe().first()
+        val state = store.observe(OWNER_A).first()
         assertTrue("present after a successful save", state.present)
         assertFalse(state.unlockFailed)
         val credential = state.credential!!
@@ -115,7 +165,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun onDiskRecord_containsNoPlaintext() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
 
         val recordFile = credentialFile()
         assertTrue("credential file must exist under noBackupFilesDir", recordFile.isFile)
@@ -129,7 +179,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun plaintextPatNeverAppearsInRoomHistoryFile(): Unit = runBlocking {
         val credentialStore = store()
-        assertEquals(SaveThinQResult.Success, credentialStore.save(TOKEN_B, COUNTRY_PH))
+        assertEquals(SaveThinQResult.Success, credentialStore.save(TOKEN_B, COUNTRY_PH, OWNER_A))
 
         val partition = HistoryPartition(
             firebaseProjectId = "demo-firebase-project",
@@ -176,7 +226,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
         assertNotNull("client id must be a well-formed UUID, was '$id1'", parsed)
         assertEquals("canonical UUID string is 36 chars", 36, id1.length)
 
-        first.save(TOKEN_A, COUNTRY_PH)
+        first.save(TOKEN_A, COUNTRY_PH, OWNER_A)
         val second = store()
         assertEquals("client id must persist across store instances", id1, second.clientId)
 
@@ -191,13 +241,13 @@ class AndroidEncryptedThinQCredentialStoreTest {
     fun clear_removesTokenButKeepsClientId() = runBlocking {
         val store = store()
         val id = store.clientId
-        store.save(TOKEN_A, COUNTRY_PH)
-        assertNotNull("precondition: a saved token exists", store.readToken())
+        store.save(TOKEN_A, COUNTRY_PH, OWNER_A)
+        assertNotNull("precondition: a saved token exists", store.readToken(OWNER_A))
 
         store.clear()
 
-        assertNull("token must be gone after clear", store.readToken())
-        val state = store.observe().first()
+        assertNull("token must be gone after clear", store.readToken(OWNER_A))
+        val state = store.observe(OWNER_A).first()
         assertFalse(state.present)
         assertNull(state.credential)
         assertFalse(state.unlockFailed)
@@ -211,25 +261,25 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun invalidSave_doesNotOverwritePriorRecord() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
 
-        val blankToken = store.save("   \t ", COUNTRY_PH)
+        val blankToken = store.save("   \t ", COUNTRY_PH, OWNER_A)
         assertEquals(
             SaveThinQResult.Failure(ThinQCredentialSaveFailure.INVALID_INPUT),
             blankToken,
         )
-        val threeLetterCountry = store.save(TOKEN_B, "PHX")
+        val threeLetterCountry = store.save(TOKEN_B, "PHX", OWNER_A)
         assertEquals(
             SaveThinQResult.Failure(ThinQCredentialSaveFailure.INVALID_INPUT),
             threeLetterCountry,
         )
-        val numericCountry = store.save(TOKEN_B, "P2")
+        val numericCountry = store.save(TOKEN_B, "P2", OWNER_A)
         assertEquals(
             SaveThinQResult.Failure(ThinQCredentialSaveFailure.INVALID_INPUT),
             numericCountry,
         )
 
-        assertEquals("failed saves must leave the prior record intact", TOKEN_A, store.readToken())
+        assertEquals("failed saves must leave the prior record intact", TOKEN_A, store.readToken(OWNER_A))
     }
 
     // --- backup and storage location -----------------------------------------
@@ -237,7 +287,7 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun recordLivesUnderNoBackupDirAndBackupDisabled() = runBlocking {
         val store = store()
-        store.save(TOKEN_A, COUNTRY_PH)
+        store.save(TOKEN_A, COUNTRY_PH, OWNER_A)
 
         val noBackup = context.noBackupFilesDir
         val recordFile = credentialFile()
@@ -257,8 +307,8 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun keyLoss_readsNullSurfacesUnlockFailed_thenSaveRecovers() = runBlocking {
         val store = store()
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH))
-        assertEquals(TOKEN_A, store.readToken())
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_A, COUNTRY_PH, OWNER_A))
+        assertEquals(TOKEN_A, store.readToken(OWNER_A))
 
         // Simulate losing the platform-protected key by destroying the alias.
         assertTrue("precondition: store key must exist", hasKeyForTesting())
@@ -266,15 +316,15 @@ class AndroidEncryptedThinQCredentialStoreTest {
         assertFalse("precondition: store key must be gone", hasKeyForTesting())
 
         // The persisted record can no longer be decrypted.
-        assertNull("readToken must not crash or leak ciphertext after key loss", store.readToken())
-        val afterLoss = store.observe().first()
+        assertNull("readToken must not crash or leak ciphertext after key loss", store.readToken(OWNER_A))
+        val afterLoss = store.observe(OWNER_A).first()
         assertTrue("observe must reflect the failed unlock", afterLoss.unlockFailed)
         assertFalse("no usable credential while the key is lost", afterLoss.present)
 
         // A fresh save recovers by generating a new key and re-encrypting.
-        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH))
-        assertEquals(TOKEN_B, store.readToken())
-        val recovered = store.observe().first()
+        assertEquals(SaveThinQResult.Success, store.save(TOKEN_B, COUNTRY_PH, OWNER_A))
+        assertEquals(TOKEN_B, store.readToken(OWNER_A))
+        val recovered = store.observe(OWNER_A).first()
         assertFalse(recovered.unlockFailed)
         assertTrue(recovered.present)
         assertEquals("client id must be untouched by the key-loss cycle", store.clientId, recovered.clientId)
@@ -283,14 +333,14 @@ class AndroidEncryptedThinQCredentialStoreTest {
     @Test
     fun reopenAfterKeyLoss_surfacesUnlockFailedWithoutCrash() = runBlocking {
         val store = store()
-        store.save(TOKEN_A, COUNTRY_PH)
+        store.save(TOKEN_A, COUNTRY_PH, OWNER_A)
         deleteKeyForTesting()
 
         val reopened = store()
-        val state = reopened.observe().first()
+        val state = reopened.observe(OWNER_A).first()
         assertTrue("a reopened store must surface unlockFailed", state.unlockFailed)
         assertFalse(state.present)
-        assertNull(reopened.readToken())
+        assertNull(reopened.readToken(OWNER_A))
     }
 
     // --- helpers ---------------------------------------------------------------
@@ -309,7 +359,34 @@ class AndroidEncryptedThinQCredentialStoreTest {
 
     private fun maskOf(token: String): String = "$MASK ${token.takeLast(4)}"
 
+    /** Creates the pre-owner-binding v1 fixture using the test Keystore key. */
+    private suspend fun writeLegacyRecord(token: String) {
+        val store = store()
+        assertEquals(SaveThinQResult.Success, store.save(token, COUNTRY_PH, OWNER_A))
+        val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            .getKey(TEST_KEY_ALIAS, null) as javax.crypto.SecretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val ciphertext = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+        val legacy = ByteArrayOutputStream().use { buffer ->
+            DataOutputStream(buffer).use { out ->
+                out.writeInt(1)
+                out.writeInt(cipher.iv.size)
+                out.write(cipher.iv)
+                out.writeInt(ciphertext.size)
+                out.write(ciphertext)
+                out.writeUTF(maskOf(token))
+                out.writeUTF(COUNTRY_PH)
+                out.writeLong(System.currentTimeMillis())
+            }
+            buffer.toByteArray()
+        }
+        credentialFile().writeBytes(legacy)
+    }
+
     companion object {
+        private const val OWNER_A = "firebase-owner-a"
+        private const val OWNER_B = "firebase-owner-b"
         const val COUNTRY_PH = "PH"
         const val MASK = "\u2022\u2022\u2022\u2022"
         private const val TEST_STORAGE_SUBDIR = "thinq-credential-adapter-test"

@@ -100,7 +100,7 @@ class OwnerSettingsControllerTest {
         val store = FakeThinQCredentialStore()
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1", "owner-a-2"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -144,7 +144,7 @@ class OwnerSettingsControllerTest {
         val store = FakeThinQCredentialStore()
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -180,7 +180,7 @@ class OwnerSettingsControllerTest {
     fun confirmedSignOutWhileSignedOutClearsThePatIdempotently() = runBlocking {
         val identity = ScriptedOwnerIdentity(initialSession = null)
         val store = FakeThinQCredentialStore()
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store)
         controller.requestSignOut()
@@ -205,7 +205,7 @@ class OwnerSettingsControllerTest {
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1", "owner-a-2"))
         seedHistory(local, secondPartition, listOf("owner-b-1"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -249,7 +249,7 @@ class OwnerSettingsControllerTest {
         val store = FakeThinQCredentialStore()
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -283,7 +283,7 @@ class OwnerSettingsControllerTest {
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1", "owner-a-2"))
         seedHistory(local, secondPartition, listOf("owner-b-1"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -338,7 +338,7 @@ class OwnerSettingsControllerTest {
         seedHistory(delegate, firstPartition, listOf("owner-a-1"))
         val local = FailOnClearLocalHistory(delegate, failClear = IllegalStateException("secret cache-clear boom"))
         val store = FakeThinQCredentialStore()
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -417,7 +417,7 @@ class OwnerSettingsControllerTest {
         val store = FakeThinQCredentialStore()
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1"))
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         // Case 1: LG rejects the replacement token → the prior PAT survives.
         val rejectingVerifier = FakeThinQCredentialVerifier(deviceId).apply {
@@ -467,7 +467,7 @@ class OwnerSettingsControllerTest {
     fun replacementCancellationPropagatesAndKeepsThePriorPat() = runBlocking {
         val identity = ScriptedOwnerIdentity(initialSession = firstSession)
         val store = FakeThinQCredentialStore()
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
         val verifier = FakeThinQCredentialVerifier(deviceId).apply {
             failWith = CancellationException("cancelled mid-verification")
         }
@@ -488,7 +488,7 @@ class OwnerSettingsControllerTest {
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1"))
         val raw = "lg-pat-top-secret-9f3a"
-        store.save(raw, "PH")
+        store.save(raw, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -510,7 +510,7 @@ class OwnerSettingsControllerTest {
         seedHistory(delegate, firstPartition, listOf("owner-a-1"))
         val local = FailOnClearLocalHistory(delegate, failClear = IllegalStateException("secret local-clear boom"))
         val store = FakeThinQCredentialStore()
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val controller = controller(identity, store, local = local)
         controller.refresh()
@@ -537,7 +537,7 @@ class OwnerSettingsControllerTest {
     fun credentialClearFailureAfterLocalClearBlocksSignOutButKeepsRowsCleared() = runBlocking {
         val identity = ScriptedOwnerIdentity(initialSession = firstSession)
         val delegateStore = FakeThinQCredentialStore()
-        delegateStore.save(priorToken, "PH")
+        delegateStore.save(priorToken, "PH", firstSession.uid)
         val store = FailOnClearCredentialStore(delegateStore, failClear = IllegalStateException("secret store-clear boom"))
         val local = FakeLocalHistory()
         seedHistory(local, firstPartition, listOf("owner-a-1"))
@@ -573,7 +573,7 @@ class OwnerSettingsControllerTest {
         seedHistory(delegate, firstPartition, listOf("owner-a-1"))
         val local = FailOnClearLocalHistory(delegate, failClear = IllegalStateException("secret-clear-a"))
         val store = FakeThinQCredentialStore()
-        store.save(priorToken, "PH")
+        store.save(priorToken, "PH", firstSession.uid)
 
         val first = controller(identity, store, local = local)
         first.refresh()
@@ -587,7 +587,7 @@ class OwnerSettingsControllerTest {
 
         // Store-clear failure: same guarantee, and no message leaks.
         val delegateStore = FakeThinQCredentialStore()
-        delegateStore.save(priorToken, "PH")
+        delegateStore.save(priorToken, "PH", firstSession.uid)
         val failingStore = FailOnClearCredentialStore(delegateStore, failClear = IllegalStateException("secret-clear-b"))
         val localOk = FakeLocalHistory()
         seedHistory(localOk, firstPartition, listOf("owner-a-1"))
@@ -652,7 +652,7 @@ class OwnerSettingsControllerTest {
     fun refreshSurfacesProtectedKeyUnlockFailed() = runBlocking {
         val identity = ScriptedOwnerIdentity(initialSession = firstSession)
         val delegate = FakeThinQCredentialStore()
-        delegate.save(priorToken, "PH")
+        delegate.save(priorToken, "PH", firstSession.uid)
         delegate.keyUnavailable = true
         val store = KeyLostCredentialStore(delegate)
 
@@ -823,7 +823,7 @@ private class KeyLostCredentialStore(
     private val delegate: FakeThinQCredentialStore,
 ) : ThinQCredentialStore by delegate {
 
-    override fun observe(): Flow<ThinQCredentialState> = delegate.observe().map { state ->
+    override fun observe(ownerUid: String?): Flow<ThinQCredentialState> = delegate.observe(ownerUid).map { state ->
         if (delegate.keyUnavailable) state.copy(unlockFailed = true) else state
     }
 }

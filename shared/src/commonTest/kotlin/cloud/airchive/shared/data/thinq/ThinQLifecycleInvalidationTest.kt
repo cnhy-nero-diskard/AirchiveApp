@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 
 /**
@@ -41,7 +42,7 @@ import kotlinx.coroutines.yield
  */
 class ThinQLifecycleInvalidationTest {
 
-    private class Fixture(ownerUid: String? = "owner-a") {
+    private class Fixture(private val ownerUid: String? = "owner-a") {
         val store = FakeThinQCredentialStore()
         val port = ScriptedThinQPort()
         val verifier: FakeThinQCredentialVerifier = testVerifier()
@@ -61,7 +62,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun contextKeyIsPartitionedByOwnerProjectDeviceAndGenerationWithoutCredentialMaterial() = runBlocking {
         val fixture = Fixture(ownerUid = "owner-a")
-        fixture.store.save("synthetic-secret-marker-1234", "PH")
+        fixture.store.save("synthetic-secret-marker-1234", "PH", "owner-a")
 
         val initial = fixture.coordinator.contextKey.value
         assertEquals(ThinQContextKey("owner-a", TEST_PROJECT_ID, TEST_DEVICE_ID, 0L), initial)
@@ -84,7 +85,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun ownerSwitchInvalidatesTheContextAndClearsPresentation() = runBlocking {
         val fixture = Fixture(ownerUid = "owner-a")
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         assertNotNull(fixture.coordinator.deviceProfile.value)
         assertTrue(fixture.coordinator.liveStateController.state.value is ThinQLiveRefreshState.Current)
@@ -110,7 +111,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun signOutInvalidatesTheOwnerPartitionAndClearsPresentation() = runBlocking {
         val fixture = Fixture(ownerUid = "owner-a")
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
 
         fixture.coordinator.onOwnerChanged(null, TEST_PROJECT_ID)
@@ -125,7 +126,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun credentialRemovalInvalidatesAndClearsTheProtectedStore() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val before = fixture.coordinator.contextKey.value
 
@@ -151,7 +152,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun failedCredentialRemovalStillReturnsItsInvalidatedContextWithoutRevivingPresentation() = runBlocking {
         val delegate = FakeThinQCredentialStore()
-        delegate.save(SEED_TOKEN, "PH")
+        delegate.save(SEED_TOKEN, "PH", "owner-a")
         val store = object : ThinQCredentialStore by delegate {
             override suspend fun clear() {
                 error("synthetic protected-store clear failure")
@@ -184,7 +185,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun identicalMaskAndTimestampReplacementStillSupersedesTheWorkingContext() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save("synthetic-old-pat-1234", "PH")
+        fixture.store.save("synthetic-old-pat-1234", "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val live = fixture.coordinator.liveStateController
         assertTrue(live.state.value is ThinQLiveRefreshState.Current)
@@ -221,7 +222,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun failedSameOwnerReplacementPreservesTheWorkingContext() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         fixture.verifier.result = ThinQVerificationResult.InvalidToken
         val keyBefore = fixture.coordinator.contextKey.value
@@ -248,7 +249,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun protectedKeyLossFromObservableStateInvalidatesTheContext() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val before = fixture.coordinator.contextKey.value
 
@@ -267,7 +268,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun protectedKeyLossDetectedAtEntryInvalidatesWithoutAnyLgCall() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val before = fixture.coordinator.contextKey.value
         val callsBefore = fixture.port.listCalls + fixture.port.profileCalls + fixture.port.liveCalls
@@ -291,7 +292,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun credentialStateObservationInvalidatesOnProtectedKeyLoss() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val before = fixture.coordinator.contextKey.value
 
@@ -301,7 +302,9 @@ class ThinQLifecycleInvalidationTest {
 
         fixture.store.keyUnavailable = true
         fixture.store.clear() // the fake models key loss as an unlockFailed emission
-        yield()
+        withTimeout(1_000L) {
+            fixture.coordinator.contextKey.first { it.credentialGeneration > before.credentialGeneration }
+        }
 
         assertTrue(
             fixture.coordinator.contextKey.value.credentialGeneration > before.credentialGeneration,
@@ -316,10 +319,10 @@ class ThinQLifecycleInvalidationTest {
 
     @Test
     fun ownerSwitchDuringADeferredReadDiscardsTheLateOldOwnerResult() = runBlocking {
-        val store = FakeThinQCredentialStore()
-        store.save(SEED_TOKEN, "PH")
         val ownerA = OwnerSession("lifecycle-owner-a", signedInAtEpochMillis = 1L)
         val ownerB = OwnerSession("lifecycle-owner-b", signedInAtEpochMillis = 2L)
+        val store = FakeThinQCredentialStore()
+        store.save(SEED_TOKEN, "PH", ownerA.uid)
         val identity = SwitchingIdentity(ownerA, ownerB)
         val account = ProductionAccountController(
             identity = identity,
@@ -377,7 +380,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun credentialRemovalDoesNotPublishADeferredOldCommandOutcome() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         val setStateStep = NetworkStep()
         fixture.port.onSetState = { command ->
             setStateStep.hold()
@@ -408,7 +411,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun lateCommandConfirmationCannotRepublishLiveStateAfterContextInvalidation() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         assertEquals(ThinQEntryResult.Success, fixture.coordinator.onDeviceOpened())
         val oldKey = fixture.coordinator.contextKey.value
         val command = AcCommand.SetPower(requestedAtEpochMillis = 1_700_000_000_100L, powerOn = false)
@@ -430,7 +433,7 @@ class ThinQLifecycleInvalidationTest {
     @Test
     fun scheduledCommandSupersededBeforeDispatchIsNeverSent() = runBlocking {
         val fixture = Fixture()
-        fixture.store.save(SEED_TOKEN, "PH")
+        fixture.store.save(SEED_TOKEN, "PH", "owner-a")
         val command = AcCommand.SetPower(requestedAtEpochMillis = 1_700_000_000_000L, powerOn = false)
         val keyAtTap = fixture.coordinator.contextKey.value
 

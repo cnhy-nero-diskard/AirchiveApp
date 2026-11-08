@@ -197,9 +197,9 @@ internal class CountingCredentialStore(
     var clearCalls: Int = 0
         private set
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         saveCalls += 1
-        return delegate.save(rawToken, accountCountry)
+        return delegate.save(rawToken, accountCountry, ownerUid)
     }
 
     override suspend fun clear() {

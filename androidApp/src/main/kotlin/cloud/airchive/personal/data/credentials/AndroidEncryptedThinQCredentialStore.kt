@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -38,7 +39,8 @@ private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
 private const val KEY_ALIAS = "airchive_thinq_pat_key"
 private const val TRANSFORMATION = "AES/GCM/NoPadding"
 private const val GCM_TAG_BITS = 128
-private const val RECORD_VERSION = 1
+private const val LEGACY_RECORD_VERSION = 1
+private const val RECORD_VERSION = 2
 private const val STORAGE_SUBDIR = "thinq"
 private const val CREDENTIAL_FILE_NAME = "thinq_credential.enc"
 private const val CLIENT_ID_FILE_NAME = "thinq_client_id"
@@ -112,39 +114,52 @@ class AndroidEncryptedThinQCredentialStore private constructor(
     override val clientId: String = loadOrCreateClientId()
 
     private val _state = MutableStateFlow(loadInitialState())
+    @Volatile
+    private var publishedOwnerUid: String? = loadInitialOwnerUid()
 
-    override fun observe(): Flow<ThinQCredentialState> = _state.asStateFlow()
+    override fun observe(ownerUid: String?): Flow<ThinQCredentialState> =
+        _state.asStateFlow().map { state ->
+            if (!ownerUid.isNullOrBlank() && (publishedOwnerUid == ownerUid || state.unlockFailed)) state
+            else noCredentialState(unlockFailed = false)
+        }
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         val country = accountCountry.trim()
-        if (rawToken.isBlank() || !TWO_LETTER_COUNTRY.matches(country)) {
+        if (rawToken.isBlank() || !TWO_LETTER_COUNTRY.matches(country) || ownerUid.isNullOrBlank()) {
             return SaveThinQResult.Failure(ThinQCredentialSaveFailure.INVALID_INPUT)
         }
         return withContext(dispatcher) {
-            mutex.withLock { saveLocked(rawToken, country) }
+            mutex.withLock { saveLocked(rawToken, country, ownerUid) }
         }
     }
 
-    override suspend fun readToken(): String? = withContext(dispatcher) {
-        mutex.withLock { readTokenLocked() }
+    override suspend fun readToken(ownerUid: String?): String? = withContext(dispatcher) {
+        if (ownerUid.isNullOrBlank()) return@withContext null
+        mutex.withLock { readTokenLocked(ownerUid) }
+    }
+
+    override suspend fun migrateLegacyCredential(ownerUid: String): Boolean = withContext(dispatcher) {
+        if (ownerUid.isBlank()) return@withContext false
+        mutex.withLock { migrateLegacyCredentialLocked(ownerUid) }
     }
 
     override suspend fun clear() {
         withContext(dispatcher) {
             mutex.withLock {
-                credentialFile.delete()
-                tempFileFor(credentialFile).delete()
+                clearRecordLocked()
                 _state.value = noCredentialState(unlockFailed = false)
+                publishedOwnerUid = null
             }
         }
     }
 
     // --- save / read ---------------------------------------------------------
 
-    private fun saveLocked(rawToken: String, country: String): SaveThinQResult = try {
+    private fun saveLocked(rawToken: String, country: String, ownerUid: String): SaveThinQResult = try {
         val key = getOrCreateKey() // returns a fresh key when one was invalidated
-        val record = encrypt(rawToken, country, key)
+        val record = encrypt(rawToken, country, ownerUid, key)
         atomicReplace(credentialFile, encodeRecord(record))
+        publishedOwnerUid = ownerUid
         _state.value = ThinQCredentialState(
             present = true,
             clientId = clientId,
@@ -164,14 +179,23 @@ class AndroidEncryptedThinQCredentialStore private constructor(
         SaveThinQResult.Failure(ThinQCredentialSaveFailure.UNKNOWN)
     }
 
-    private fun readTokenLocked(): String? = try {
+    private fun readTokenLocked(ownerUid: String): String? = try {
         val record = readRecordSafely() ?: return null
+        if (record.version == LEGACY_RECORD_VERSION) {
+            discardUnboundRecord()
+            return null
+        }
         val key = getExistingKeyOrNull()
         if (key == null) {
             markUnlockFailed()
             return null
         }
-        decrypt(record, key)
+        val decrypted = decrypt(record, key)
+        if (decrypted.ownerUid != ownerUid) {
+            discardUnboundRecord()
+            return null
+        }
+        decrypted.token
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: GeneralSecurityException) {
@@ -185,6 +209,47 @@ class AndroidEncryptedThinQCredentialStore private constructor(
         null
     }
 
+    /** Migrate a legacy unbound record only after the owner passes access checks. */
+    private fun migrateLegacyCredentialLocked(ownerUid: String): Boolean = try {
+        val record = readRecordSafely() ?: return false
+        val key = getExistingKeyOrNull()
+        if (key == null) {
+            discardUnboundRecord()
+            return false
+        }
+        val decrypted = decrypt(record, key)
+        if (record.version == RECORD_VERSION) {
+            if (decrypted.ownerUid != ownerUid) {
+                discardUnboundRecord()
+                return false
+            }
+            publishedOwnerUid = ownerUid
+            _state.value = ThinQCredentialState(
+                present = true,
+                clientId = clientId,
+                credential = record.toCredential(),
+                unlockFailed = false,
+            )
+            return true
+        }
+
+        val boundRecord = encrypt(decrypted.token, record.accountCountry, ownerUid, key)
+        atomicReplace(credentialFile, encodeRecord(boundRecord))
+        publishedOwnerUid = ownerUid
+        _state.value = ThinQCredentialState(
+            present = true,
+            clientId = clientId,
+            credential = boundRecord.toCredential(),
+            unlockFailed = false,
+        )
+        true
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        discardUnboundRecord()
+        false
+    }
+
     // --- observable state -----------------------------------------------------
 
     private fun loadInitialState(): ThinQCredentialState {
@@ -196,13 +261,17 @@ class AndroidEncryptedThinQCredentialStore private constructor(
             if (key == null) {
                 unlockFailedState(id)
             } else {
-                decrypt(record, key) // verifies the saved record is still usable
-                ThinQCredentialState(
-                    present = true,
-                    clientId = id,
-                    credential = record.toCredential(),
-                    unlockFailed = false,
-                )
+                val decrypted = decrypt(record, key) // verifies the saved record is still usable
+                if (record.version == LEGACY_RECORD_VERSION || decrypted.ownerUid.isNullOrBlank()) {
+                    noCredentialState(unlockFailed = false)
+                } else {
+                    ThinQCredentialState(
+                        present = true,
+                        clientId = id,
+                        credential = record.toCredential(),
+                        unlockFailed = false,
+                    )
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -213,6 +282,17 @@ class AndroidEncryptedThinQCredentialStore private constructor(
         } catch (_: Exception) {
             unlockFailedState(id)
         }
+    }
+
+    private fun loadInitialOwnerUid(): String? = try {
+        val record = readRecordSafely() ?: return null
+        if (record.version != RECORD_VERSION) return null
+        val key = getExistingKeyOrNull() ?: return null
+        decrypt(record, key).ownerUid
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     private fun markUnlockFailed() {
@@ -254,11 +334,19 @@ class AndroidEncryptedThinQCredentialStore private constructor(
         null
     }
 
-    private fun encrypt(rawToken: String, country: String, key: SecretKey): EncryptedRecord {
+    private fun encrypt(rawToken: String, country: String, ownerUid: String, key: SecretKey): EncryptedRecord {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
-        val ciphertext = cipher.doFinal(rawToken.toByteArray(Charsets.UTF_8))
+        val payload = ByteArrayOutputStream().use { buffer ->
+            DataOutputStream(buffer).use { out ->
+                out.writeUTF(ownerUid)
+                out.writeUTF(rawToken)
+            }
+            buffer.toByteArray()
+        }
+        val ciphertext = cipher.doFinal(payload)
         return EncryptedRecord(
+            version = RECORD_VERSION,
             iv = cipher.iv.copyOf(),
             ciphertext = ciphertext,
             maskedToken = mask(rawToken),
@@ -267,10 +355,16 @@ class AndroidEncryptedThinQCredentialStore private constructor(
         )
     }
 
-    private fun decrypt(record: EncryptedRecord, key: SecretKey): String {
+    private fun decrypt(record: EncryptedRecord, key: SecretKey): DecryptedCredential {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, record.iv))
-        return String(cipher.doFinal(record.ciphertext), Charsets.UTF_8)
+        val plaintext = cipher.doFinal(record.ciphertext)
+        if (record.version == LEGACY_RECORD_VERSION) {
+            return DecryptedCredential(ownerUid = null, token = String(plaintext, Charsets.UTF_8))
+        }
+        return DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
+            DecryptedCredential(ownerUid = input.readUTF(), token = input.readUTF())
+        }
     }
 
     // --- no-backup file IO ----------------------------------------------------
@@ -343,16 +437,30 @@ class AndroidEncryptedThinQCredentialStore private constructor(
     }
 
     private fun tempFileFor(target: File): File = File(target.parentFile, target.name + TMP_SUFFIX)
+
+    private fun clearRecordLocked() {
+        credentialFile.delete()
+        tempFileFor(credentialFile).delete()
+    }
+
+    private fun discardUnboundRecord() {
+        clearRecordLocked()
+        publishedOwnerUid = null
+        _state.value = noCredentialState(unlockFailed = false)
+    }
 }
 
 /** Encrypted payload plus masked metadata, as persisted in `thinq_credential.enc`. */
 private data class EncryptedRecord(
+    val version: Int,
     val iv: ByteArray,
     val ciphertext: ByteArray,
     val maskedToken: String,
     val accountCountry: String,
     val createdAtEpochMillis: Long,
 )
+
+private data class DecryptedCredential(val ownerUid: String?, val token: String)
 
 private fun EncryptedRecord.toCredential(): ThinQCredential =
     ThinQCredential(
@@ -367,7 +475,7 @@ private fun mask(token: String): String = MASKED_PREFIX + token.takeLast(4)
 private fun encodeRecord(record: EncryptedRecord): ByteArray =
     ByteArrayOutputStream().use { buffer ->
         DataOutputStream(buffer).use { out ->
-            out.writeInt(RECORD_VERSION)
+            out.writeInt(record.version)
             out.writeInt(record.iv.size)
             out.write(record.iv)
             out.writeInt(record.ciphertext.size)
@@ -382,7 +490,9 @@ private fun encodeRecord(record: EncryptedRecord): ByteArray =
 private fun decodeRecord(bytes: ByteArray): EncryptedRecord =
     DataInputStream(ByteArrayInputStream(bytes)).use { input ->
         val version = input.readInt()
-        if (version != RECORD_VERSION) throw IOException("Unsupported ThinQ credential record version $version")
+        if (version != LEGACY_RECORD_VERSION && version != RECORD_VERSION) {
+            throw IOException("Unsupported ThinQ credential record version $version")
+        }
         val ivLength = input.readInt()
         if (ivLength <= 0 || ivLength > MAX_RECORD_BYTES) {
             throw IOException("Unsupported ThinQ credential record lengths")
@@ -399,5 +509,5 @@ private fun decodeRecord(bytes: ByteArray): EncryptedRecord =
         if (maskedToken.isBlank() || accountCountry.isBlank()) {
             throw IOException("Malformed ThinQ credential record")
         }
-        EncryptedRecord(iv, ciphertext, maskedToken, accountCountry, createdAtEpochMillis)
+        EncryptedRecord(version, iv, ciphertext, maskedToken, accountCountry, createdAtEpochMillis)
     }

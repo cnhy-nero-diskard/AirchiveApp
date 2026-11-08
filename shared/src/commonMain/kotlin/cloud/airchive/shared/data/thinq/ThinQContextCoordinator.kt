@@ -16,13 +16,17 @@ import kotlin.time.Clock
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -197,7 +201,7 @@ class ThinQContextCoordinator(
                 // The transition first moves this key to ownerUid=null; never
                 // dispatch the outgoing owner's PAT from that unowned context.
                 hasCredential = contextKey.ownerUid != null &&
-                    !credentialStore.readToken().isNullOrBlank(),
+                    !credentialStore.readToken(contextKey.ownerUid).isNullOrBlank(),
             )
         }
 
@@ -206,7 +210,7 @@ class ThinQContextCoordinator(
         if (!snapshot.hasCredential) {
             // Distinguish "no credential yet" from "the protected key is lost":
             // the latter invalidates so no in-flight old-context result can land.
-            val state = credentialStore.observe().first()
+            val state = credentialStore.observe(snapshot.contextKey.ownerUid).first()
             if (state.unlockFailed || state.present) {
                 invalidateForProtectedKeyLoss()
                 return ThinQEntryResult.Unavailable
@@ -462,7 +466,12 @@ class ThinQContextCoordinator(
             }
         }
         val result = try {
-            credentialSetup.setup(rawToken, country, gate)
+            credentialSetup.setup(
+                rawToken = rawToken,
+                country = country,
+                ownerUid = attempt.contextKey.ownerUid,
+                commitGate = gate,
+            )
         } catch (cancelled: CancellationException) {
             // Cancellation of the route/caller supersedes precisely this
             // attempt before propagating, even when the verifier is uncooperative.
@@ -523,6 +532,12 @@ class ThinQContextCoordinator(
         lifecycle.invalidateOwner(ownerUid, projectId) { clearPresentationUnderBoundary() }
     }
 
+    /** Binds an upgrade-era credential only after this owner passes access checks. */
+    suspend fun prepareCredentialForOwner(ownerUid: String): Boolean {
+        if (lifecycle.current().ownerUid != ownerUid) return false
+        return credentialStore.migrateLegacyCredential(ownerUid)
+    }
+
     /**
      * Protected-key loss detected from the observable credential state. Only
      * `unlockFailed` is handled here: removal/replacement/sign-out always go
@@ -542,7 +557,7 @@ class ThinQContextCoordinator(
      */
     fun startCredentialStateObservation(scope: CoroutineScope): Job =
         scope.launch {
-            credentialStore.observe().collect { state -> onCredentialState(state) }
+            credentialStateFlow().collect { state -> onCredentialState(state) }
         }
 
     // ------------------------------------------------------------------
@@ -588,13 +603,14 @@ class ThinQContextCoordinator(
 
     /** Platform bindings over this coordinator; see [ProductionThinQBindings]. */
     fun bindings(): ProductionThinQBindings = ProductionThinQBindings(
-        credentialState = credentialStore.observe(),
+        credentialState = credentialStateFlow(),
         clientId = credentialStore.clientId,
         contextKey = contextKey,
         deviceProfile = mutableDeviceProfile,
         liveStateController = liveStateController,
         commandController = commandController,
         setupCredential = ::setupCredentialDetailed,
+        prepareCredentialForOwner = ::prepareCredentialForOwner,
         cancelSetupAttempt = ::cancelSetupAttempt,
         onDeviceOpened = ::onDeviceOpened,
         refreshDeviceProfile = ::refreshDeviceProfile,
@@ -603,6 +619,12 @@ class ThinQContextCoordinator(
         clearCachedDeviceProfile = ::clearCachedDeviceProfile,
         dispatchCommand = ::dispatchCommand,
     )
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun credentialStateFlow() = lifecycle.key
+        .map { it.ownerUid }
+        .distinctUntilChanged()
+        .flatMapLatest { ownerUid -> credentialStore.observe(ownerUid) }
 
     private data class EntrySnapshot(
         val contextKey: ThinQContextKey,

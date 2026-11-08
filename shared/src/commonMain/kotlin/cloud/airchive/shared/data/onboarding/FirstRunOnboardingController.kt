@@ -134,7 +134,7 @@ class FirstRunOnboardingController(
         check(access is OwnerAccessState.Authorized) {
             "ThinQ credential setup requires authorized owner access; current state is $access"
         }
-        when (val result = credentialSetup.setup(rawToken, country)) {
+        when (val result = credentialSetup.setup(rawToken, country, ownerUid = access.session.uid)) {
             is ThinQCredentialSetupResult.Success -> {
                 _state.value = current.copy(
                     step = deriveStep(access, result.credential, current.history),
@@ -188,7 +188,7 @@ class FirstRunOnboardingController(
         val access = _state.value.ownerAccess
         val session = (access as? OwnerAccessState.Authorized)?.session
             ?: throw IllegalStateException("Initial history sync requires authorized owner access.")
-        val credential = credentialStore.observe().first()
+        val credential = credentialStore.observe(session.uid).first()
         check(credential.present && !credential.unlockFailed) {
             "Initial history sync requires a saved, decryptable ThinQ credential."
         }
@@ -242,7 +242,10 @@ class FirstRunOnboardingController(
         val credential = if (authorized == null) {
             null
         } else {
-            credentialStore.observe().first()
+            // Binding a legacy install credential is allowed only after this
+            // session has passed the device-read access check.
+            credentialStore.migrateLegacyCredential(authorized.session.uid)
+            credentialStore.observe(authorized.session.uid).first()
         }
         val stepCredential = credential ?: ThinQCredentialState(
             present = false,

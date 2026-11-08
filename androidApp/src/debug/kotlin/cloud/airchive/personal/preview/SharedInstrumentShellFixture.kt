@@ -322,7 +322,7 @@ class SharedInstrumentShellFixture(context: Context) {
         val history = session?.let { owner ->
             localHistory.observe(coordinator.partitionFor(owner)).first()
         }
-        val credential = credentialStore.observe().first()
+        val credential = credentialStore.observe(session?.uid).first()
         return listOf(
             "credential-state=$credential",
             "history-snapshot=$history",
@@ -688,17 +688,20 @@ private class CountingCredentialStore(
     val delegateTypeName: String get() = delegate.javaClass.simpleName
 
     override val clientId: String get() = delegate.clientId
-    override fun observe(): Flow<ThinQCredentialState> = delegate.observe()
+    override fun observe(ownerUid: String?): Flow<ThinQCredentialState> = delegate.observe(ownerUid)
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult {
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult {
         counters.credentialSaves.incrementAndGet()
-        return delegate.save(rawToken, accountCountry)
+        return delegate.save(rawToken, accountCountry, ownerUid)
     }
 
-    override suspend fun readToken(): String? {
+    override suspend fun readToken(ownerUid: String?): String? {
         counters.credentialTokenReads.incrementAndGet()
-        return delegate.readToken()
+        return delegate.readToken(ownerUid)
     }
+
+    override suspend fun migrateLegacyCredential(ownerUid: String): Boolean =
+        delegate.migrateLegacyCredential(ownerUid)
 
     override suspend fun clear() {
         counters.credentialClears.incrementAndGet()

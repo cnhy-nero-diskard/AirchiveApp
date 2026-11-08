@@ -13,6 +13,7 @@ import cloud.airchive.shared.data.thinq.ThinQSetupOutcome
 import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
@@ -47,12 +48,14 @@ class AndroidProductionThinQGraph(
 ) : AutoCloseable {
 
     val credentialStore = AndroidEncryptedThinQCredentialStore(context.applicationContext)
+    private val activeOwnerUid = MutableStateFlow(ownerUid)
 
     private val client = KtorThinQClient(
         engine = CIO.create(),
         credentialStore = credentialStore,
         configuredDeviceId = configuredDeviceId,
         temperatureStepOverride = BuildConfig.AIRCHIVE_THINQ_TEMPERATURE_STEP_OVERRIDE.toDoubleOrNull(),
+        ownerUidProvider = { activeOwnerUid.value },
     )
 
     /** Stable owner for command work; route composition never owns these jobs. */
@@ -113,7 +116,15 @@ class AndroidProductionThinQGraph(
      * can never reappear, even if the same owner signs back in.
      */
     suspend fun onOwnerChanged(ownerUid: String?, projectId: String) {
-        coordinator.onOwnerChanged(ownerUid, projectId)
+        if (activeOwnerUid.value == ownerUid) {
+            coordinator.onOwnerChanged(ownerUid, projectId)
+            return
+        }
+        // Close the old credential scope before publishing the next owner.
+        activeOwnerUid.value = null
+        coordinator.onOwnerChanged(null, projectId)
+        activeOwnerUid.value = ownerUid
+        if (ownerUid != null) coordinator.onOwnerChanged(ownerUid, projectId)
     }
 
     fun bindings(): ProductionThinQBindings = coordinator.bindings()

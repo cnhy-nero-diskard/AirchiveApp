@@ -25,7 +25,7 @@ class PendingCommandHostTest {
 
     @Test
     fun scheduledReadAndCommandShareOneNonQueuingDeviceSlot() = runBlocking {
-        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH") }
+        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH", "owner") }
         val port = ScriptedThinQPort()
         val coordinator = ThinQContextCoordinator(store, port, testVerifier(), TEST_DEVICE_ID,
             ownerUid = "owner", projectId = TEST_PROJECT_ID, commandScope = this)
@@ -47,7 +47,7 @@ class PendingCommandHostTest {
 
     @Test
     fun scheduledReadSkipsPendingCommandAndSupersededContext() = runBlocking {
-        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH") }
+        val store = FakeThinQCredentialStore().apply { save(SEED_TOKEN, "PH", "owner") }
         val port = ScriptedThinQPort()
         val coordinator = ThinQContextCoordinator(store, port, testVerifier(), TEST_DEVICE_ID,
             ownerUid = "owner", projectId = TEST_PROJECT_ID, commandScope = this)
@@ -71,7 +71,7 @@ class PendingCommandHostTest {
     @Test
     fun oldContextCommandKeepsGlobalSlotAndNewTapIsNeutralNonQueuedBusy() = runBlocking {
         val store = FakeThinQCredentialStore()
-        store.save(SEED_TOKEN, "PH")
+        store.save(SEED_TOKEN, "PH", "command-owner-a")
         val port = ScriptedThinQPort()
         val commandStep = NetworkStep()
         port.onSetState = { command ->
@@ -125,7 +125,7 @@ class PendingCommandHostTest {
     @Test
     fun stableHostScopeIsIndependentOfRouteScopedWork() = runBlocking {
         val store = FakeThinQCredentialStore()
-        store.save(SEED_TOKEN, "PH")
+        store.save(SEED_TOKEN, "PH", "stable-command-owner")
         val port = ScriptedThinQPort()
         val commandStep = NetworkStep()
         port.onSetState = { command ->
@@ -168,7 +168,7 @@ class PendingCommandHostTest {
     @Test
     fun hostAppliesTheExistingCommandObservationWithoutAnAdditionalLiveRequest() = runBlocking {
         val store = FakeThinQCredentialStore()
-        store.save(SEED_TOKEN, "PH")
+        store.save(SEED_TOKEN, "PH", "command-owner")
         val port = ScriptedThinQPort()
         val coordinator = ThinQContextCoordinator(
             credentialStore = store,

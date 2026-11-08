@@ -212,6 +212,21 @@ private fun ProductionRouteHost(
         thinQBindings.credentialState.collectAsState(initial = emptyCredentialState).value
     }
     val activeThinQContextKey = thinQBindings?.contextKey?.collectAsState()?.value
+    val restoreAccessAndPrepareCredential: suspend () -> OwnerAccessState = {
+        val restored = try {
+            coordinator.access.restore()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            accessState
+        }
+        val authorizedSession = (restored as? OwnerAccessState.Authorized)?.session
+        if (authorizedSession != null && thinQBindings != null) {
+            thinQBindings.contextKey.first { it.ownerUid == authorizedSession.uid }
+            thinQBindings.prepareCredentialForOwner(authorizedSession.uid)
+        }
+        restored
+    }
     // Keep an unapplied setpoint above the conditional route composition. The
     // lifecycle key intentionally resets it when the owner/device/credential
     // context changes, but navigation and display-detail changes do not.
@@ -226,15 +241,7 @@ private fun ProductionRouteHost(
 
     // Re-check the device-read authorization whenever the owner session changes.
     LaunchedEffect(coordinator, session?.uid) {
-        rawAccessState = try {
-            coordinator.access.restore()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Defensive only: restore() already classifies every failure into an
-            // OwnerAccessState, so an unexpected throw just keeps the prior state.
-            accessState
-        }
+        rawAccessState = restoreAccessAndPrepareCredential()
     }
 
     // Bootstrap the initial 24h window as soon as the owner is authorized —
@@ -266,13 +273,7 @@ private fun ProductionRouteHost(
             false
         }
         if (!hasSavedCredential) thinQBindings?.clearCachedDeviceProfile?.invoke()
-        rawAccessState = try {
-            coordinator.access.restore()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            accessState
-        }
+        rawAccessState = restoreAccessAndPrepareCredential()
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {

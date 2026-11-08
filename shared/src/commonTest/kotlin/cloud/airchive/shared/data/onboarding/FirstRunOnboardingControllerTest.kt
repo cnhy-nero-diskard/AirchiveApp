@@ -405,7 +405,7 @@ class FirstRunOnboardingControllerTest {
         val local = FakeLocalHistory()
         val partition = HistoryPartition(PROJECT_ID, FakeOwnerIdentity.DEFAULT_SESSION.uid, deviceId)
         identity.signIn()
-        store.save("demo-token", "PH")
+        store.save("demo-token", "PH", FakeOwnerIdentity.DEFAULT_SESSION.uid)
         // An app-open incremental refresh can be recent while the separate
         // initial 24-hour/30-total bootstrap has not happened yet.
         local.replace(

@@ -218,7 +218,7 @@ private fun DemoRouteShell(
         providers.localHistory.observe(context.partition)
     }.collectAsState(initial = initialHistory)
     val credential by remember(providers) {
-        providers.thinQCredentialStore.observe()
+        providers.thinQCredentialStore.observe(context.partition.ownerUid)
     }.collectAsState(initial = context.credential)
     val historySyncState = historySyncInProgress?.collectAsState(initial = false)
         ?: remember { mutableStateOf(false) }
@@ -767,7 +767,7 @@ private suspend fun loadDemoHomeContext(providers: FakeProviders): DemoHomeConte
         partition = partition,
         device = device,
         profile = providers.thinQ.profile(device.deviceId),
-        credential = providers.thinQCredentialStore.observe().first(),
+        credential = providers.thinQCredentialStore.observe(owner.uid).first(),
     )
 }
 

@@ -68,7 +68,7 @@ import kotlinx.coroutines.NonCancellable
  */
 class ThinQSetupAttemptFenceTest {
 
-    private class Fixture(ownerUid: String? = "owner-a") {
+    private class Fixture(private val ownerUid: String? = "owner-a") {
         val store = CountingCredentialStore()
         val verifier = GateableVerifier()
         val port = ScriptedThinQPort()
@@ -83,7 +83,7 @@ class ThinQSetupAttemptFenceTest {
         )
 
         suspend fun seedCredential(token: String = SEED_TOKEN) {
-            store.save(token, "PH")
+            store.save(token, "PH", ownerUid)
         }
     }
 
@@ -564,7 +564,7 @@ class ThinQSetupAttemptFenceTest {
     @Test
     fun sameOwnerFailedStoreSaveRetainsTheWorkingCredentialAndContext() = runBlocking {
         val delegate = FakeThinQCredentialStore()
-        delegate.save(SEED_TOKEN, "PH")
+        delegate.save(SEED_TOKEN, "PH", "owner-a")
         val store = SaveFailingCredentialStore(delegate)
         val coordinator = ThinQContextCoordinator(
             credentialStore = store,
@@ -695,6 +695,6 @@ private class SaveFailingCredentialStore(
     private val delegate: FakeThinQCredentialStore,
 ) : ThinQCredentialStore by delegate {
 
-    override suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult =
+    override suspend fun save(rawToken: String, accountCountry: String, ownerUid: String?): SaveThinQResult =
         SaveThinQResult.Failure(ThinQCredentialSaveFailure.UNKNOWN)
 }

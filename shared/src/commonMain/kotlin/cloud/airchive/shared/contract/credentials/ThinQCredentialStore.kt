@@ -22,16 +22,27 @@ interface ThinQCredentialStore {
     val clientId: String
 
     /** Emits masked credential status and every later change. */
-    fun observe(): Flow<ThinQCredentialState>
+    fun observe(ownerUid: String? = null): Flow<ThinQCredentialState>
 
     /**
      * Encrypts and stores a new token, replacing any previous one on success.
      * A failed save leaves the last valid token untouched.
      */
-    suspend fun save(rawToken: String, accountCountry: String): SaveThinQResult
+    suspend fun save(
+        rawToken: String,
+        accountCountry: String,
+        ownerUid: String? = null,
+    ): SaveThinQResult
 
-    /** Plaintext token for the narrow LG client only; `null` when absent or undecryptable. */
-    suspend fun readToken(): String?
+    /** Plaintext token for the narrow LG client only; `null` when absent, undecryptable, or owned by someone else. */
+    suspend fun readToken(ownerUid: String? = null): String?
+
+    /**
+     * Binds a pre-owner-binding credential to [ownerUid] after that owner has
+     * passed the app's access check. Returns false when no usable matching
+     * credential remains; never returns the token.
+     */
+    suspend fun migrateLegacyCredential(ownerUid: String): Boolean
 
     /** Removes the stored token (used on confirmed sign-out/account change). */
     suspend fun clear()
