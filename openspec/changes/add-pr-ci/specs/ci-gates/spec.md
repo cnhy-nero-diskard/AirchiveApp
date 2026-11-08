@@ -94,7 +94,7 @@ Automated verification SHALL NOT address the production Firebase project or the 
 - **THEN** Firebase traffic SHALL go only to local Auth and Firestore emulators, and the live verification tests SHALL be reported as skipped
 
 ### Requirement: Instrumentation results are reported truthfully
-A scheduled and manually triggerable run SHALL execute the instrumentation suite on an Android emulator. It SHALL report executed, passed, failed, and skipped counts. Any failure SHALL fail the run. A run in which tests were not executed SHALL NOT be reported as passing. The run SHALL NOT be part of the merge gate until its known failures are resolved.
+A scheduled and manually triggerable run SHALL execute the instrumentation suite on an Android emulator. It SHALL report executed, passed, failed, and skipped counts. Any failure SHALL fail the run. A run in which tests were not executed SHALL NOT be reported as passing. The run SHALL NOT be part of the merge gate until it has passed on seven consecutive scheduled runs.
 
 #### Scenario: Instrumentation test fails
 - **WHEN** an instrumentation test fails during a scheduled run

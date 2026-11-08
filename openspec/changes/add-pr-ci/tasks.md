@@ -34,12 +34,12 @@
   - one failure
   - live tests skipped
   - no tests executed
-- [ ] 3.2 Add `.github/workflows/instrumentation.yml` (design §5): daily schedule and manual dispatch, KVM, an x86_64 API 36 emulator, pinned `firebase-tools`, the `firebase emulators:exec` command with no runner arguments, and a guard step that fails if any workflow mentions `liveAccessCheck` or `liveHistoryCheck`. Verify a manual dispatch:
+- [ ] 3.2 Add `.github/workflows/instrumentation.yml` (design §5): daily schedule and manual dispatch, KVM, an x86_64 API 36 emulator, pinned `firebase-tools`, the `firebase emulators:exec` command with no live-test runner arguments (class filters for batching are allowed), and a guard step that fails if any workflow mentions `liveAccessCheck` or `liveHistoryCheck`. Verify a manual dispatch:
   - runs the suite
   - reports both `Live*VerificationTest` classes as skipped
-  - fails naming the six known `SharedInstrumentUiTest` failures
+  - passes every batch, or names each failing test
   - uploads JUnit XML and logcat
-- [ ] 3.3 With the owner's confirmation, open a follow-up GitHub issue for the six clock-sensitive `SharedInstrumentUiTest` failures, linked from `docs/ci.md`. Verify the issue lists each test and links the dispatch run from 3.2.
+- [ ] 3.3 Document the batch list and the promotion rule (seven consecutive green scheduled runs) in `docs/ci.md`. Verify that every `androidTest` class appears in exactly one batch.
 - [ ] 3.4 Add `.github/workflows/codeql.yml` (design §6): `java-kotlin` with a manual `assembleDebug` build, `security-events: write` as the only write, and runs on pull requests, `main`, and weekly. It is not part of `required`. Verify a run completes, and record in `docs/ci.md` whether Kotlin extraction was complete.
 
 ## 4. Gate definition, tooling, and docs
@@ -56,7 +56,7 @@
   - what runs, and which check is required
   - the local command that reproduces `build`
   - lockfile updates and the lint baseline
-  - the instrumentation counts and known failures
+  - the instrumentation batches, counts, and promotion rule
   - the live-test guard
   - CodeQL status
   - the identity of integration `1144995`, as reported by the owner

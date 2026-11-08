@@ -25,7 +25,8 @@ See proposal.md for motivation and specs/ci-gates/spec.md for the required behav
 *Instrumentation tests*
 - There are 11 `androidTest` classes. The Firebase-backed ones reach the Auth and Firestore emulators at `10.0.2.2:9099/19080` through the `firebase.test.json` harness (project `demo-airchive-telemetry-poller`).
 - `LiveOwnerAccessVerificationTest` and `LiveHistoryCacheVerificationTest` address production. They are skipped via `Assume` unless the runner receives `airchive.liveAccessCheck=true` or `airchive.liveHistoryCheck=true`.
-- Six `SharedInstrumentUiTest` tests fail on a headless emulator because of clock-sensitive waits.
+- The previously failing `SharedInstrumentUiTest` cases were test-side defects (non-scrolling waits, stale expectations, a selection race). They were repaired in PRs #6 and #7. Single tests take up to about 6 minutes, and batches larger than a few tests can time out.
+- `AGENTS.md` and `scripts/test-emulator.sh` require host-GPU rendering for the Mac emulator. That rule applies to the owner's M5. A hosted Linux runner has no GPU, so CI uses the runner's software renderer.
 - There is no standalone Firestore rules test suite.
 
 *Repository settings*
@@ -45,7 +46,7 @@ See proposal.md for motivation and specs/ci-gates/spec.md for the required behav
 **Non-Goals:**
 - Release signing and publishing (`release-pipeline`).
 - iOS compilation. It needs macOS runners, and iOS is a scaffold.
-- Fixing the six known instrumentation failures. That is a tracked follow-up.
+- Making instrumentation a required PR check. It is too slow for every PR today, and is promoted after a green record.
 - Burning down the lint baseline. That belongs to the later hardening change.
 - Dependabot version-update PRs and required reviews.
 
@@ -112,10 +113,11 @@ firebase emulators:exec --config firebase.test.json --project demo-airchive-tele
   --only auth,firestore "./gradlew :androidApp:connectedDebugAndroidTest"
 ```
 
-- No `-Pandroid.testInstrumentationRunnerArguments.*` properties are passed. A guard step fails the workflow if any workflow file in the repository mentions `liveAccessCheck` or `liveHistoryCheck`.
+- Only `class` runner arguments are passed, for batching. The live-test arguments never are. A guard step fails the workflow if any workflow file in the repository mentions `liveAccessCheck` or `liveHistoryCheck`.
 - A summary step reads the JUnit XML from `androidApp/build/outputs/androidTest-results/connected/` and writes executed, passed, failed, and skipped counts to the job summary. The run fails when no tests executed or any test failed.
 - JUnit XML and logcat are uploaded.
-- The run will be red until the six known failures are fixed, and that is the honest result. A follow-up issue tracks them.
+- The suite runs in batches of a few test classes per `connectedDebugAndroidTest` invocation (with `-Pandroid.testInstrumentationRunnerArguments.class=…`) with a per-batch timeout, so one slow test cannot hang the run. A failed batch fails the run.
+- After seven consecutive green scheduled runs, a follow-up change adds the run to the merge gate or to a pre-merge label-triggered check.
 
 ### 6. Advisory CodeQL
 
