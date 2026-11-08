@@ -32,7 +32,7 @@
 ## 6. Spec-aligned temperature behaviour and suite
 
 - [x] 6.1 Update the tests and docs that encode the old Apply wording (`docs/home-instrument-refinement.md`, `docs/shared-instrument-screens.md`, `docs/interface-detail.md`) to the one-second paused send. Keep `SharedInstrumentUiTest`'s send-after-one-second test. Verify with `grep -rn "Apply" docs/` that the only hits are unrelated.
-- [ ] 6.2 Run `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug`, then the affected `SharedInstrumentUiTest` classes in small batches on the emulator started by `scripts/test-emulator.sh start`. Verify everything is green and record counts and the commit in the PR.
+- [x] 6.2 Run `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug`, then the affected `SharedInstrumentUiTest` classes in small batches on the emulator started by `scripts/test-emulator.sh start`. Verify everything is green and record counts and the commit in the PR.
 
 ## Workflow follow-up
 
