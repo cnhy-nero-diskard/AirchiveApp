@@ -8,7 +8,7 @@
 - [x] 1.2 Add the `lint {}` block from design §3 to `androidApp/build.gradle.kts` and generate `androidApp/lint-baseline.xml`. Verify:
   - `:androidApp:lintDebug` passes, and its report still lists the baseline findings
   - a temporary new lint warning fails the task (then revert it)
-- [ ] 1.3 Document the baseline and the disabled time-dependent checks in `docs/ci.md`. Verify the section names every baseline finding and explains why `GradleDependency`, `NewerVersionAvailable`, and `AndroidGradlePluginVersion` are disabled.
+- [x] 1.3 Document the baseline and the disabled time-dependent checks in `docs/ci.md`. Verify the section names every baseline finding and explains why `GradleDependency`, `NewerVersionAvailable`, and `AndroidGradlePluginVersion` are disabled.
 
 ## 2. Required verification workflow
 
