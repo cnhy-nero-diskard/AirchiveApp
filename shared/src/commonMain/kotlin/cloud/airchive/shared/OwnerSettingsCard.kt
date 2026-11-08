@@ -305,6 +305,8 @@ private fun OwnerSettingsActionResult.Failure.failureMessage(): String = when (r
     OwnerSettingsActionFailure.LOCAL_CACHE_CLEAR_FAILED -> "Could not clear this account's local history. The cache, account, and ThinQ credential were not changed; retry cleanup."
     OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED -> "Could not remove the ThinQ PAT. You remain signed in; retry cleanup."
     OwnerSettingsActionFailure.SIGN_OUT_FAILED -> "Local data was cleared, but sign-out did not finish. Retry or restart the app."
+    OwnerSettingsActionFailure.FIRESTORE_CACHE_CLEAR_FAILED -> "Could not reset Firebase's document cache after this account changed. Live controls remain disabled; retry cleanup."
+    OwnerSettingsActionFailure.OWNER_TRANSITION_CLEANUP_FAILED -> "The owner changed before cleanup finished. Live AC controls remain disabled until cleanup succeeds. Retry cleanup."
 }
 
 private fun String.settingsErrorLabel(): String = when (this) {

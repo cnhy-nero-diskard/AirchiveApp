@@ -522,4 +522,10 @@ enum class OwnerSettingsActionFailure {
 
     /** The identity port could not end the session after its data was cleared. */
     SIGN_OUT_FAILED,
+
+    /** The Firebase document cache could not be reset after its owner changed. */
+    FIRESTORE_CACHE_CLEAR_FAILED,
+
+    /** An owner changed outside Settings and one or more cleanup steps failed. */
+    OWNER_TRANSITION_CLEANUP_FAILED,
 }

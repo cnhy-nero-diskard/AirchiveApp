@@ -8,9 +8,9 @@
 
 ## 2. Single owner-transition path
 
-- [ ] 2.1 Add `OwnerTransition.onSessionChanged(previous, next)` under the account `operationMutex`. On a UID change or session end it invalidates the ThinQ context, clears the previous partition and credential, and clears the Firestore cache (`terminate` + `clearPersistence`, with the instance re-created lazily). Wire `MainActivity`'s session collector to it. Verify with a host test where emitting owner B from the identity port without the controller leaves A's token absent, A's partition empty, and `onDeviceOpened()` Unavailable.
-- [ ] 2.2 Surface cleanup failure on Settings and block live controls until it is resolved. Verify with a host test using a failing clear.
-- [ ] 2.3 Add an emulator test: seed and read a document, sign out, then assert `get(Source.CACHE)` finds nothing and a new server read works. Verify it passes on `ANDROID_SERIAL=emulator-5554`.
+- [x] 2.1 Add `OwnerTransition.onSessionChanged(previous, next)` under the account `operationMutex`. On a UID change or session end it invalidates the ThinQ context, clears the previous partition and credential, and clears the Firestore cache (`terminate` + `clearPersistence`, with the instance re-created lazily). Wire `MainActivity`'s session collector to it. Verify with a host test where emitting owner B from the identity port without the controller leaves A's token absent, A's partition empty, and `onDeviceOpened()` Unavailable.
+- [x] 2.2 Surface cleanup failure on Settings and block live controls until it is resolved. Verify with a host test using a failing clear.
+- [x] 2.3 Add an emulator test: seed and read a document, sign out, then assert `get(Source.CACHE)` finds nothing and a new server read works. Verify it passes on `ANDROID_SERIAL=emulator-5554`.
 
 ## 3. Access state during checks
 

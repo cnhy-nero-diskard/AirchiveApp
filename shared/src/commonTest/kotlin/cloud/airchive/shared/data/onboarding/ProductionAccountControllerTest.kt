@@ -6,12 +6,19 @@ import cloud.airchive.shared.contract.credentials.ThinQCredentialStore
 import cloud.airchive.shared.contract.owner.OwnerIdentityPort
 import cloud.airchive.shared.contract.owner.OwnerSession
 import cloud.airchive.shared.contract.owner.SignInResult
+import cloud.airchive.shared.contract.telemetry.EnergyUnit
+import cloud.airchive.shared.contract.telemetry.Observation
+import cloud.airchive.shared.data.thinq.ScriptedThinQPort
+import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
+import cloud.airchive.shared.data.thinq.ThinQEntryResult
+import cloud.airchive.shared.data.thinq.testVerifier
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeOwnerIdentity
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -36,6 +43,15 @@ class ProductionAccountControllerTest {
 
     private fun partitionFor(session: OwnerSession): HistoryPartition =
         HistoryPartition(project, session.uid, device)
+
+    private fun thinQContext(store: ThinQCredentialStore, ownerUid: String) = ThinQContextCoordinator(
+        credentialStore = store,
+        thinQ = ScriptedThinQPort(device),
+        verifier = testVerifier(device),
+        configuredDeviceId = device,
+        ownerUid = ownerUid,
+        projectId = project,
+    )
 
     @Test
     fun confirmedSignOutClearsPartitionBeforeEndingSession() = runBlocking {
@@ -116,6 +132,110 @@ class ProductionAccountControllerTest {
             events,
             "old ThinQ presentation is invalidated before any owner data/session transition",
         )
+    }
+
+    @Test
+    fun externalSessionChangeClearsOldPartitionCredentialAndThinQContextWithoutAccountController() = runBlocking {
+        val nextOwner = OwnerSession(
+            uid = "owner-uid-2",
+            displayName = "Owner Two",
+            email = "owner2@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 1L,
+        )
+        val identity = SwitchingIdentity(owner, nextOwner)
+        val store = FakeThinQCredentialStore().apply {
+            save("synthetic-owner-a-pat.example.invalid", "PH", owner.uid)
+        }
+        val thinQ = thinQContext(store, owner.uid)
+        assertEquals(ThinQEntryResult.Success, thinQ.onDeviceOpened())
+
+        val local = FakeLocalHistory()
+        val previousPartition = partitionFor(owner)
+        local.upsertObservations(
+            previousPartition,
+            listOf(
+                Observation(
+                    sampleId = "owner-a-sample",
+                    deviceId = device,
+                    intervalStartEpochMillis = 1_000L,
+                    intervalEndEpochMillis = 301_000L,
+                    energyValue = 1.0,
+                    recordedUnit = EnergyUnit.WH,
+                ),
+            ),
+        )
+        var documentCacheClears = 0
+        val transition = OwnerTransition(
+            local = local,
+            credentialStore = store,
+            thinQ = thinQ,
+            documentCache = OwnerDocumentCache { documentCacheClears += 1 },
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            currentSession = { identity.currentSession },
+        )
+
+        identity.signIn() // Firebase emits B without passing through Settings.
+        assertNull(transition.onSessionChanged(owner, identity.currentSession))
+
+        assertTrue(local.observe(previousPartition).first().observations.isEmpty())
+        assertNull(store.readToken(owner.uid))
+        assertEquals(1, documentCacheClears)
+        assertEquals(ThinQEntryResult.Unavailable, thinQ.onDeviceOpened())
+    }
+
+    @Test
+    fun failedExternalCredentialCleanupIsPublishedAndKeepsThinQControlsBlocked() = runBlocking {
+        val nextOwner = OwnerSession(
+            uid = "owner-uid-2",
+            displayName = "Owner Two",
+            email = "owner2@example.invalid",
+            signedInAtEpochMillis = owner.signedInAtEpochMillis + 1L,
+        )
+        val identity = SwitchingIdentity(owner, nextOwner)
+        val delegate = FakeThinQCredentialStore().apply {
+            save("synthetic-owner-a-pat.example.invalid", "PH", owner.uid)
+        }
+        val failingStore = object : ThinQCredentialStore by delegate {
+            override suspend fun clear() {
+                error("synthetic protected-store failure")
+            }
+        }
+        val thinQ = thinQContext(failingStore, owner.uid)
+        assertEquals(ThinQEntryResult.Success, thinQ.onDeviceOpened())
+        val local = FakeLocalHistory()
+        val accountController = ProductionAccountController(
+            identity = identity,
+            local = local,
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            credentialStore = failingStore,
+        )
+        var settingsFailure: OwnerSettingsActionFailure? = null
+        val transition = OwnerTransition(
+            local = local,
+            credentialStore = failingStore,
+            thinQ = thinQ,
+            documentCache = OwnerDocumentCache {},
+            firebaseProjectId = project,
+            configuredDeviceId = device,
+            currentSession = { identity.currentSession },
+            reportOutcome = { failure ->
+                settingsFailure = failure
+                accountController.reportOwnerTransitionOutcome(failure)
+            },
+        )
+
+        identity.signIn()
+        val failure = transition.onSessionChanged(owner, identity.currentSession)
+
+        assertEquals(OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED, failure)
+        assertNotNull(settingsFailure)
+        assertEquals(
+            OwnerSettingsActionResult.Failure(OwnerSettingsActionFailure.OWNER_TRANSITION_CLEANUP_FAILED),
+            accountController.state.value.lastActionResult,
+        )
+        assertEquals(ThinQEntryResult.Unavailable, thinQ.onDeviceOpened())
     }
 
     @Test

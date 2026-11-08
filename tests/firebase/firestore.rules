@@ -84,6 +84,12 @@ service cloud.firestore {
       allow get: if isOwnerFixture() && isOwnerDevice(deviceId);
     }
 
+    // Dedicated document used only by the owner-transition cache lifecycle
+    // instrumentation test; production paths and authorization stay unchanged.
+    match /ownerTransitionCache/{documentId} {
+      allow read, write: if isOwnerFixture();
+    }
+
     // Every other /devices/... sub-path (metadata, reconciliation, runtime/*,
     // other device ids, ...) has no matching rule and is denied by default.
   }

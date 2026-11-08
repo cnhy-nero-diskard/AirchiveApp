@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import cloud.airchive.personal.data.auth.FirebaseOwnerIdentityFactory
 import cloud.airchive.personal.data.auth.OwnerAuthConfiguration
 import cloud.airchive.personal.data.firebase.FirebaseAirchiveTelemetry
+import cloud.airchive.personal.data.firebase.FirebaseOwnerFirestore
 import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
 import cloud.airchive.shared.ProductionThinQBindings
 import cloud.airchive.shared.ProductionAirchiveApp
@@ -18,11 +19,11 @@ import cloud.airchive.shared.data.local.AirchiveDatabase
 import cloud.airchive.shared.data.local.RoomLocalHistoryPort
 import cloud.airchive.shared.data.local.openAirchiveDatabase
 import cloud.airchive.shared.data.onboarding.ProductionAccountController
+import cloud.airchive.shared.data.onboarding.OwnerTransition
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.ProductionRefreshOutcome
 import cloud.airchive.shared.data.sync.ForegroundRefreshBackoff
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -204,9 +205,12 @@ class MainActivity : ComponentActivity() {
         }
         val local = RoomLocalHistoryPort(database)
         val auth = configuration.identity.firebaseAuth
+        val ownerFirestore = synchronized(MainActivity::class.java) {
+            historyFirestore ?: FirebaseOwnerFirestore(auth.app).also { historyFirestore = it }
+        }
         val telemetry = FirebaseAirchiveTelemetry.fromBuildConfig(
             auth = auth,
-            firestore = FirebaseFirestore.getInstance(auth.app),
+            firestoreProvider = ownerFirestore::get,
         )
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val productionThinQGraph = AndroidProductionThinQGraph(
@@ -225,22 +229,10 @@ class MainActivity : ComponentActivity() {
             scope = scope,
         )
 
-        // Cancel any in-flight refresh the moment the owner session changes
-        // (sign-out, account switch, or Firebase session restore settle) and
-        // invalidate the ThinQ lifecycle context with it, so the previous
-        // owner's readings/profile/command feedback can never reappear
-        // (OpenSpec deliver-shared-instrument-ui task 2.1).
-        lifecycleScope.launch {
-            productionCoordinator.session.collect {
-                activeRefreshJob?.cancel()
-                activeRefreshJob = null
-                productionThinQGraph.onOwnerChanged(it?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
-            }
-        }
-
         // The account controller's destructive transitions run under the same
         // lock as refresh runs, so a clear/sign-out never races an in-flight
         // refresh that could re-populate the partition being removed.
+        var explicitlyTransitioningOwnerUid: String? = null
         val productionAccountController = ProductionAccountController(
             identity = configuration.identity,
             local = local,
@@ -249,18 +241,50 @@ class MainActivity : ComponentActivity() {
             serializedAction = { action -> productionCoordinator.runExclusive(action) },
             credentialStore = productionThinQGraph.credentialStore,
             beforeOwnerTransition = {
+                explicitlyTransitioningOwnerUid = configuration.identity.currentSession?.uid
                 // Invalidate before the account controller clears the PAT or
                 // changes Firebase identity. The session observer below remains
                 // the backstop for external identity changes.
                 productionThinQGraph.onOwnerChanged(null, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
             },
             afterOwnerTransition = { session ->
-                // If cleanup/sign-in fails and the old owner remains active,
-                // re-bind only after the prior context has been cleared; the
-                // next Home entry must perform a fresh matching read.
-                productionThinQGraph.onOwnerChanged(session?.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                val ownerBeforeAction = explicitlyTransitioningOwnerUid
+                explicitlyTransitioningOwnerUid = null
+                // If identity did not change (for example, Firebase sign-out
+                // failed after local cleanup), restore that now-empty context.
+                // A new UID is rebound only by OwnerTransition after Firestore
+                // and the previous owner's partition have also been cleared.
+                if (session != null && session.uid == ownerBeforeAction) {
+                    productionThinQGraph.onOwnerChanged(session.uid, BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID)
+                }
             },
         )
+
+        val ownerTransition = OwnerTransition(
+            local = local,
+            credentialStore = productionThinQGraph.credentialStore,
+            thinQ = productionThinQGraph.coordinator,
+            documentCache = ownerFirestore,
+            firebaseProjectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+            configuredDeviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+            currentSession = { configuration.identity.currentSession },
+            serializedAction = { action -> productionCoordinator.runExclusive(action) },
+            reportOutcome = productionAccountController::reportOwnerTransitionOutcome,
+        )
+
+        // Every identity change reaches the same serialized cleanup path,
+        // including Firebase sign-out/session replacement outside Settings.
+        lifecycleScope.launch {
+            var previous = productionCoordinator.session.value
+            productionCoordinator.session.collect { next ->
+                if (previous?.uid != next?.uid) {
+                    activeRefreshJob?.cancel()
+                    activeRefreshJob = null
+                    ownerTransition.onSessionChanged(previous, next)
+                }
+                previous = next
+            }
+        }
 
         coordinator = productionCoordinator
         accountController = productionAccountController
@@ -271,5 +295,6 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         var historyDatabase: AirchiveDatabase? = null
+        var historyFirestore: FirebaseOwnerFirestore? = null
     }
 }

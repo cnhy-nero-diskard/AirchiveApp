@@ -1110,6 +1110,17 @@ private fun ProductionAccountCard(
         }
     }
 
+    LaunchedEffect(state.lastActionResult, session?.uid) {
+        val transitionFailure = (state.lastActionResult as? OwnerSettingsActionResult.Failure)
+            ?.takeIf { it.reason == cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.OWNER_TRANSITION_CLEANUP_FAILED }
+        if (transitionFailure != null) {
+            feedback = transitionFailure.productionOutcomeMessage()
+            feedbackOwnerUid = session?.uid
+        } else if (feedbackOwnerUid == session?.uid && feedback?.startsWith("The owner changed before cleanup finished.") == true) {
+            feedback = null
+        }
+    }
+
     fun launchAction(action: suspend () -> Unit) {
         scope.launch {
             busy = true
@@ -1318,6 +1329,10 @@ private fun OwnerSettingsActionResult.productionOutcomeMessage(): String = when 
             "The history cache was cleared, but the ThinQ PAT could not be removed. You remain signed in; retry cleanup."
         cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.SIGN_OUT_FAILED ->
             "Local history and the ThinQ PAT were cleared, but sign-out did not finish. Retry or restart the app."
+        cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.FIRESTORE_CACHE_CLEAR_FAILED ->
+            "Could not reset Firebase's document cache after this account changed. Live controls remain disabled; retry cleanup by signing out or switching accounts again."
+        cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure.OWNER_TRANSITION_CLEANUP_FAILED ->
+            "The owner changed before cleanup finished. Live AC controls remain disabled until cleanup succeeds. Retry by signing out or switching accounts again."
     }
 }
 

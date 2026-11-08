@@ -100,10 +100,12 @@ import kotlinx.coroutines.withContext
  */
 class FirebaseAirchiveTelemetry private constructor(
     private val auth: FirebaseAuth,
-    private val firestore: FirebaseFirestore,
+    private val firestoreProvider: () -> FirebaseFirestore,
     config: ReadConfig,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AirchiveTelemetryPort {
+
+    private val firestore: FirebaseFirestore get() = firestoreProvider()
 
     private val configuredProjectId: String = config.projectId.trim().also {
         require(it.isNotEmpty()) {
@@ -119,11 +121,12 @@ class FirebaseAirchiveTelemetry private constructor(
         require(maxPageSize in 1..AirchiveTelemetryPort.MAX_PAGE_SIZE) {
             "maxPageSize must be in 1..${AirchiveTelemetryPort.MAX_PAGE_SIZE}, got $maxPageSize"
         }
-        require(auth.app.name == firestore.app.name) {
-            "FirebaseAuth (app '${auth.app.name}') and FirebaseFirestore (app '${firestore.app.name}') " +
+        val initialFirestore = firestoreProvider()
+        require(auth.app.name == initialFirestore.app.name) {
+            "FirebaseAuth (app '${auth.app.name}') and FirebaseFirestore (app '${initialFirestore.app.name}') " +
                 "must come from the same FirebaseApp so Firestore reads use the signed-in user's token."
         }
-        val reportedProjectId = firestore.app.options.projectId
+        val reportedProjectId = initialFirestore.app.options.projectId
         require(reportedProjectId == configuredProjectId) {
             "Firestore instance reports project id '${reportedProjectId ?: "<unset>"}' but the configured " +
                 "Airchive project id is '$configuredProjectId'. Register the app in the expected Firebase " +
@@ -415,7 +418,24 @@ class FirebaseAirchiveTelemetry private constructor(
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         ): FirebaseAirchiveTelemetry = FirebaseAirchiveTelemetry(
             auth = auth,
-            firestore = firestore,
+            firestoreProvider = { firestore },
+            config = ReadConfig(
+                projectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
+                deviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
+                dayTimeZone = BuildConfig.AIRCHIVE_DAY_TIME_ZONE,
+                maxPageSize = BuildConfig.AIRCHIVE_FIRESTORE_MAX_PAGE_SIZE,
+            ),
+            ioDispatcher = ioDispatcher,
+        )
+
+        /** Production factory for a Firestore instance that is recreated after owner-cache clearing. */
+        fun fromBuildConfig(
+            auth: FirebaseAuth,
+            firestoreProvider: () -> FirebaseFirestore,
+            ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+        ): FirebaseAirchiveTelemetry = FirebaseAirchiveTelemetry(
+            auth = auth,
+            firestoreProvider = firestoreProvider,
             config = ReadConfig(
                 projectId = BuildConfig.AIRCHIVE_FIREBASE_PROJECT_ID,
                 deviceId = BuildConfig.AIRCHIVE_DEVICE_ID,
@@ -435,7 +455,7 @@ class FirebaseAirchiveTelemetry private constructor(
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         ): FirebaseAirchiveTelemetry = FirebaseAirchiveTelemetry(
             auth = auth,
-            firestore = firestore,
+            firestoreProvider = { firestore },
             config = ReadConfig(
                 projectId = EMULATOR_TEST_PROJECT_ID,
                 deviceId = BuildConfig.AIRCHIVE_DEVICE_ID,

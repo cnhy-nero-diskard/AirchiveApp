@@ -116,6 +116,21 @@ class ProductionAccountController(
         _state.value = snapshot()
     }
 
+    /**
+     * Publishes cleanup status from an identity change that bypassed Settings.
+     * A failure is deliberately distinct from the confirmed-action failures:
+     * Firebase has already changed owners, so ThinQ remains blocked until a
+     * later transition completes cleanup.
+     */
+    suspend fun reportOwnerTransitionOutcome(failure: OwnerSettingsActionFailure?) {
+        _state.value = snapshot().copy(
+            confirmStep = ProductionAccountConfirmStep.NONE,
+            lastActionResult = failure?.let {
+                OwnerSettingsActionResult.Failure(OwnerSettingsActionFailure.OWNER_TRANSITION_CLEANUP_FAILED)
+            },
+        )
+    }
+
     // ------------------------------------------------------------ actions
 
     /**
@@ -136,7 +151,7 @@ class ProductionAccountController(
                 ?.let { OwnerSettingsActionResult.Failure(it) }
                 ?: OwnerSettingsActionResult.Success(session = null)
         }
-        afterOwnerTransition(identity.currentSession)
+        if (cleanupFailure == null) afterOwnerTransition(identity.currentSession)
         publishAfter(result)
         result
     }
@@ -185,7 +200,7 @@ class ProductionAccountController(
                 }
             }
         }
-        afterOwnerTransition(identity.currentSession)
+        if (cleanupFailure == null) afterOwnerTransition(identity.currentSession)
         publishAfter(result)
         result
     }
