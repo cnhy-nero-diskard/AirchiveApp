@@ -44,7 +44,11 @@ interface ThinQCredentialStore {
      */
     suspend fun migrateLegacyCredential(ownerUid: String): Boolean
 
-    /** Removes the stored token (used on confirmed sign-out/account change). */
+    /**
+     * Removes the stored token and its platform key (used on confirmed
+     * removal/sign-out/account change). Throws if protected material remains so
+     * callers can keep the current owner session and ask the owner to retry.
+     */
     suspend fun clear()
 }
 

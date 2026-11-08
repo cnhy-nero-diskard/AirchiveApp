@@ -9,8 +9,14 @@ import cloud.airchive.shared.contract.telemetry.EnergyUnit
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.data.local.RoomLocalHistoryPort
 import cloud.airchive.shared.data.local.openAirchiveDatabase
+import cloud.airchive.shared.data.onboarding.OwnerSettingsActionFailure
+import cloud.airchive.shared.data.onboarding.OwnerSettingsActionResult
+import cloud.airchive.shared.data.onboarding.OwnerSettingsController
 import cloud.airchive.shared.contract.credentials.SaveThinQResult
 import cloud.airchive.shared.contract.credentials.ThinQCredentialSaveFailure
+import cloud.airchive.shared.fakes.FakeLocalHistory
+import cloud.airchive.shared.fakes.FakeOwnerIdentity
+import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -254,6 +260,42 @@ class AndroidEncryptedThinQCredentialStoreTest {
         assertEquals("client id must remain after clear", id, state.clientId)
         assertEquals(id, store.clientId)
         assertFalse("credential file must be deleted by clear", credentialFile().exists())
+        assertFalse("ThinQ Keystore alias must be deleted by clear", hasKeyForTesting())
+    }
+
+    @Test
+    fun undeletableCredentialFile_reportsRemovalFailureAndKeepsOwnerSignedIn() = runBlocking {
+        val identity = FakeOwnerIdentity()
+        identity.signIn()
+        val owner = identity.currentSession!!
+        val credentialStore = store()
+        assertEquals(SaveThinQResult.Success, credentialStore.save(TOKEN_A, COUNTRY_PH, owner.uid))
+        val controller = OwnerSettingsController(
+            identity = identity,
+            credentialStore = credentialStore,
+            credentialVerifier = FakeThinQCredentialVerifier(),
+            local = FakeLocalHistory(),
+            firebaseProjectId = "credential-clear-test-project",
+            configuredDeviceId = "credential-clear-test-device",
+        )
+        controller.refresh()
+        controller.requestRemoveCredential()
+
+        // A non-empty directory at the record path makes File.delete() fail on
+        // Android without relying on permissions or device-specific behavior.
+        assertTrue(credentialFile().delete())
+        assertTrue(credentialFile().mkdir())
+        File(credentialFile(), "occupied").writeText("synthetic fixture")
+
+        val result = controller.removeCredentialConfirmed()
+        assertTrue("removal failure is surfaced", result is OwnerSettingsActionResult.Failure)
+        assertEquals(
+            OwnerSettingsActionFailure.CREDENTIAL_STORE_CLEAR_FAILED,
+            (result as OwnerSettingsActionResult.Failure).reason,
+        )
+        assertEquals("failed credential removal must retain the signed-in owner", owner, identity.currentSession)
+        assertTrue("the undeletable record path remains", credentialFile().exists())
+        assertFalse("the unusable ciphertext's key is still removed", hasKeyForTesting())
     }
 
     // --- validation keeps the prior record -----------------------------------

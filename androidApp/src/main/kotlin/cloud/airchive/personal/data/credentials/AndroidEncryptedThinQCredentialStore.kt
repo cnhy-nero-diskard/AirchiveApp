@@ -146,9 +146,7 @@ class AndroidEncryptedThinQCredentialStore private constructor(
     override suspend fun clear() {
         withContext(dispatcher) {
             mutex.withLock {
-                clearRecordLocked()
-                _state.value = noCredentialState(unlockFailed = false)
-                publishedOwnerUid = null
+                clearCredentialLocked()
             }
         }
     }
@@ -437,6 +435,59 @@ class AndroidEncryptedThinQCredentialStore private constructor(
     }
 
     private fun tempFileFor(target: File): File = File(target.parentFile, target.name + TMP_SUFFIX)
+
+    /** Delete all encrypted material and the key, then verify every artifact is gone. */
+    private fun clearCredentialLocked() {
+        var failure: Exception? = null
+        fun attempt(action: () -> Unit) {
+            try {
+                action()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (failure == null) failure = error
+            }
+        }
+        fun deleteIfPresent(file: File) {
+            if (file.exists() && !file.delete()) {
+                throw IOException("Failed to delete ${file.name}")
+            }
+        }
+
+        attempt { deleteIfPresent(credentialFile) }
+        attempt { deleteIfPresent(tempFileFor(credentialFile)) }
+        attempt {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            if (keyStore.containsAlias(keyAlias)) keyStore.deleteEntry(keyAlias)
+        }
+
+        val encryptedMaterialRemains = try {
+            credentialFile.exists() || tempFileFor(credentialFile).exists()
+        } catch (error: Exception) {
+            if (failure == null) failure = error
+            true
+        }
+        val keyRemains = try {
+            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.containsAlias(keyAlias)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (failure == null) failure = error
+            true
+        }
+
+        if (!encryptedMaterialRemains || !keyRemains) {
+            // If either side of the encrypted record/key pair is gone, no PAT
+            // can be used. Never keep publishing a stale usable credential.
+            publishedOwnerUid = null
+            _state.value = noCredentialState(
+                unlockFailed = encryptedMaterialRemains && !keyRemains,
+            )
+        }
+        if (encryptedMaterialRemains || keyRemains) {
+            throw IOException("Failed to fully remove the protected ThinQ credential.", failure)
+        }
+    }
 
     private fun clearRecordLocked() {
         credentialFile.delete()
