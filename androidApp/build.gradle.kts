@@ -233,6 +233,13 @@ dependencies {
     // Native debug-only scene for isolated Home layout and interaction verification.
     add("debugImplementation", libs.compose.foundation)
     add("debugImplementation", libs.compose.material3)
+
+    constraints {
+        implementation("com.google.guava:guava:33.7.2-android") {
+            because("Fixes high-severity GHSA-xxph-c9ww-hj94 in the transitive Firebase/gRPC dependency graph.")
+        }
+    }
+
     implementation(project(":shared"))
     implementation(libs.room.runtime)
     implementation(libs.activity.compose)

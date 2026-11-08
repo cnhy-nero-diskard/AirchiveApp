@@ -15,6 +15,17 @@ release, and instrumentation tests, plus the shared Android and host-test
 classpaths. It does not resolve the shared iOS targets, which CI does not build.
 Commit the resulting lockfile changes with the dependency change.
 
+## Dependency vulnerability gate
+
+The `dependencies` job runs OSV-Scanner against both committed Gradle lockfiles.
+High and critical findings fail the job and name the dependency and advisory ID;
+low and medium findings do not block verification. `osv-scanner.toml` is the
+exception list. Each `[[IgnoredVulns]]` entry must include an advisory `id`, a
+non-empty `reason`, and a future `ignoreUntil` date. CI rejects expired or
+incomplete entries and does not allow package-wide ignore overrides. The
+transitive Guava dependency is constrained to `33.7.2-android` to resolve
+`GHSA-xxph-c9ww-hj94` without an exception.
+
 ## Android debug lint
 
 `:androidApp:lintDebug` uses `androidApp/lint-baseline.xml`. Baseline findings

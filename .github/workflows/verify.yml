@@ -65,3 +65,33 @@ jobs:
             androidApp/build/reports/lint-results-debug.sarif
           if-no-files-found: error
           retention-days: 14
+
+  dependencies:
+    name: dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate OSV exceptions
+        run: python3 scripts/ci/osv_policy.py validate-exceptions osv-scanner.toml
+
+      - name: Scan Gradle lockfiles with OSV-Scanner
+        id: osv_scan
+        uses: google/osv-scanner-action/osv-scanner-action@0a65f82af05cd58cf587827b0bb0489548c18346 # v2.7.0
+        with:
+          scan-args: |-
+            --config=osv-scanner.toml
+            --format=json
+            --output-file=osv-results.json
+            --all-vulns
+            --lockfile=shared/gradle.lockfile
+            --lockfile=androidApp/gradle.lockfile
+        continue-on-error: true
+
+      - name: Enforce the high and critical advisory threshold
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 scripts/ci/osv_policy.py check-results osv-results.json
+          --scan-outcome '${{ steps.osv_scan.outcome }}'
