@@ -1,7 +1,13 @@
 {
   "name": "main-gate",
-  "target": "~DEFAULT_BRANCH",
+  "target": "branch",
   "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
   "bypass_actors": [],
   "rules": [
     {

@@ -48,6 +48,7 @@
   - `bypass_actors` is `[]`
   - the single required context is `required` with `integration_id` 15368
   - `strict_required_status_checks_policy` is false
+  - the target is `branch` and `conditions.ref_name.include` contains `~DEFAULT_BRANCH`
   - the `pull_request` rule has 0 required approvals
 - [x] 4.2 Rewrite the version-bump mode in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to work through a `chore/bump-version-<name>` branch, a PR, and `gh pr merge --auto --merge`. Verify:
   - neither copy contains a direct `git push` to `main`
