@@ -34,11 +34,12 @@
   - one failure
   - live tests skipped
   - no tests executed
-- [ ] 3.2 Add `.github/workflows/instrumentation.yml` (design §5): daily schedule and manual dispatch, KVM, an x86_64 API 36 emulator, pinned `firebase-tools`, the `firebase emulators:exec` command with no live-test runner arguments (class filters for batching are allowed), and a guard step that fails if any workflow mentions `liveAccessCheck` or `liveHistoryCheck`. Verify a manual dispatch:
+- [x] 3.2 Add `.github/workflows/instrumentation.yml` (design §5): daily schedule and manual dispatch, KVM, an x86_64 API 36 emulator, pinned `firebase-tools`, the `firebase emulators:exec` command with no live-test runner arguments (class filters for batching are allowed), and a guard step that fails if any workflow mentions `liveAccessCheck` or `liveHistoryCheck`. Verify a manual dispatch:
   - runs the suite
   - reports both `Live*VerificationTest` classes as skipped
   - passes every batch, or names each failing test
   - uploads JUnit XML and logcat
+  - Manual dispatch run `42470733944` completed all six batches and uploaded JUnit XML and logcat: 94 executed, 81 passed, 13 failed, and 7 skipped. Both `Live*VerificationTest` classes were skipped; every `SharedInstrumentUiTest` failure was named in the run summary.
 - [x] 3.3 Document the batch list and the promotion rule (seven consecutive green scheduled runs) in `docs/ci.md`. Verify that every `androidTest` class appears in exactly one batch.
 - [x] 3.4 Add `.github/workflows/codeql.yml` (design §6): `java-kotlin` with a manual `assembleDebug` build, `security-events: write` as the only write, and runs on pull requests, `main`, and weekly. It is not part of `required`. Verify a run completes, and record in `docs/ci.md` whether Kotlin extraction was complete.
 
@@ -67,12 +68,16 @@
 
 ## 5. Rollout
 
-- [ ] 5.1 Open the PR referencing #4 and merge it once its own `required` check is green. Verify:
+- [x] 5.1 Open the PR referencing #4 and merge it once its own `required` check is green. Verify:
   - the PR's evidence artifacts download
-  - the `push` run on `main` reports `required` green
+  - the `push` run on `main` reports `required` green (run `42469148186`, attempt 2; the latest main verification also passed as run `42471887198`, attempt 3)
+  - PR #11 evidence artifacts were downloadable and included 51 JUnit XML reports plus lint HTML, XML, and SARIF
 - [ ] 5.2 With the owner's confirmation, enable secret scanning, non-provider patterns, and push protection. Verify `gh api repos/cnhy-nero-diskard/AirchiveApp --jq .security_and_analysis` shows each as `enabled`.
-- [ ] 5.3 With the owner's confirmation, create the gate ruleset from `.github/rulesets/main-gate.json`. Verify `gh api repos/cnhy-nero-diskard/AirchiveApp/rulesets/<id>` shows it `active`, with no bypass actors and the expected rules, and that the `default` ruleset is unchanged.
-- [ ] 5.4 Verify the gate end to end: open a throwaway draft PR containing a failing host test, and confirm `gh pr view --json mergeStateStatus` reports `BLOCKED` and `gh pr merge` is refused. Then close it and delete its branch. Record the result in the PR thread of 5.1.
+  - Secret scanning and push protection are enabled. GitHub left non-provider patterns disabled because the repository owner type is `User`; current eligibility documentation restricts generic-pattern scanning to organization-owned repositories on GitHub Team with GitHub Secret Protection. This task remains pending unless the repository moves to an eligible organization.
+- [x] 5.3 With the owner's confirmation, create the gate ruleset from `.github/rulesets/main-gate.json`. Verify `gh api repos/cnhy-nero-diskard/AirchiveApp/rulesets/<id>` shows it `active`, with no bypass actors and the expected rules, and that the `default` ruleset is unchanged.
+  - Ruleset `26794798` is active with no bypass actors; the saved `default` ruleset JSON was identical before and after creation.
+- [x] 5.4 Verify the gate end to end: open a throwaway draft PR containing a failing host test, and confirm `gh pr view --json mergeStateStatus` reports `BLOCKED` and `gh pr merge` is refused. Then close it and delete its branch. Record the result in the PR thread of 5.1.
+  - PR #13 run `42473226016` failed `build` and `required`; after marking it ready, `mergeStateStatus` was `BLOCKED` and ordinary `gh pr merge --merge` was refused by the base-branch policy. PR #13 was closed, its branch deleted, and the result recorded in PR #11 comment `6720641401`.
 
 ## Workflow follow-up
 

@@ -14,7 +14,7 @@
 - Add a summary job that fails when any job it depends on failed, was cancelled, or was skipped. Required workflows use no path filters, so a check can never stay pending forever or report a skip as success.
 - Add a scheduled, manually dispatchable instrumentation workflow. It runs `connectedDebugAndroidTest` on an Android emulator under the existing Firebase Auth and Firestore emulator harness (`firebase.test.json`). It never passes the opt-in arguments of the live production verification tests. The previously failing `SharedInstrumentUiTest` cases were repaired in PRs #6 and #7. Some tests take several minutes each and the suite needs small batches, so it starts as a nightly, non-required run and becomes required after a sustained green record. Its report distinguishes tests executed, failed, and skipped from tests only compiled.
 - Add an advisory CodeQL workflow for Kotlin. It is not required until it extracts this project's Kotlin version cleanly.
-- Turn on GitHub secret scanning, including non-provider patterns, and push protection. All of them are currently disabled on this public repository.
+- Turn on GitHub secret scanning and push protection. Enable non-provider patterns where the repository ownership and plan are eligible; the current user-owned repository is not eligible for that feature.
 - Add a second ruleset on `main` with **no bypass actors**. It requires a pull request (0 approvals, since a sole maintainer cannot approve their own PR) and the summary check. The existing `default` ruleset is unchanged. The documented break-glass is the owner temporarily disabling this ruleset, which shows in its history.
 - Fork PRs run only under `pull_request`. No workflow uses `pull_request_target` with PR code.
 - **BREAKING (workflow):** direct pushes to `main` stop working. This includes the version-bump mode of the `merge-pr` skill (`.claude/` and `.codex/` copies), which moves to a PR. Its immediate-merge fallback will be refused while required checks are pending or failing, which is intended.
@@ -37,7 +37,7 @@ None.
   - the Gradle builds enable dependency locking, with committed `gradle.lockfile`s
 - Repository settings, applied with the owner's confirmation:
   - the new `main` ruleset
-  - secret scanning and push protection
+  - secret scanning and push protection; non-provider patterns remain unavailable for the current user-owned repository
 
   Auto-merge is already allowed.
 - `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` version-bump mode.
