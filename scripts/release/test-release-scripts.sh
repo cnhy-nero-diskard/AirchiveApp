@@ -115,6 +115,47 @@ else
   printf '%s\n' "$output" >&2
   exit 1
 fi
+
+# Newer Android build-tools omit the numbered signer prefix. Keep the parser
+# compatible by counting certificate digest records, which still distinguishes
+# single-signer APKs from APKs with multiple signers.
+modern_sdk="$temp_dir/modern-android-sdk"
+mkdir -p "$modern_sdk/build-tools/99.0.0"
+cat > "$modern_sdk/build-tools/99.0.0/aapt" <<'EOF'
+#!/usr/bin/env bash
+case "$2" in
+  badging)
+    printf "package: name='cloud.airchive.personal' versionCode='%s' versionName='%s'\n" \
+      "$AIRCHIVE_RELEASE_TEST_CODE" "$AIRCHIVE_RELEASE_TEST_NAME"
+    ;;
+  xmltree)
+    printf 'A: android:name(0x01010003)="cloud.airchive.build.commit"\n'
+    printf 'A: android:value(0x01010024)="%s"\n' "$AIRCHIVE_RELEASE_TEST_COMMIT"
+    ;;
+  *) exit 1 ;;
+esac
+EOF
+cat > "$modern_sdk/build-tools/99.0.0/apksigner" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "verify" ]; then
+  printf 'certificate SHA-256 digest: %s\n' "$AIRCHIVE_RELEASE_TEST_CERT"
+else
+  exit 1
+fi
+EOF
+chmod +x "$modern_sdk/build-tools/99.0.0/aapt" "$modern_sdk/build-tools/99.0.0/apksigner"
+if ANDROID_HOME="$modern_sdk" \
+  AIRCHIVE_RELEASE_TEST_CODE="$code" \
+  AIRCHIVE_RELEASE_TEST_NAME="$name" \
+  AIRCHIVE_RELEASE_TEST_COMMIT="$commit" \
+  AIRCHIVE_RELEASE_TEST_CERT="$fixture_pin" \
+  check_apk_with_pin "$temp_dir/good.apk" "$name" "$code" "$commit" "$fixture_pin" >/dev/null; then
+  echo "PASS: modern signer output without a numbered prefix is accepted"
+else
+  echo "FAIL: modern signer output without a numbered prefix was rejected" >&2
+  exit 1
+fi
+
 expect_failure "valid fixture rejected by fixed production pin" "signer certificate SHA-256" \
   check_apk "$temp_dir/good.apk" "$name" "$code" "$commit"
 
@@ -133,7 +174,7 @@ make_unsigned_apk two-signers cloud.airchive.personal "$name" "$code" "$commit" 
   --v1-signer-name fixture-two \
   --ks-pass "pass:$fixture_password" --key-pass "pass:$fixture_password" \
   --out "$temp_dir/two-signers.apk" "$temp_dir/two-signers-unsigned.apk" >/dev/null
-expect_failure "APK with two signers rejected" "exactly one signer" \
+expect_failure "APK with two signers rejected" "exactly one signer certificate" \
   check_apk_with_pin "$temp_dir/two-signers.apk" "$name" "$code" "$commit" "$fixture_pin"
 
 make_unsigned_apk wrong-package cloud.airchive.invalid "$name" "$code" "$commit" false

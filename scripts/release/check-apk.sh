@@ -50,7 +50,7 @@ find_build_tools() {
 
 check_apk_with_pin() {
   local apk expected_name expected_code expected_commit certificate_pin build_tools
-  local aapt apksigner badging manifest signer_output signer_count certificate_count
+  local aapt apksigner badging manifest signer_output certificate_count
   local observed_package observed_code observed_name observed_cert observed_commit
   local apk_sha256 apk_size
   local -a failures
@@ -101,10 +101,9 @@ check_apk_with_pin() {
   if ! signer_output=$("$apksigner" verify --print-certs "$apk" 2>&1); then
     failures[${#failures[@]}]="apksigner verification failed"
   fi
-  signer_count=$(printf '%s\n' "$signer_output" | grep -c 'Signer #[0-9][0-9]* certificate SHA-256 digest:' || true)
   certificate_count=$(printf '%s\n' "$signer_output" | grep -c 'certificate SHA-256 digest:' || true)
-  if [ "$signer_count" -ne 1 ] || [ "$certificate_count" -ne 1 ]; then
-    failures[${#failures[@]}]="APK must have exactly one signer (found $signer_count)"
+  if [ "$certificate_count" -ne 1 ]; then
+    failures[${#failures[@]}]="APK must have exactly one signer certificate (found $certificate_count)"
   fi
   observed_cert=$(printf '%s\n' "$signer_output" | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
   [ "$observed_cert" = "$certificate_pin" ] || failures[${#failures[@]}]="signer certificate SHA-256 is '$observed_cert', expected '$certificate_pin'"

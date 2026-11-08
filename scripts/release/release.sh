@@ -160,9 +160,9 @@ if [ "$publish_release" = false ]; then
     echo "Could not verify the installed APK signature; refusing to install." >&2
     exit 1
   }
-  signer_count=$(printf '%s\n' "$installed_signers" | grep -c 'Signer #[0-9][0-9]* certificate SHA-256 digest:' || true)
+  installed_certificate_count=$(printf '%s\n' "$installed_signers" | grep -c 'certificate SHA-256 digest:' || true)
   installed_certificate=$(printf '%s\n' "$installed_signers" | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
-  if [ "$signer_count" -ne 1 ] || [ "$installed_certificate" != "$expected_certificate" ]; then
+  if [ "$installed_certificate_count" -ne 1 ] || [ "$installed_certificate" != "$expected_certificate" ]; then
     echo "Installed app does not use the pinned Airchive release identity; refusing to install." >&2
     exit 1
   fi
