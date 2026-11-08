@@ -6,6 +6,36 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+val ciDependencyConfigurationNames = listOf(
+    "debugCompileClasspath",
+    "debugRuntimeClasspath",
+    "releaseCompileClasspath",
+    "releaseRuntimeClasspath",
+    "debugAndroidTestCompileClasspath",
+    "debugAndroidTestRuntimeClasspath",
+)
+
+dependencyLocking {
+    lockMode = LockMode.STRICT
+}
+
+configurations.matching { it.name in ciDependencyConfigurationNames }.configureEach {
+    resolutionStrategy.activateDependencyLocking()
+}
+
+tasks.register("resolveCiDependencies") {
+    group = "verification"
+    description = "Resolves the app dependency configurations used by CI."
+    notCompatibleWithConfigurationCache("This maintenance task resolves configurations to write Gradle lock state.")
+    doLast {
+        ciDependencyConfigurationNames.forEach { configurationName ->
+            val configuration = configurations.getByName(configurationName)
+            val componentCount = configuration.incoming.resolutionResult.allComponents.size
+            logger.lifecycle("Resolved $configurationName ($componentCount components).")
+        }
+    }
+}
+
 val airchiveConfig = Properties().apply {
     rootProject.file("config/airchive-mobile.properties").inputStream().use { load(it) }
 }

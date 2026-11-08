@@ -8,6 +8,34 @@ plugins {
     alias(libs.plugins.room3.plugin)
 }
 
+val ciDependencyConfigurationNames = listOf(
+    "androidCompileClasspath",
+    "androidRuntimeClasspath",
+    "androidHostTestCompileClasspath",
+    "androidHostTestRuntimeClasspath",
+)
+
+dependencyLocking {
+    lockMode = LockMode.STRICT
+}
+
+configurations.matching { it.name in ciDependencyConfigurationNames }.configureEach {
+    resolutionStrategy.activateDependencyLocking()
+}
+
+tasks.register("resolveCiDependencies") {
+    group = "verification"
+    description = "Resolves the shared Android and host-test dependency configurations used by CI."
+    notCompatibleWithConfigurationCache("This maintenance task resolves configurations to write Gradle lock state.")
+    doLast {
+        ciDependencyConfigurationNames.forEach { configurationName ->
+            val configuration = configurations.getByName(configurationName)
+            val componentCount = configuration.incoming.resolutionResult.allComponents.size
+            logger.lifecycle("Resolved $configurationName ($componentCount components).")
+        }
+    }
+}
+
 kotlin {
     android {
         namespace = "cloud.airchive.shared"

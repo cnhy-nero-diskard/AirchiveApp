@@ -8,3 +8,9 @@ plugins {
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.room3.plugin) apply false
 }
+
+tasks.register("resolveCiDependencies") {
+    group = "verification"
+    description = "Resolves the Android and host-test dependency configurations used by CI."
+    dependsOn(":shared:resolveCiDependencies", ":androidApp:resolveCiDependencies")
+}

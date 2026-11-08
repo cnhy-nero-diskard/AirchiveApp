@@ -2,7 +2,7 @@
 
 ## 1. Reproducible build inputs
 
-- [ ] 1.1 Enable strict Gradle dependency locking in `:shared` and `:androidApp` for the configurations in design §4. Add the root task that resolves them, generate the `gradle.lockfile`s, and document `--write-locks` in `docs/ci.md`. Verify:
+- [x] 1.1 Enable strict Gradle dependency locking in `:shared` and `:androidApp` for the configurations in design §4. Add the root task that resolves them, generate the `gradle.lockfile`s, and document `--write-locks` in `docs/ci.md`. Verify:
   - `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest` passes on the Mac
   - a temporary version change in `gradle/libs.versions.toml` without `--write-locks` fails and names the configuration (then revert it)
 - [ ] 1.2 Add the `lint {}` block from design §3 to `androidApp/build.gradle.kts` and generate `androidApp/lint-baseline.xml`. Verify:
