@@ -72,8 +72,8 @@
   - the PR's evidence artifacts download
   - the `push` run on `main` reports `required` green (run `42469148186`, attempt 2; the latest main verification also passed as run `42471887198`, attempt 3)
   - PR #11 evidence artifacts were downloadable and included 51 JUnit XML reports plus lint HTML, XML, and SARIF
-- [ ] 5.2 With the owner's confirmation, enable secret scanning, non-provider patterns, and push protection. Verify `gh api repos/cnhy-nero-diskard/AirchiveApp --jq .security_and_analysis` shows each as `enabled`.
-  - Secret scanning and push protection are enabled. GitHub left non-provider patterns disabled because the repository owner type is `User`; current eligibility documentation restricts generic-pattern scanning to organization-owned repositories on GitHub Team with GitHub Secret Protection. This task remains pending unless the repository moves to an eligible organization.
+- [x] 5.2 With the owner's confirmation, enable secret scanning and push protection. For this solo project, the owner considers non-provider patterns unnecessary and has chosen to leave them disabled. Verify the API reports secret scanning and push protection as `enabled`.
+  - Secret scanning and push protection are enabled. Non-provider patterns remain disabled by owner decision; GitHub also doesn't offer generic-pattern scanning for this user-owned repository under its current eligibility rules.
 - [x] 5.3 With the owner's confirmation, create the gate ruleset from `.github/rulesets/main-gate.json`. Verify `gh api repos/cnhy-nero-diskard/AirchiveApp/rulesets/<id>` shows it `active`, with no bypass actors and the expected rules, and that the `default` ruleset is unchanged.
   - Ruleset `26794798` is active with no bypass actors; the saved `default` ruleset JSON was identical before and after creation.
 - [x] 5.4 Verify the gate end to end: open a throwaway draft PR containing a failing host test, and confirm `gh pr view --json mergeStateStatus` reports `BLOCKED` and `gh pr merge` is refused. Then close it and delete its branch. Record the result in the PR thread of 5.1.
