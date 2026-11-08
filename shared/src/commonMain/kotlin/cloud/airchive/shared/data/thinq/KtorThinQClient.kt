@@ -304,7 +304,20 @@ class KtorThinQClient(
 
     // ------------------------------------------------------ internal plumbing
 
-    private data class CredentialContext(val token: String, val country: String, val clientId: String)
+    /** One operation's raw credential snapshot with a safe debug representation. */
+    internal class CredentialContext(
+        val token: String,
+        val country: String,
+        val clientId: String,
+    ) {
+        override fun toString(): String =
+            "CredentialContext(token=${maskedToken(token)}, country=$country, clientId=$clientId)"
+
+        private companion object {
+            fun maskedToken(token: String): String =
+                if (token.isBlank()) "[absent]" else "•••• ${token.takeLast(4)}"
+        }
+    }
 
     /** Opaque facade that pins one protected credential snapshot to one operation. */
     private inner class CredentialBoundThinQPort(

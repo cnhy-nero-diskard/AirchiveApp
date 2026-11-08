@@ -94,6 +94,20 @@ class KtorThinQClientTest {
     private fun requestBody(request: HttpRequestData): String =
         (request.body as? TextContent)?.text.orEmpty()
 
+    @Test
+    fun credentialContextToStringMasksThePat() {
+        val context = KtorThinQClient.CredentialContext(
+            token = pat,
+            country = "PH",
+            clientId = stableClientId,
+        )
+
+        val rendered = context.toString()
+        assertFalse(rendered.contains(pat), "the raw PAT must never appear in CredentialContext.toString()")
+        assertFalse(rendered.contains(pat.dropLast(4)), "the PAT prefix must not leak")
+        assertTrue(rendered.contains("•••• ${pat.takeLast(4)}"), "only a masked suffix may be shown")
+    }
+
     // ------------------------------------------------------------- fixtures
 
     private val deviceListJson = """

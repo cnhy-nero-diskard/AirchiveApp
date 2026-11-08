@@ -4,7 +4,7 @@
 
 - [x] 1.1 Store the owner UID in the encrypted credential record (GCM-authenticated). Make reads owner-scoped: a mismatched or unbound record clears itself and reports absent. Verify with host/instrumented store tests for: same owner reads, other owner gets absent and the record is deleted, legacy record migration, and the legacy fallback.
 - [x] 1.2 Make `clear()` delete the ciphertext and the Keystore alias, and fail if either remains. Propagate failure through removal, sign-out, and account change. Verify with a test where the file cannot be deleted (removal reports failure, owner stays signed in) and a test that the alias is gone after clear.
-- [ ] 1.3 Replace the `CredentialContext` data class with a class whose `toString()` masks the token. Verify a host test asserts the PAT never appears in its `toString()`.
+- [x] 1.3 Replace the `CredentialContext` data class with a class whose `toString()` masks the token. Verify a host test asserts the PAT never appears in its `toString()`.
 
 ## 2. Single owner-transition path
 
