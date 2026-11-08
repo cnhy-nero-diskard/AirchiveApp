@@ -22,7 +22,7 @@ Two independent operations:
   unarchive was deliberate), then merge into `main`.
 - **Bump the app version** — check out `main`, bump `versionName` / `versionCode`,
   commit and push (signed release builds are produced separately via
-  `scripts/release/Invoke-AirchiveRelease.ps1`).
+  `scripts/release/release.sh <versionName> --notes-file <path>`).
 
 ## Mode A — Merge a PR
 
@@ -116,14 +116,15 @@ gh pr merge <number> --auto --merge --delete-branch
    git pull --ff-only
    git switch -c chore/bump-version-<name>
    ```
-3. Edit `versionName` in `androidApp/build.gradle.kts` and increase the default
-   `airchive.versionCode` monotonically. Run the host tests and debug assembly
-   (`./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug`, or
-   `./gradlew.bat` with the same tasks on Windows) and review `git diff --check`.
+3. Edit `versionName` and `versionCode` in
+   `config/airchive-version.properties`. The code must strictly increase. Run
+   the host tests and debug assembly
+   (`./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug`) and review
+   `git diff --check`.
 4. Stage only the version file and any explicitly requested release notes, then
    commit and push the feature branch:
    ```bash
-   git add androidApp/build.gradle.kts
+   git add config/airchive-version.properties
    git commit -m "chore: bump version to <version>"
    git push --set-upstream origin chore/bump-version-<name>
    ```
@@ -136,8 +137,9 @@ gh pr merge <number> --auto --merge --delete-branch
    ```
    Do not merge around pending or failing checks.
 6. Verify whether GitHub merged the PR or only queued auto-merge, and report its
-   URL, status, and the version. Signed release builds are separate and use
-   `scripts/release/Invoke-AirchiveRelease.ps1` with the private signing setup.
+   URL, status, and the version. After it lands, stage a draft with
+   `scripts/release/release.sh <versionName> --notes-file <path>`; publish it
+   only through the `release-publish` workflow.
 
 ## Guardrails
 

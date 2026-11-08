@@ -73,7 +73,8 @@ bullets under 180 characters each, or exactly `None` for technical-only changes.
     `androidApp/src/androidTest/`, `firebase.test.json`, and `tests/firebase/firestore.rules`;
     run device/emulator checks only with the required environment available. For changes to
     `scripts/release/`, also run
-    `powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1`.
+    `shellcheck scripts/release/*.sh` and
+    `scripts/release/test-release-scripts.sh`.
     With a dedicated local Android emulator available, the Firebase harness is:
     `firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller --only auth,firestore "gradlew.bat :androidApp:connectedDebugAndroidTest"`.
     Compiling `:androidApp:assembleDebugAndroidTest` alone does not execute tests.

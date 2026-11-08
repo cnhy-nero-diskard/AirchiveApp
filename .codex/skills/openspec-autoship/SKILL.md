@@ -151,7 +151,7 @@ fully implemented; never silently narrow or defer specified behavior.
 Read `PRODUCT.md`, `DESIGN.md`, and applicable specs. For Kotlin/Android changes run
 `.\gradlew.bat :shared:testAndroidHostTest :androidApp:assembleDebug` in the target
 checkout. For release-script changes also run
-`powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1`.
+`shellcheck scripts/release/*.sh` and `scripts/release/test-release-scripts.sh`.
 Documentation/skill-only checkpoints need diff/reference checks rather than an APK.
 Report any unavailable device, emulator, or iOS validation explicitly; an Android
 build does not prove iOS support or real-device control acceptance.

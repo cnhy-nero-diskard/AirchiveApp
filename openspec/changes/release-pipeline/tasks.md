@@ -60,8 +60,8 @@
 
 ## 5. Runbook and skills
 
-- [ ] 5.1 Replace the Windows sections of `docs/android-release.md` with a Mac runbook: keystore transfer (copy, never move; check the fingerprint first), setup, release, dry run, publish, install recovery, withdrawal, and key backup and recovery. Check GitHub's immutable-release documentation for which withdrawal actions (delete, demote to prerelease) are allowed, and document only those. Verify every command in the runbook exists in `scripts/release/` with the documented flags.
-- [ ] 5.2 Update merge-pr Mode B in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to edit `config/airchive-version.properties` (code strictly increasing) and to point at `release.sh`. Update the release-script check in both `make-pr` skills to `test-release-scripts.sh`. Verify `grep -rn 'airchive.versionCode\|\.ps1' .claude .codex` returns nothing.
+- [x] 5.1 Replace the Windows sections of `docs/android-release.md` with a Mac runbook: keystore transfer (copy, never move; check the fingerprint first), setup, release, dry run, publish, install recovery, withdrawal, and key backup and recovery. Check GitHub's immutable-release documentation for which withdrawal actions (delete, demote to prerelease) are allowed, and document only those. Verify every command in the runbook exists in `scripts/release/` with the documented flags.
+- [x] 5.2 Update merge-pr Mode B in `.claude/skills/merge-pr/SKILL.md` and `.codex/skills/merge-pr/SKILL.md` to edit `config/airchive-version.properties` (code strictly increasing) and to point at `release.sh`. Update the release-script check in both `make-pr` skills to `test-release-scripts.sh`. Verify `grep -rn 'airchive.versionCode\|\.ps1' .claude .codex` returns nothing.
 
 ## 6. Owner key transfer, dry run, and Windows retirement
 

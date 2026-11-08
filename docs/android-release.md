@@ -1,196 +1,122 @@
-# Private Android release signing and upgrade guide
+# Android release runbook
 
-## Signing setup status
+Airchive releases are signed on the owner's Mac with the existing release
+keystore. GitHub Releases hosts public APKs and the updater manifest. CI checks
+and publishes a draft but never has access to the signing key or passwords.
 
-### Unattended Windows builds (preferred)
+## Release identity and versioning
 
-Run `scripts/release/Setup-AirchiveSigning.ps1` once in a local Windows
-PowerShell window. Its masked dialog accepts the existing keystore passwords,
-validates them without exporting the private key, and stores SecureStrings in
-`%USERPROFILE%\.airchive\signing-credentials.clixml`. Windows DPAPI binds these
-credentials to this Windows account on this PC; the file ACL grants only this
-user and SYSTEM access. Do not copy it into Git or share it. Keep the original
-keystore/password backup separately; this encrypted file is not a portable backup.
+The only version source is `config/airchive-version.properties`. Both Android
+build types use its `versionName` and `versionCode`; the release tag is
+`v<versionName>`. Make version changes through a pull request and increase
+`versionCode` for every build. Never reuse or lower a code. The first public
+release must use code 3 or higher because code 2 is already installed.
 
-After setup, the assistant can run this unattended:
+## Transfer and set up the signing key
 
-```powershell
-powershell.exe -NoProfile -File scripts/release/Invoke-AirchiveRelease.ps1 `
-  -VersionCode 2 -Install -DeviceSerial 9XDQCM6HLB5DO7YH
+Keep the original keystore and an offline backup until a Mac-signed APK passes
+the release checks. Copy the existing `airchive-release.jks`; never move it.
+Before removing or changing the source copy, inspect the transferred copy's
+public certificate and confirm the SHA-256 fingerprint is
+`2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202`:
+
+```sh
+keytool -list -v -keystore /path/to/transfer/airchive-release.jks -alias airchive-release
 ```
 
-Omit `-Install` to build only. Increment `-VersionCode` for each update. The
-script decrypts credentials only for the build, uses a single-use Gradle daemon
-with configuration caching disabled, restores process environment variables,
-verifies the pinned release certificate/package/version, and checks the installed
-certificate and older version before `adb install -r`. It **never uninstalls,
-clears data, publishes, or sends AC commands**. A disconnected phone or rejected
-installation stops the process; it does not trigger a destructive fallback.
+Keytool prompts for the store password locally. Create the private directory,
+copy the file, and restrict its permissions:
 
-To set up and immediately perform the authorized build/update in the same local
-process, setup accepts `-BuildAfterSetup -Install -DeviceSerial ... -VersionCode 2`.
-Passwords never need to be sent in chat, command arguments, or shell history.
-DPAPI protects the file at rest, not from programs already running as your Windows
-account. Build tools necessarily receive plaintext process-environment passwords
-while signing. Do not use transcripts, Gradle build scans or debug logging for
-credential-bearing builds. No cloud credential storage or CI upload is configured.
-
-Noninteractive checks using dummy credentials only:
-`powershell.exe -NoProfile -File scripts/release/Test-ReleaseAutomation.ps1`.
-
-Android Studio's **Build → Generate Signed Bundle / APK → APK** wizard is
-also supported. Select the existing keystore and alias, enter the passwords
-locally, and choose **release**. There is no need to create another key or set
-PowerShell environment variables when using this wizard. AGP validates the
-wizard's signing credentials; the release preflight accepts its complete signing
-configuration and still rejects builds with no signing setup.
-
-Gradle is configured to sign a private release APK from these **process
-environment variables** (not BuildConfig, resources, or the APK):
-
-- `AIRCHIVE_RELEASE_STORE_FILE`
-- `AIRCHIVE_RELEASE_STORE_PASSWORD`
-- `AIRCHIVE_RELEASE_KEY_ALIAS`
-- `AIRCHIVE_RELEASE_KEY_PASSWORD`
-
-The `verifyPrivateReleaseSigning` preflight fails closed when any value is
-missing or the keystore path does not exist. Debug builds do not require signing
-variables. See the acceptance evidence at the end for the installed release key.
-
-## 7.1 — Create and register the private release key
-
-Create the key outside the repository. `keytool` prompts for passwords; do not
-put passwords in command arguments, source files, `local.properties`, or chat:
-
-```powershell
-$releaseDir = Join-Path $env:USERPROFILE '.airchive'
-New-Item -ItemType Directory -Force $releaseDir | Out-Null
-keytool -genkeypair -v `
-  -keystore (Join-Path $releaseDir 'airchive-release.jks') `
-  -alias airchive-release `
-  -keyalg RSA -keysize 4096 -validity 10000 -storetype JKS
+```sh
+mkdir -p -m 700 ~/.airchive
+cp /path/to/transfer/airchive-release.jks ~/.airchive/airchive-release.jks
+chmod 600 ~/.airchive/airchive-release.jks
 ```
 
-Back up the `.jks` file and its passwords securely outside Git. To obtain the
-public certificate fingerprints (not the private key):
+Run the setup script. It checks the pinned certificate before asking for either
+password, stores the passwords as macOS Keychain items, then validates both
+against the keystore:
 
-```powershell
-keytool -list -v `
-  -keystore (Join-Path $releaseDir 'airchive-release.jks') `
-  -alias airchive-release
+```sh
+scripts/release/setup-signing.sh
 ```
 
-In Firebase Console, open the existing project’s Android app
-`cloud.airchive.personal` and add the certificate’s **SHA-1** fingerprint to
-its SHA certificate fingerprints. Add SHA-256 as well if the project’s app
-protections require it, and verify Google sign-in is enabled. See Firebase’s
-[Google sign-in setup](https://firebase.google.com/docs/auth/android/google-signin)
-and Android’s [app-signing guidance](https://developer.android.com/studio/publish/app-signing).
+The script does not create or replace a key. Never put passwords in command
+arguments, shell history, repository files, CI, or chat.
 
-Set the keystore path and alias locally. The following prompts keep password
-typing out of shell history and command output; Gradle receives them only in
-this PowerShell process:
+## Build and stage a draft
 
-```powershell
-$env:AIRCHIVE_RELEASE_STORE_FILE = Join-Path $releaseDir 'airchive-release.jks'
-$env:AIRCHIVE_RELEASE_KEY_ALIAS = 'airchive-release'
+Set the version in a merged pull request before releasing. From a clean checkout
+whose commit is already contained in `origin/main`, prepare a plain-text release
+notes file and run:
 
-function Set-AirchiveSecret([string]$Name, [string]$Prompt) {
-  $secure = Read-Host -Prompt $Prompt -AsSecureString
-  $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  try {
-    $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
-    [Environment]::SetEnvironmentVariable($Name, $plain, 'Process')
-  } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
-    $secure.Dispose()
-  }
-}
-
-Set-AirchiveSecret 'AIRCHIVE_RELEASE_STORE_PASSWORD' 'Keystore password'
-Set-AirchiveSecret 'AIRCHIVE_RELEASE_KEY_PASSWORD' 'Key password'
+```sh
+scripts/release/release.sh 0.2.0 --notes-file /path/to/release-notes.txt
 ```
 
-The first signed release used version code 1. The shared version source is
-`config/airchive-version.properties`; it currently has `versionName=0.1.0` and
-`versionCode=2` for the same-key upgrade test. Change those values in a PR for
-each release. The removed `-Pairchive.versionCode` override is not supported.
-Build the signed release:
+Replace `0.2.0` with the exact `versionName` in the tracked version file. The
+script refuses a dirty tree, a commit outside `origin/main`, a reused local or
+remote tag, or a version mismatch. It reads passwords from Keychain for the
+single Gradle build process, checks the signed APK, pushes tag `v<versionName>`,
+and uploads the APK and notes as a draft release. The draft is not public as the
+latest release.
 
-```powershell
-.\gradlew.bat --no-configuration-cache --no-daemon :androidApp:assembleRelease
+## Verify a draft and publish
+
+Open **Actions → release-publish → Run workflow**. Select the release tag as the
+workflow ref, enter the same draft tag (for example `v0.2.0`), and leave
+**dry_run** enabled first. The workflow checks that the
+tag's commit is in `main`, verifies the APK and monotonically increasing code,
+and creates `update.json` as an artifact while leaving the release as a draft.
+Download that artifact and confirm its checksum, size, release notes, and
+versioned APK URL. Inspect the GitHub download redirect chain for the APK URL
+before publishing.
+
+After the dry run is reviewed, run the same workflow and tag with **dry_run**
+disabled. CI attaches `update.json` and publishes the release as latest. The
+stable manifest URL is:
+
+`https://github.com/cnhy-nero-diskard/AirchiveApp/releases/latest/download/update.json`
+
+The manifest points to the APK under its versioned release URL, so a newer
+publication cannot make an older manifest point to a different APK.
+
+## Checked install recovery
+
+Use this path only when an existing installation needs a direct update, such as
+the first build that carries the updater:
+
+```sh
+scripts/release/release.sh --install <device-serial>
 ```
 
-Use a temporary PowerShell process for the secret variables, do not persist them
-as user/system environment variables, and use `--no-configuration-cache` so
-Gradle does not store their values in its configuration cache.
+The serial is required before the build starts. The script reads the tracked
+version, checks the signed APK, confirms the named device is available, and
+requires an existing Airchive installation with a lower version code and the
+pinned signer. It runs only `adb install -r`; it never removes the app or clears
+its data.
 
-The APK is at
-`androidApp\build\outputs\apk\release\androidApp-release.apk`. Verify it and
-compare its signing certificate with the SHA fingerprint registered in Firebase:
+## Withdraw or roll forward
 
-```powershell
-$buildTools = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Android\Sdk\build-tools') -Directory |
-  Sort-Object Name -Descending | Select-Object -First 1
-& (Join-Path $buildTools.FullName 'apksigner.bat') verify --verbose --print-certs `
-  androidApp\build\outputs\apk\release\androidApp-release.apk
-```
+If a published release is bad, open its GitHub release page and either mark it as
+a prerelease or delete the release. With immutable releases enabled, you cannot
+replace or delete published assets, or move/delete the associated tag while the
+release exists. Deleting an immutable release permits deleting its tag, but that
+tag name can never be reused. A prerelease can be switched back to a regular
+release, so use deletion when permanent withdrawal is required. GitHub still
+allows editing the title and notes and changing the prerelease/latest status.
+See GitHub's [immutable releases guidance](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
 
-Remove the password variables from this PowerShell process when finished:
+Never replace a published APK or reuse its version code. To restore older
+behavior, prepare and publish a new release with a higher version code.
 
-```powershell
-Remove-Item Env:AIRCHIVE_RELEASE_STORE_PASSWORD, Env:AIRCHIVE_RELEASE_KEY_PASSWORD `
-  -ErrorAction SilentlyContinue
-```
+## Key backup and recovery
 
-## 7.2 — Test a same-key release upgrade
-
-The original phone installation was a debug-signed app. Android rejects a release APK
-signed by a different key as an in-place update. Uninstalling the debug app
-deletes its local Room history and Android Keystore PAT; history can be synced
-again, but the PAT must be entered again. **Do not uninstall until you are
-ready for that one-time reset.**
-
-To verify the required upgrade preservation, install a signed release first,
-sign in, sync history, and enter the PAT. Then build a higher-version APK with
-the same key and install it as an update, without uninstalling:
-
-```powershell
-.\gradlew.bat --no-configuration-cache --no-daemon `
-  :androidApp:assembleRelease
-$adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
-& $adb -s <phone-serial> install -r `
-  androidApp\build\outputs\apk\release\androidApp-release.apk
-```
-
-Verify sign-in, Room history, masked PAT status, navigation, and the supported
-profile-gated controls survive the same-signing-identity update. Do not send
-control commands without explicit values/authorization. Increase `versionCode`
-in `config/airchive-version.properties` for every subsequent release build.
-
-## Current boundary
-
-The owner reports registering SHA-1 and SHA-256 in Firebase. The version-code-1
-release APK passed `apksigner verify` with a 4096-bit RSA release certificate
-(SHA-256 `2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202`),
-distinct from the debug certificate. After the approved debug uninstall, ADB
-installed and launched it on phone `9XDQCM6HLB5DO7YH`. The owner reported finishing
-sign-in, history sync, and PAT entry. No PAT was read by the assistant.
-
-The Windows-DPAPI setup validated the existing keystore credentials and saved
-them outside Git. The automation built version code 2, verified its pinned
-release certificate and the installed version-1 certificate, then successfully
-updated the phone with `adb install -r` and launched the app. There was no
-uninstall or data clear during this upgrade. The owner confirmed that sign-in,
-history visibility, and saved PAT status survived. This confirms user-visible
-preservation, not an independent row-by-row Room database audit or a new control
-request.
-
-Artifact-name and common private-key/token-pattern scans found no matches across
-333 tracked paths. No secret environment files were read. This limited pattern
-scan does not guarantee detection of every possible credential. Task 7.1 is
-complete. The owner subsequently explicitly confirmed post-update navigation and
-all-four-control verification complete, closing task 7.2 on owner-reported final
-acceptance. Those manual checks are distinct from the assistant-observed signed
-build/update results. No new AC command was issued by the assistant during
-signing or upgrade verification.
+Keep the offline keystore backup separate from the Mac and maintain a separate,
+secure record of both passwords. Keep the original source copy until a Mac
+release APK has passed `check-apk.sh`. If the Mac is replaced, copy the offline
+keystore backup to `~/.airchive/airchive-release.jks` and run
+`scripts/release/setup-signing.sh`; setup must print the same pinned
+certificate fingerprint. If the key or passwords are lost, stop release
+signing and plan a signing-key migration. Do not generate a replacement key for
+the existing app identity.
