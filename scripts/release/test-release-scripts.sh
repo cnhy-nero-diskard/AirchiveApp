@@ -407,4 +407,66 @@ if grep -nE "$forbidden_install_pattern" "$script_dir"/*.sh; then
 fi
 echo "PASS: release scripts contain no app-removal or package-data-wipe command"
 
+manifest_sdk="$temp_dir/manifest-sdk"
+mkdir -p "$manifest_sdk/build-tools/1.0.0"
+cat > "$manifest_sdk/build-tools/1.0.0/aapt" <<'EOF'
+#!/usr/bin/env bash
+printf "package: name='cloud.airchive.personal' versionCode='42' versionName='2.3.4'\n"
+EOF
+chmod +x "$manifest_sdk/build-tools/1.0.0/aapt"
+printf 'fixture release APK\n' > "$temp_dir/manifest-fixture.apk"
+cat > "$temp_dir/manifest-notes.md" <<'EOF'
+## Fixes
+
+- Added **safe** update. See [guide](https://example.test).
+EOF
+cat > "$temp_dir/manifest-golden.json" <<'EOF'
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "packageName": "cloud.airchive.personal",
+  "versionCode": 42,
+  "versionName": "2.3.4",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "publishedAt": "2026-11-07T00:00:00Z",
+  "releaseNotes": "Fixes\n\n- Added safe update. See guide.",
+  "apk": {
+    "url": "https://github.com/cnhy-nero-diskard/AirchiveApp/releases/download/v2.3.4/airchive-2.3.4-42.apk",
+    "sha256": "7b7262b0af8aee826cec2958891a2d651535c4197ea6200c445601e90e5706d1",
+    "size": 20,
+    "signingCertSha256": "2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202"
+  }
+}
+EOF
+ANDROID_HOME="$manifest_sdk" "$script_dir/make-manifest.sh" \
+  --apk "$temp_dir/manifest-fixture.apk" \
+  --tag v2.3.4 \
+  --commit 0123456789abcdef0123456789abcdef01234567 \
+  --published-at 2026-11-07T00:00:00Z \
+  --release-body "$temp_dir/manifest-notes.md" \
+  --output "$temp_dir/update.json" >/dev/null
+if ! cmp -s "$temp_dir/manifest-golden.json" "$temp_dir/update.json"; then
+  echo "FAIL: generated update manifest differs from the golden file" >&2
+  diff -u "$temp_dir/manifest-golden.json" "$temp_dir/update.json" >&2 || true
+  exit 1
+fi
+grep -q 'releases/download/v2.3.4/' "$temp_dir/update.json"
+if grep -q 'minSupportedVersionCode' "$temp_dir/update.json"; then
+  echo "FAIL: schema-version-1 manifest emitted a forced-update field" >&2
+  exit 1
+fi
+printf '%04001d' 0 | tr '0' x > "$temp_dir/oversized-notes.md"
+if output=$(ANDROID_HOME="$manifest_sdk" "$script_dir/make-manifest.sh" \
+  --apk "$temp_dir/manifest-fixture.apk" \
+  --tag v2.3.4 \
+  --commit 0123456789abcdef0123456789abcdef01234567 \
+  --published-at 2026-11-07T00:00:00Z \
+  --release-body "$temp_dir/oversized-notes.md" \
+  --output "$temp_dir/oversized-update.json" 2>&1); then
+  echo "FAIL: oversized release notes were accepted" >&2
+  exit 1
+fi
+printf '%s\n' "$output" | grep -q 'exceed 4000 characters'
+echo "PASS: update manifest matches golden schema and rejects oversized notes"
+
 echo "All release APK checks passed."
