@@ -142,7 +142,7 @@ The `default` ruleset is left untouched. Integration `1144995` is identified and
 
 ### 8. Secret scanning instead of a CI secret scanner
 
-Secret scanning and push protection are enabled through the repository's `security_and_analysis` settings. Push protection rejects a secret before it is stored. Non-provider patterns remain disabled because this repository is user-owned; GitHub currently lists generic-pattern scanning as available for organization-owned repositories on GitHub Team with GitHub Secret Protection. Revisit this setting if the repository moves to an eligible organization. A CI scanner could only report a secret after it had already been pushed to a public repository.
+Secret scanning and push protection are enabled through the repository's `security_and_analysis` settings. Push protection rejects a secret before it is stored. Non-provider patterns remain disabled because this repository is user-owned; GitHub currently lists generic-pattern scanning as available for organization-owned repositories on GitHub Team with GitHub Secret Protection. The owner considers this extra coverage unnecessary for the solo project, so it is out of scope unless the project's needs change. A CI scanner could only report a secret after it had already been pushed to a public repository.
 
 ### 9. `merge-pr` version bumps through a PR
 
@@ -162,7 +162,7 @@ In both copies of the skill, the version-bump mode now creates a `chore/bump-ver
 
 1. Open the PR with the workflows, lint config and baseline, lockfiles, ruleset JSON, docs, and `merge-pr` updates. Its own `verify.yml` run must be green.
 2. Merge. Confirm the `required` check reports green on `main`.
-3. With the owner's confirmation, enable secret scanning and push protection. Enable non-provider patterns when the repository's GitHub ownership and plan are eligible; otherwise record the limitation and leave that setting pending.
+3. With the owner's confirmation, enable secret scanning and push protection. The owner considers non-provider patterns unnecessary for this solo project, so leave them disabled; reconsider only if the project's needs change and the repository becomes eligible.
 4. With the owner's confirmation, create the gate ruleset from `main-gate.json`.
 5. Check that it works:
    - open a throwaway draft PR containing a failing host test, confirm merging is refused, then close it
