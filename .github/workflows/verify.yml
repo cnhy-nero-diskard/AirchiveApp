@@ -47,6 +47,11 @@ jobs:
             :androidApp:assembleDebugAndroidTest \
             :androidApp:lintDebug
 
+      - name: Check release scripts
+        run: |
+          shellcheck scripts/release/*.sh
+          scripts/release/test-release-scripts.sh
+
       - name: Record the tested commit
         if: always()
         run: |

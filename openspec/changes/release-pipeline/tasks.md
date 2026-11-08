@@ -20,7 +20,7 @@
   - a non-debuggable APK signed with a throwaway key passes only through the test-pin function
 
   Verify it passes on the Mac.
-- [ ] 2.3 Add a step to the `build` job in `.github/workflows/verify.yml`, after assembly, that runs `shellcheck scripts/release/*.sh` and `test-release-scripts.sh`. Verify on the PR that the step runs and that a temporary broken assertion fails `required` (then revert it).
+- [x] 2.3 Add a step to the `build` job in `.github/workflows/verify.yml`, after assembly, that runs `shellcheck scripts/release/*.sh` and `test-release-scripts.sh`. Verify on the PR that the step runs and that a temporary broken assertion fails `required` (then revert it).
 
 ## 3. Mac signing setup and release script
 
