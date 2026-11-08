@@ -38,7 +38,7 @@
   - upload a draft release with asset `airchive-<versionName>-<versionCode>.apk` and notes from `--notes-file`
 
   Verify each refusal in `test-release-scripts.sh` against a temporary git repository, with `gradlew`, `security` and `gh` shimmed on `PATH`. Assert the shimmed Gradle never receives a password in its arguments.
-- [ ] 3.3 Add `release.sh --install <serial>` with the old script's protections (design §2). Verify in `test-release-scripts.sh` with a shimmed `adb`:
+- [x] 3.3 Add `release.sh --install <serial>` with the old script's protections (design §2). Verify in `test-release-scripts.sh` with a shimmed `adb`:
   - a missing serial is refused before building
   - an equal or higher installed code is refused
   - an installed APK with another signer is refused
