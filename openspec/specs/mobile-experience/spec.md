@@ -36,7 +36,7 @@ The app SHALL explain normal, anomalous, unavailable, stale, and failed conditio
 - **THEN** the UI SHALL expose a readable explanation that does not rely on color alone
 
 ### Requirement: Private Android release and iOS preparation
-The first release SHALL produce a signed Android APK that can be installed privately and updated without clearing local data. The project SHALL contain shared Kotlin Multiplatform UI/domain code and an iOS app scaffold wired to that shared code; iOS distribution and device validation are outside this first release.
+The first release SHALL produce a signed Android APK that can be installed privately and updated without clearing local data. "Installed privately" means installed directly, outside any app store; release APKs MAY be publicly downloadable from the repository's GitHub Releases, signed with the pinned Airchive release identity. The project SHALL contain shared Kotlin Multiplatform UI/domain code and an iOS app scaffold wired to that shared code; iOS distribution and device validation are outside this first release.
 
 #### Scenario: Upgrade private APK
 - **WHEN** the owner installs a newer release signed with the same release identity
