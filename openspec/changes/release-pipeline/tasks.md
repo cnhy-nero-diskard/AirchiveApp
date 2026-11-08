@@ -65,7 +65,7 @@
 
 ## 6. Owner key transfer, dry run, and Windows retirement
 
-- [ ] 6.1 Owner step: copy `airchive-release.jks` to `~/.airchive/` and run `setup-signing.sh`. Verify the printed certificate SHA-256 equals the pin, and that both Keychain items exist.
+- [x] 6.1 Owner step: copy `airchive-release.jks` to `~/.airchive/` and run `setup-signing.sh`. Verify the printed certificate SHA-256 equals the pin, and that both Keychain items exist.
 - [ ] 6.2 Owner-approved dry run:
   - merge a version-bump PR to the planned bootstrap version (code 3 or higher)
   - run `release.sh` to a draft, then `release-publish` with `dry_run=true`
