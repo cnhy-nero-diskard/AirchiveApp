@@ -2,7 +2,7 @@
 
 ## 1. Version source and build identity
 
-- [ ] 1.1 Add `config/airchive-version.properties` (`versionName=0.1.0`, `versionCode=2`) and make `androidApp/build.gradle.kts` read it through a configuration-cache-safe provider. Remove `airchive.versionCode`, and fail the build with a message naming the version file when that property is passed. Update the version section of `docs/android-release.md`. Verify:
+- [x] 1.1 Add `config/airchive-version.properties` (`versionName=0.1.0`, `versionCode=2`) and make `androidApp/build.gradle.kts` read it through a configuration-cache-safe provider. Remove `airchive.versionCode`, and fail the build with a message naming the version file when that property is passed. Update the version section of `docs/android-release.md`. Verify:
   - `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug` passes
   - `aapt dump badging` on the debug APK shows `versionCode='2' versionName='0.1.0-debug'`
   - `./gradlew :androidApp:assembleDebug -Pairchive.versionCode=9` fails and names `config/airchive-version.properties`

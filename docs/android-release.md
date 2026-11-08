@@ -111,8 +111,11 @@ Set-AirchiveSecret 'AIRCHIVE_RELEASE_STORE_PASSWORD' 'Keystore password'
 Set-AirchiveSecret 'AIRCHIVE_RELEASE_KEY_PASSWORD' 'Key password'
 ```
 
-The first signed release used version code 1. The default is now 2 for the
-same-key upgrade test. Build the signed release:
+The first signed release used version code 1. The shared version source is
+`config/airchive-version.properties`; it currently has `versionName=0.1.0` and
+`versionCode=2` for the same-key upgrade test. Change those values in a PR for
+each release. The removed `-Pairchive.versionCode` override is not supported.
+Build the signed release:
 
 ```powershell
 .\gradlew.bat --no-configuration-cache --no-daemon :androidApp:assembleRelease
@@ -154,7 +157,7 @@ the same key and install it as an update, without uninstalling:
 
 ```powershell
 .\gradlew.bat --no-configuration-cache --no-daemon `
-  :androidApp:assembleRelease -Pairchive.versionCode=2
+  :androidApp:assembleRelease
 $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 & $adb -s <phone-serial> install -r `
   androidApp\build\outputs\apk\release\androidApp-release.apk
@@ -162,8 +165,8 @@ $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 
 Verify sign-in, Room history, masked PAT status, navigation, and the supported
 profile-gated controls survive the same-signing-identity update. Do not send
-control commands without explicit values/authorization. Increment
-`airchive.versionCode` for every subsequent release build.
+control commands without explicit values/authorization. Increase `versionCode`
+in `config/airchive-version.properties` for every subsequent release build.
 
 ## Current boundary
 
