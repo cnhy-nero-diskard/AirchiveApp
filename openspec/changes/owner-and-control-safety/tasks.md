@@ -14,8 +14,8 @@
 
 ## 3. Access state during checks
 
-- [ ] 3.1 Start `rawAccessState` as `AccessPending(session)` when a session exists. Render "Checking history access…" with no sign-in button. Route `signIn()` with an existing session to the account-change confirmation. Verify with a Compose host test: a signed-in fake with `restore()` suspended shows no "Continue with Google".
-- [ ] 3.2 Publish the loop's `checkedRefresh` result to `rawAccessState`. Verify with a test where the first check fails offline, a later checked refresh succeeds, and the failure card clears with range loading re-enabled.
+- [x] 3.1 Start `rawAccessState` as `AccessPending(session)` when a session exists. Render "Checking history access…" with no sign-in button. Route `signIn()` with an existing session to the account-change confirmation. Verify with a Compose host test: a signed-in fake with `restore()` suspended shows no "Continue with Google".
+- [x] 3.2 Publish the loop's `checkedRefresh` result to `rawAccessState`. Verify with a test where the first check fails offline, a later checked refresh succeeds, and the failure card clears with range loading re-enabled.
 
 ## 4. Command send safety
 

@@ -48,7 +48,12 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
             // over fake owner/history/credential/verifier/ThinQ ports with a
             // controlled clock. This branch constructs no production Firebase,
             // Android Keystore credential or Ktor/CIO graph.
-            val fixture = SharedInstrumentShellFixture(applicationContext)
+            val fixture = SharedInstrumentShellFixture(
+                context = applicationContext,
+                initiallySignedIn = intent.getBooleanExtra("fixture_signed_in", false),
+                suspendInitialAccessCheck = intent.getBooleanExtra("fixture_suspend_access", false),
+                initialOfflineAccessCheck = intent.getBooleanExtra("fixture_offline_access", false),
+            )
             shellFixture = fixture
             setContent { fixture.Shell() }
             return

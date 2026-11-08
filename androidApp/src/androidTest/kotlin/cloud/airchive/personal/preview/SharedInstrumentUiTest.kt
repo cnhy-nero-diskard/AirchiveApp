@@ -237,9 +237,16 @@ class SharedInstrumentUiTest {
         }
     }
 
-    private fun launchShell() = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
+    private fun launchShell(
+        initiallySignedIn: Boolean = false,
+        suspendInitialAccessCheck: Boolean = false,
+        initialOfflineAccessCheck: Boolean = false,
+    ) = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
-            .putExtra("shell", true),
+            .putExtra("shell", true)
+            .putExtra("fixture_signed_in", initiallySignedIn)
+            .putExtra("fixture_suspend_access", suspendInitialAccessCheck)
+            .putExtra("fixture_offline_access", initialOfflineAccessCheck),
     )
 
     /**
@@ -396,6 +403,44 @@ class SharedInstrumentUiTest {
                 assertEquals("shell-fixture-owner-b", fixtureActivity.shellFixture!!.coordinator.session.value?.uid)
                 assertEquals(1, fixtureActivity.shellFixture!!.counters.credentialClears.get())
             }
+        }
+    }
+
+    @Test fun signedInRestoreShowsCheckingWithoutOfferingAnotherSignIn() {
+        launchShell(initiallySignedIn = true, suspendInitialAccessCheck = true).use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+
+            awaitNode { it.text?.toString() == "Checking history access…" }
+            awaitTrue("the initial restore remains suspended in the fake device-identity read") {
+                fixture.get().counters.deviceIdentityReads.get() > 0 && !fixture.get().telemetryReadGate.isOpen
+            }
+            assertTextAbsent("Continue with Google")
+            assertEquals("A restored session does not start a second account chooser", 0, fixture.get().counters.ownerSignInAttempts.get())
+        }
+    }
+
+    @Test fun checkedRefreshClearsOfflineAccessFailureAndReenablesRangeLoading() {
+        launchShell(initiallySignedIn = true, initialOfflineAccessCheck = true).use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+
+            awaitNode { it.text?.toString()?.contains("History access could not be verified yet.") == true }
+            val readsBeforeCheck = fixture.get().counters.deviceIdentityReads.get()
+            scene.onActivity {
+                it.shellFixture!!.setTelemetryFailure(null)
+                it.shellFixture!!.runCheckedRefreshForTest()
+            }
+            awaitTrue("the later checked refresh re-reads device access") {
+                fixture.get().counters.deviceIdentityReads.get() > readsBeforeCheck
+            }
+            awaitNode { it.text?.toString() == "Connect ThinQ in Settings to read and control your AC." }
+            assertTextAbsent("History access could not be verified yet.")
+
+            clickTab("Energy")
+            awaitVisibleNode { it.text?.toString() == "Offline history" }
+            val retryRange = awaitVisibleNode { it.text?.toString() == "Retry history loading" }
+            assertTrue("authorized history access enables selected-range loading", retryRange.isEnabled)
         }
     }
 

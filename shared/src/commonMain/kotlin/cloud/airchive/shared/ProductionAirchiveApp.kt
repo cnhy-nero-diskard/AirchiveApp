@@ -195,8 +195,14 @@ private fun ProductionRouteHost(
 ) {
     val session by coordinator.session.collectAsState()
     val isRefreshing by coordinator.isRefreshing.collectAsState()
-    var rawAccessState by remember(coordinator, session?.uid) { mutableStateOf<OwnerAccessState>(OwnerAccessState.SignedOut) }
+    var rawAccessState by remember(coordinator, session?.uid) {
+        mutableStateOf<OwnerAccessState>(
+            session?.let { OwnerAccessState.AccessPending(it, CHECKING_HISTORY_ACCESS_CODE) }
+                ?: OwnerAccessState.SignedOut,
+        )
+    }
     val accessState = productionAccessForSession(rawAccessState, session)
+    val checkedAccessState by coordinator.checkedAccessState.collectAsState()
     val partition = session?.let { coordinator.partitionFor(it) }
 
     val placeholderHistory = remember(coordinator) { coordinator.emptySnapshot() }
@@ -242,6 +248,19 @@ private fun ProductionRouteHost(
     // Re-check the device-read authorization whenever the owner session changes.
     LaunchedEffect(coordinator, session?.uid) {
         rawAccessState = restoreAccessAndPrepareCredential()
+    }
+
+    // Foreground/manual checked refreshes share the same access check as the
+    // initial restore. Publish their latest session-matched result so a later
+    // successful check clears the failure card and unlocks historical ranges.
+    LaunchedEffect(checkedAccessState, session?.uid) {
+        when (val checked = checkedAccessState) {
+            is OwnerAccessState.Authorized -> if (session?.uid == checked.session.uid) rawAccessState = checked
+            is OwnerAccessState.AccessPending -> if (session?.uid == checked.session.uid) rawAccessState = checked
+            is OwnerAccessState.AccessCheckFailed -> if (session?.uid == checked.session.uid) rawAccessState = checked
+            OwnerAccessState.SignedOut -> if (session == null) rawAccessState = checked
+            else -> Unit
+        }
     }
 
     // Bootstrap the initial 24h window as soon as the owner is authorized —
@@ -297,6 +316,10 @@ private fun ProductionRouteHost(
                     history = history,
                     accessState = accessState,
                     onAccessChanged = { rawAccessState = it },
+                    onRequestAccountChange = {
+                        accountController.requestChangeAccount()
+                        route = ProductionRoute.SETTINGS
+                    },
                     historySync = syncPresentation,
                     isHistorySyncing = isRefreshing,
                     nowEpochMillis = nowEpochMillis,
@@ -399,6 +422,7 @@ private fun ProductionHome(
     history: HistorySnapshot,
     accessState: OwnerAccessState,
     onAccessChanged: (OwnerAccessState) -> Unit,
+    onRequestAccountChange: () -> Unit,
     historySync: HistorySyncPresentation,
     isHistorySyncing: Boolean,
     nowEpochMillis: Long,
@@ -434,7 +458,7 @@ private fun ProductionHome(
         Text("Airchive", modifier = Modifier.semantics { heading() },
             style = MaterialTheme.typography.headlineLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         if (accessState !is OwnerAccessState.Authorized) {
-            ProductionAccessCard(coordinator, accessState, onAccessChanged, nowProvider)
+            ProductionAccessCard(coordinator, accessState, onAccessChanged, onRequestAccountChange, nowProvider)
         }
         key(history.partition) {
             ProductionHomeInstrument(history, thinQBindings, credentialState, hasSession, onOpenEnergy, onOpenSettings,
@@ -570,6 +594,7 @@ private fun ProductionAccessCard(
     coordinator: ProductionHistoryCoordinator,
     accessState: OwnerAccessState,
     onAccessChanged: (OwnerAccessState) -> Unit,
+    onRequestAccountChange: () -> Unit,
     nowProvider: () -> Long,
 ) {
     val scope = rememberCoroutineScope()
@@ -600,6 +625,14 @@ private fun ProductionAccessCard(
         }
     }
 
+    fun signInOrRequestAccountChange() {
+        if (coordinator.session.value != null) {
+            onRequestAccountChange()
+        } else {
+            runAction { coordinator.access.signIn() }
+        }
+    }
+
     SummaryCard("Airchive account & access") {
         Text(
             productionAccessMessage(accessState),
@@ -616,19 +649,27 @@ private fun ProductionAccessCard(
         when (accessState) {
             OwnerAccessState.SignedOut -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
-                onClick = { runAction { coordinator.access.signIn() } },
+                onClick = ::signInOrRequestAccountChange,
             ) {
                 Text(if (busy) "Signing in…" else "Continue with Google")
             }
 
             is OwnerAccessState.SignInFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
-                onClick = { runAction { coordinator.access.signIn() } },
+                onClick = ::signInOrRequestAccountChange,
             ) {
                 Text(if (busy) "Signing in…" else "Retry Google sign-in")
             }
 
-            is OwnerAccessState.AccessPending,
+            is OwnerAccessState.AccessPending -> if (accessState.safeErrorCode != CHECKING_HISTORY_ACCESS_CODE) {
+                Button(shape = MaterialTheme.shapes.small,
+                    enabled = !busy,
+                    onClick = { runAction { coordinator.access.retryHistoryAccess() } },
+                ) {
+                    Text(if (busy) "Checking access…" else "Retry history access")
+                }
+            }
+
             is OwnerAccessState.AccessCheckFailed -> Button(shape = MaterialTheme.shapes.small,
                 enabled = !busy,
                 onClick = { runAction { coordinator.access.retryHistoryAccess() } },
@@ -1295,14 +1336,19 @@ internal fun productionAccessMessage(access: OwnerAccessState): String = when (a
             "sign in, then check this account's history access."
     is OwnerAccessState.SignInFailed ->
         "Google sign-in did not complete (${productionSignInFailureReason(access.reason)}). You can retry when ready."
-    is OwnerAccessState.AccessPending ->
+    is OwnerAccessState.AccessPending -> if (access.safeErrorCode == CHECKING_HISTORY_ACCESS_CODE) {
+        "Checking history access…"
+    } else {
         "Signed in, but Airchive history access is pending. Sign-in alone never grants access: ask the " +
             "operator to enroll this exact account UID, then retry."
+    }
     is OwnerAccessState.AccessCheckFailed ->
         "History access could not be verified yet. Keep this account and retry the access check when ready."
     is OwnerAccessState.Authorized ->
         "History access is verified for this device. Signed-in UID: ${access.session.uid}."
 }
+
+internal const val CHECKING_HISTORY_ACCESS_CODE = "CHECKING_HISTORY_ACCESS"
 
 internal fun productionSignInFailureReason(reason: SignInFailure): String = when (reason) {
     SignInFailure.USER_CANCELLED -> "the account chooser was closed"
