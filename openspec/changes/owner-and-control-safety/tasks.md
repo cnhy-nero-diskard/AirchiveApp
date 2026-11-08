@@ -25,13 +25,13 @@
 
 ## 5. Truthful outcomes, failures, and selectors
 
-- [ ] 5.1 Make `Unconfirmed` copy failure-independent ("may have been applied", plus a fresh-read action, no retry wording). Verify with a host test over every `CommandFailure` that no retry wording appears.
-- [ ] 5.2 Carry the read-failure kind through `ThinQEntryResult` and live state, and map it to cause text and an action (token → Replace token; offline; rate limited; network), outside disclosures in both modes. Verify with host tests for a revoked token, offline, and rate limit in Simple and Detailed. Update `SharedInstrumentUiTest`'s generic read-failure assertion.
-- [ ] 5.3 When `current` is unknown or not writable, render `SteppedChoice` with no thumb position and a "not settable / unknown" label, and send only after a deliberate selection. Verify with a test `SteppedChoice(options=[LOW,HIGH], current=AUTO)` where there is no selected position and no command until LOW or HIGH is chosen.
+- [x] 5.1 Make `Unconfirmed` copy failure-independent ("may have been applied", plus a fresh-read action, no retry wording). Verify with a host test over every `CommandFailure` that no retry wording appears.
+- [x] 5.2 Carry the read-failure kind through `ThinQEntryResult` and live state, and map it to cause text and an action (token → Replace token; offline; rate limited; network), outside disclosures in both modes. Verify with host tests for a revoked token, offline, and rate limit in Simple and Detailed. Update `SharedInstrumentUiTest`'s generic read-failure assertion.
+- [x] 5.3 When `current` is unknown or not writable, render `SteppedChoice` with no thumb position and a "not settable / unknown" label, and send only after a deliberate selection. Verify with a test `SteppedChoice(options=[LOW,HIGH], current=AUTO)` where there is no selected position and no command until LOW or HIGH is chosen.
 
 ## 6. Spec-aligned temperature behaviour and suite
 
-- [ ] 6.1 Update the tests and docs that encode the old Apply wording (`docs/home-instrument-refinement.md`, `docs/shared-instrument-screens.md`, `docs/interface-detail.md`) to the one-second paused send. Keep `SharedInstrumentUiTest`'s send-after-one-second test. Verify with `grep -rn "Apply" docs/` that the only hits are unrelated.
+- [x] 6.1 Update the tests and docs that encode the old Apply wording (`docs/home-instrument-refinement.md`, `docs/shared-instrument-screens.md`, `docs/interface-detail.md`) to the one-second paused send. Keep `SharedInstrumentUiTest`'s send-after-one-second test. Verify with `grep -rn "Apply" docs/` that the only hits are unrelated.
 - [ ] 6.2 Run `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug`, then the affected `SharedInstrumentUiTest` classes in small batches on the emulator started by `scripts/test-emulator.sh start`. Verify everything is green and record counts and the commit in the PR.
 
 ## Workflow follow-up

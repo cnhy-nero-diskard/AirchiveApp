@@ -93,7 +93,12 @@ class ThinQContextCoordinatorTest {
         fixture.port.onLiveState = { throw ThinQClientException.Network }
         fixture.coordinator.refreshLiveState()
         val stale = fixture.coordinator.liveStateController.state.value
-        repeat(3) { assertEquals(ThinQEntryResult.Failed, fixture.coordinator.onDeviceOpened()) }
+        repeat(3) {
+            assertEquals(
+                ThinQEntryResult.Failed(ThinQRefreshFailureKind.NETWORK),
+                fixture.coordinator.onDeviceOpened(),
+            )
+        }
         assertEquals(stale, fixture.coordinator.liveStateController.state.value)
         assertEquals(2, fixture.port.liveCalls, "navigation must not retry a failed poll")
 
@@ -284,7 +289,10 @@ class ThinQContextCoordinatorTest {
 
         val result = fixture.coordinator.onDeviceOpened()
 
-        assertEquals(ThinQEntryResult.Unavailable, result)
+        assertEquals(
+            ThinQEntryResult.Failed(ThinQRefreshFailureKind.DEVICE_UNAVAILABLE),
+            result,
+        )
         val publication = assertNotNull(fixture.coordinator.deviceProfile.value)
         assertNull(publication.profile, "an offline device publishes identity without a verified profile")
         assertEquals(fixture.coordinator.contextKey.value, publication.contextKey)
@@ -440,13 +448,34 @@ class ThinQContextCoordinatorTest {
 
         val result = fixture.coordinator.onDeviceOpened()
 
-        assertEquals(ThinQEntryResult.Failed, result)
+        assertEquals(ThinQEntryResult.Failed(ThinQRefreshFailureKind.NETWORK), result)
         assertEquals(keyBefore, fixture.coordinator.contextKey.value, "a same-context transient failure never invalidates")
         assertNull(fixture.coordinator.deviceProfile.value, "nothing unverified is published")
         assertTrue(fixture.coordinator.liveStateController.state.value is ThinQLiveRefreshState.NotRead)
         assertEquals(1, fixture.port.listCalls)
         assertEquals(0, fixture.port.profileCalls, "no profile request follows a failed list request")
         assertEquals(0, fixture.port.liveCalls)
+    }
+
+    @Test
+    fun deviceEntryPreservesTypedRemoteReadFailureKinds() = runBlocking {
+        val cases = listOf(
+            ThinQRemoteError.InvalidToken to ThinQRefreshFailureKind.INVALID_TOKEN,
+            ThinQRemoteError.DeviceUnavailable to ThinQRefreshFailureKind.DEVICE_UNAVAILABLE,
+            ThinQRemoteError.RateLimited to ThinQRefreshFailureKind.RATE_LIMITED,
+        )
+        for ((remoteError, expectedKind) in cases) {
+            val fixture = Fixture()
+            fixture.seedCredential()
+            fixture.port.onListDevices = {
+                throw ThinQClientException.RemoteFailure(remoteError)
+            }
+
+            val result = fixture.coordinator.onDeviceOpened()
+
+            assertEquals(ThinQEntryResult.Failed(expectedKind), result)
+            assertEquals(ThinQLiveRefreshState.NotRead, fixture.coordinator.liveStateController.state.value)
+        }
     }
 
     @Test
@@ -463,9 +492,10 @@ class ThinQContextCoordinatorTest {
 
         val result = fixture.coordinator.refreshDeviceProfile()
 
-        assertEquals(ThinQEntryResult.Failed, result)
+        assertEquals(ThinQEntryResult.Failed(ThinQRefreshFailureKind.NETWORK), result)
         assertEquals(keyBefore, fixture.coordinator.contextKey.value, "a same-context failure never invalidates")
         val stale = assertIs<ThinQLiveRefreshState.Stale>(fixture.coordinator.liveStateController.state.value)
+        assertEquals(ThinQRefreshFailureKind.NETWORK, stale.errorKind)
         assertEquals(oldReading, stale.lastKnownState, "the prior reading is retained and labeled old, not republished as current")
         assertFalse(stale.canIssueCommands, "commands stay disabled after the failed read")
         assertEquals(
@@ -494,10 +524,11 @@ class ThinQContextCoordinatorTest {
         fixture.port.onLiveState = { throw ThinQClientException.Network }
         val result = fixture.coordinator.onDeviceOpened()
 
-        assertEquals(ThinQEntryResult.Failed, result)
+        assertEquals(ThinQEntryResult.Failed(ThinQRefreshFailureKind.NETWORK), result)
         assertEquals(newKey, fixture.coordinator.contextKey.value, "a failed read never invalidates again")
         // Unavailable (not Stale) proves no pre-replacement reading was retained.
         val live = assertIs<ThinQLiveRefreshState.Unavailable>(fixture.coordinator.liveStateController.state.value)
+        assertEquals(ThinQRefreshFailureKind.NETWORK, live.errorKind)
         assertFalse(live.canIssueCommands, "an unavailable state never enables commands")
         assertEquals(
             newKey,

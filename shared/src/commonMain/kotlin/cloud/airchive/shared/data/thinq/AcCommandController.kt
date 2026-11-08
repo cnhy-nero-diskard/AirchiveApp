@@ -480,11 +480,7 @@ sealed interface AcCommandUiState {
     /** The port rejected the command with a stable, secret-free [CommandFailure]. */
     data class Failed(val outcome: CommandOutcome) : AcCommandUiState
 
-    /**
-     * The command may or may not have taken effect (timeout, network ambiguity,
-     * cancellation, or a non-matching fresh state read). Never auto-resent;
-     * the owner is asked to refresh state before acting again.
-     */
+    /** The command may have taken effect, but a fresh state read did not confirm it. */
     data class Unconfirmed(val outcome: CommandOutcome) : AcCommandUiState
 }
 

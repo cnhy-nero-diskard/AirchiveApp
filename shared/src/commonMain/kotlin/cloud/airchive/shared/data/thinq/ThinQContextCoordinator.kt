@@ -234,7 +234,8 @@ class ThinQContextCoordinator(
             val result = when (retainedLive) {
                 is ThinQLiveRefreshState.Current ->
                     if (retainedLive.state.deviceId == configuredDeviceId) ThinQEntryResult.Success else null
-                is ThinQLiveRefreshState.Stale, is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed
+                is ThinQLiveRefreshState.Stale -> ThinQEntryResult.Failed(retainedLive.errorKind)
+                is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed(retainedLive.errorKind)
                 is ThinQLiveRefreshState.Loading -> ThinQEntryResult.Unavailable
                 ThinQLiveRefreshState.NotRead -> null
             }
@@ -253,9 +254,11 @@ class ThinQContextCoordinator(
             } ?: return ThinQEntryResult.Superseded
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             clearDeviceProfileIfCurrent(captured)
-            return if (lifecycle.isCurrent(captured)) ThinQEntryResult.Failed else ThinQEntryResult.Superseded
+            return if (lifecycle.isCurrent(captured)) {
+                ThinQEntryResult.Failed(classifyRefreshFailure(failure))
+            } else ThinQEntryResult.Superseded
         }
         if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
 
@@ -275,36 +278,36 @@ class ThinQContextCoordinator(
                 operationPort.listDevices().firstOrNull { it.deviceId == configuredDeviceId }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 // The UI sees no verified capability and the live controller's
                 // safe error classification; raw LG/exception text is omitted.
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Failed
+                return ThinQEntryResult.Failed(classifyRefreshFailure(failure))
             }
             if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
             if (device == null) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.WRONG_ACCOUNT)
             }
             if (device.online == false) {
                 if (!publishDeviceProfile(captured, device, profile = null)) {
                     return ThinQEntryResult.Superseded
                 }
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.DEVICE_UNAVAILABLE)
             }
 
             val profile = try {
                 operationPort.profile(configuredDeviceId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Failed
+                return ThinQEntryResult.Failed(classifyRefreshFailure(failure))
             }
             if (!lifecycle.isCurrent(captured)) return ThinQEntryResult.Superseded
             if (profile.deviceId != configuredDeviceId) {
                 clearDeviceProfileIfCurrent(captured)
-                return ThinQEntryResult.Unavailable
+                return ThinQEntryResult.Failed(ThinQRefreshFailureKind.WRONG_ACCOUNT)
             }
             if (!publishDeviceProfile(captured, device, profile)) {
                 return ThinQEntryResult.Superseded
@@ -328,9 +331,8 @@ class ThinQContextCoordinator(
                 live.state.deviceId == verifiedProfile.deviceId ->
                 ThinQEntryResult.Success
 
-            live is ThinQLiveRefreshState.Stale ||
-                live is ThinQLiveRefreshState.Unavailable ->
-                ThinQEntryResult.Failed
+            live is ThinQLiveRefreshState.Stale -> ThinQEntryResult.Failed(live.errorKind)
+            live is ThinQLiveRefreshState.Unavailable -> ThinQEntryResult.Failed(live.errorKind)
 
             else -> ThinQEntryResult.Unavailable
         }

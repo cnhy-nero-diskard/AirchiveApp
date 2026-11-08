@@ -277,6 +277,10 @@ class SharedInstrumentShellFixture(
         thinQ.setReadFailure(failure)
     }
 
+    fun setThinQReadFailureKind(failure: cloud.airchive.shared.data.thinq.ThinQReadFailure?) {
+        thinQ.setReadFailure(failure)
+    }
+
     /** Replaces only the synthetic client's verified profile for task-3.2 journeys. */
     fun setThinQProfileForTest(profile: ThinQDeviceProfile) {
         thinQ.setProfile(profile)
@@ -652,6 +656,12 @@ private class CountingThinQClient(
         val fake = delegate as? FakeThinQClient
             ?: error("The fixture ThinQ client is not the expected fake")
         fake.failReadsWith = failure
+    }
+
+    fun setReadFailure(failure: cloud.airchive.shared.data.thinq.ThinQReadFailure?) {
+        val fake = delegate as? FakeThinQClient
+            ?: error("The fixture ThinQ client is not the expected fake")
+        fake.setReadFailure(failure)
     }
 
     fun setProfile(profile: ThinQDeviceProfile) {

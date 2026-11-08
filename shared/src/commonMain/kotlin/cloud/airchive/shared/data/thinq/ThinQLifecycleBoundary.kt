@@ -63,8 +63,10 @@ sealed interface ThinQEntryResult {
     /** No LG request was possible or the configured device/profile was unavailable. */
     data object Unavailable : ThinQEntryResult
 
-    /** The list/profile/live network work failed inside the still-unchanged context. */
-    data object Failed : ThinQEntryResult
+    /** Read failed inside the still-unchanged context with a stable, secret-free cause. */
+    data class Failed(
+        val failureKind: ThinQRefreshFailureKind = ThinQRefreshFailureKind.UNKNOWN,
+    ) : ThinQEntryResult
 
     /** The lifecycle context changed while the read ran; nothing was published for it. */
     data object Superseded : ThinQEntryResult

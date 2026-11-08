@@ -13,6 +13,9 @@ import cloud.airchive.shared.contract.thinq.ThinQDevice
 import cloud.airchive.shared.contract.thinq.ThinQDeviceProfile
 import cloud.airchive.shared.contract.thinq.ThinQLiveState
 import cloud.airchive.shared.contract.thinq.ThinQPort
+import cloud.airchive.shared.data.thinq.ThinQClientException
+import cloud.airchive.shared.data.thinq.ThinQReadFailure
+import cloud.airchive.shared.data.thinq.ThinQRemoteError
 
 /**
  * Deterministic, in-memory LG/ThinQ client for one fake AC. No live LG account
@@ -36,6 +39,21 @@ class FakeThinQClient(
 
     /** Synthetic read-failure injection for isolated production-shell tests. */
     var failReadsWith: Throwable? = null
+
+    /** Injects a classified remote-read failure without constructing an LG payload. */
+    fun setReadFailure(failure: ThinQReadFailure?) {
+        failReadsWith = when (failure) {
+            null -> null
+            ThinQReadFailure.INVALID_TOKEN -> ThinQClientException.RemoteFailure(ThinQRemoteError.InvalidToken)
+            ThinQReadFailure.WRONG_ACCOUNT -> ThinQClientException.RemoteFailure(ThinQRemoteError.WrongAccount)
+            ThinQReadFailure.DEVICE_UNAVAILABLE -> ThinQClientException.RemoteFailure(ThinQRemoteError.DeviceUnavailable)
+            ThinQReadFailure.RATE_LIMITED -> ThinQClientException.RemoteFailure(ThinQRemoteError.RateLimited)
+            ThinQReadFailure.NO_CONTROL_AUTHORITY -> ThinQClientException.RemoteFailure(ThinQRemoteError.NoControlAuthority)
+            ThinQReadFailure.TRANSIENT -> ThinQClientException.RemoteFailure(ThinQRemoteError.Transient)
+            ThinQReadFailure.INVALID_REQUEST -> ThinQClientException.RemoteFailure(ThinQRemoteError.InvalidRequest)
+            ThinQReadFailure.UNKNOWN -> ThinQClientException.RemoteFailure(ThinQRemoteError.MalformedOrUnknown)
+        }
+    }
 
     /** When `false`, markup the accepted command as pending without confirming. */
     var verifyAfterAccept: Boolean = true

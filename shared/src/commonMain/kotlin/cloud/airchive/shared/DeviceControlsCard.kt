@@ -556,7 +556,15 @@ internal fun AcCommandUiState.feedbackText(simulated: Boolean): String? = when (
         "${outcome.command.commandLabel()} confirmed${if (simulated) " (demo)" else ""}."
 
     is AcCommandUiState.Failed -> failureText(outcome.failure, simulated)
-    is AcCommandUiState.Unconfirmed -> failureText(outcome.failure, simulated)
+    is AcCommandUiState.Unconfirmed -> unconfirmedText(simulated)
+}
+
+private fun unconfirmedText(simulated: Boolean): String = if (simulated) {
+    "The demo command may have been applied, but the device did not confirm the change. " +
+        "Refresh simulated state to check."
+} else {
+    "The command may have been applied, but the AC did not confirm the change. " +
+        "Read current device state to check."
 }
 
 private fun failureText(failure: CommandFailure?, simulated: Boolean): String {

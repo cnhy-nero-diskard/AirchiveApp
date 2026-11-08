@@ -33,9 +33,17 @@ class SharedInstrumentUiTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val uiDevice by lazy { UiDevice.getInstance(instrumentation) }
 
-    private fun launch(dark: Boolean = false, stale: Boolean = false, route: Int = 0, detail: String? = "simple") = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
+    private fun launch(
+        dark: Boolean = false,
+        stale: Boolean = false,
+        route: Int = 0,
+        detail: String? = "simple",
+        unknownFan: Boolean = false,
+    ) = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
-            .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route).apply { if (detail != null) putExtra("detail", detail) },
+            .putExtra("dark", dark).putExtra("stale", stale).putExtra("route", route)
+            .putExtra("unknown_fan", unknownFan)
+            .apply { if (detail != null) putExtra("detail", detail) },
     )
 
     @Test fun homePullRefreshFetchesAgainAndDetailsRemainReadable() {
@@ -909,6 +917,36 @@ class SharedInstrumentUiTest {
         }
     }
 
+    @Test fun unknownSelectorHasNoThumbAndSendsOnlyAfterAChoice() {
+        launch(unknownFan = true).use { scene ->
+            val slider = awaitVisibleNode {
+                it.contentDescription?.toString()?.startsWith("Fan speed selection.") == true
+            }
+            assertEquals("Current AUTO; not settable here", slider.stateDescription?.toString())
+            assertEquals("Current AUTO · not settable here", awaitVisibleNode {
+                it.text?.toString() == "Current AUTO · not settable here"
+            }.text?.toString())
+            assertEquals("no option is selected before the user chooses one", 0.5f, slider.rangeInfo.current, 0.01f)
+            scene.onActivity { assertEquals("the unknown value sends no command", 0, it.submittedCommands) }
+
+            assertTrue(
+                slider.performAction(
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id,
+                    Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 0f) },
+                ),
+            )
+            awaitTrue("choosing LOW deliberately sends exactly one command") {
+                var count = 0
+                scene.onActivity { count = it.submittedCommands }
+                count == 1
+            }
+            scene.onActivity {
+                val command = it.lastSubmittedCommand as cloud.airchive.shared.contract.thinq.AcCommand.SetFanSpeed
+                assertEquals(cloud.airchive.shared.contract.thinq.FanSpeed.LOW, command.speed)
+            }
+        }
+    }
+
     @Test fun acceptedCommandRemainsUnconfirmedWithoutAutomaticRetry() {
         clearFixturePreferences()
         launchShell().use { scene ->
@@ -965,7 +1003,7 @@ class SharedInstrumentUiTest {
                 fixture.get().thinQContext.commandController.state.value is
                     cloud.airchive.shared.data.thinq.AcCommandUiState.Unconfirmed
             }
-            awaitVisibleNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("may have been applied") == true }
             assertEquals(1, fixture.get().counters.thinQCommandSubmissions.get())
 
             clickTab("Device")
@@ -975,7 +1013,7 @@ class SharedInstrumentUiTest {
             awaitTrue("the owner can explicitly refresh after an unconfirmed command") {
                 fixture.get().counters.thinQLiveStateReads.get() > liveReadsBeforeRefresh
             }
-            awaitVisibleNode { it.text?.toString()?.contains("Nothing was automatically resent") == true }
+            awaitVisibleNode { it.text?.toString()?.contains("may have been applied") == true }
             assertEquals("the explicit recovery action reads state but never resubmits", 1,
                 fixture.get().counters.thinQCommandSubmissions.get())
         }
@@ -1532,12 +1570,12 @@ class SharedInstrumentUiTest {
 
             val fixture = AtomicReference<SharedInstrumentShellFixture>()
             scene.onActivity { fixture.set(it.shellFixture!!) }
-            fixture.get().setThinQReadFailure(IllegalStateException("synthetic fake read failure"))
+            fixture.get().setThinQReadFailure(cloud.airchive.shared.data.thinq.ThinQClientException.Network)
             clickText("Device")
             // Opening Device is presentation-only once the context has read (ThinQContextCoordinator
             // performDeviceEntry); only the explicit refresh control performs a new read.
             clickText("Refresh device state")
-            awaitVisibleNode { it.text?.toString() == "The device read failed. Check the connection and retry." }
+            awaitVisibleNode { it.text?.toString() == "Could not reach ThinQ. Check your connection, then refresh device state." }
             assertFalse(accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow).contains("Current power consumption as of "))
             assertFalse(awaitNode { it.contentDescription?.toString() == "Increase target temperature" }.isEnabled)
 
@@ -1548,7 +1586,7 @@ class SharedInstrumentUiTest {
                     it.contentDescription?.toString() == "Increase target temperature"
                 }?.isEnabled == true
             }
-            assertTextAbsent("The device read failed. Check the connection and retry.")
+            assertTextAbsent("Could not reach ThinQ. Check your connection, then refresh device state.")
             assertTextPresent("Set temperature")
             assertTextAbsent("Apply")
             assertTextPresent("Mode")
@@ -1586,6 +1624,74 @@ class SharedInstrumentUiTest {
             assertTextPresent("History and storage")
             assertTextPresent("Google account")
             assertEquals(0, fixture.get().counters.thinQCommandSubmissions.get())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun typedDeviceReadFailuresShowCauseAndRecoveryInBothInterfaceModes() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            prepareConfiguredShell(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+
+            val cases: List<Triple<(SharedInstrumentShellFixture) -> Unit, String, String>> = listOf(
+                Triple(
+                    { it.setThinQReadFailureKind(cloud.airchive.shared.data.thinq.ThinQReadFailure.DEVICE_UNAVAILABLE) },
+                    "The AC is offline or unavailable. Check its power and network, then refresh device state.",
+                    "Refresh device state",
+                ),
+                Triple(
+                    { it.setThinQReadFailureKind(cloud.airchive.shared.data.thinq.ThinQReadFailure.RATE_LIMITED) },
+                    "ThinQ is rate-limiting device reads. Wait before refreshing.",
+                    "Refresh device state",
+                ),
+                Triple(
+                    { it.setThinQReadFailure(cloud.airchive.shared.data.thinq.ThinQClientException.Network) },
+                    "Could not reach ThinQ. Check your connection, then refresh device state.",
+                    "Refresh device state",
+                ),
+                Triple(
+                    { it.setThinQReadFailureKind(cloud.airchive.shared.data.thinq.ThinQReadFailure.INVALID_TOKEN) },
+                    "ThinQ rejected this token. Replace the ThinQ PAT to restore device access.",
+                    "Replace token",
+                ),
+            )
+
+            for (detail in listOf(cloud.airchive.shared.InterfaceDetail.SIMPLE, cloud.airchive.shared.InterfaceDetail.DETAILED)) {
+                scene.onActivity { fixture.get().interfacePreferences.select(detail) }
+                for ((inject, message, action) in cases.dropLast(1)) {
+                    inject(fixture.get())
+                    clickTab("Device")
+                    clickText("Refresh device state")
+                    awaitVisibleNode { it.text?.toString() == message }
+                    awaitVisibleNode { it.text?.toString() == action }
+                    assertFalse(
+                        accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow)
+                            .contains("synthetic fake read failure"),
+                    )
+
+                    fixture.get().setThinQReadFailureKind(null)
+                    fixture.get().setThinQReadFailure(null)
+                    clickText("Refresh device state")
+                    awaitTrue("clearing the injected failure restores the verified controls") {
+                        find(instrumentation.uiAutomation.rootInActiveWindow) {
+                            it.contentDescription?.toString() == "Increase target temperature"
+                        }?.isEnabled == true
+                    }
+                }
+            }
+
+            val tokenFailure = cases.last()
+            scene.onActivity { fixture.get().interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.SIMPLE) }
+            tokenFailure.first(fixture.get())
+            clickTab("Device")
+            clickText("Refresh device state")
+            awaitVisibleNode { it.text?.toString() == tokenFailure.second }
+            awaitVisibleNode { it.text?.toString() == tokenFailure.third }
+            scene.onActivity { fixture.get().interfacePreferences.select(cloud.airchive.shared.InterfaceDetail.DETAILED) }
+            awaitVisibleNode { it.text?.toString() == tokenFailure.second }
+            awaitVisibleNode { it.text?.toString() == tokenFailure.third }
         }
         clearFixturePreferences()
     }
