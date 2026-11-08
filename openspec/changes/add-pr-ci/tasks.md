@@ -29,7 +29,7 @@
 
 ## 3. Advisory instrumentation and code scanning
 
-- [ ] 3.1 Add the instrumentation summary script, which reads JUnit XML, writes executed/passed/failed/skipped counts to the job summary, and exits non-zero on any failure or zero executed tests. Verify it against fixture XML files for these cases:
+- [x] 3.1 Add the instrumentation summary script, which reads JUnit XML, writes executed/passed/failed/skipped counts to the job summary, and exits non-zero on any failure or zero executed tests. Verify it against fixture XML files for these cases:
   - all passed
   - one failure
   - live tests skipped
@@ -39,7 +39,7 @@
   - reports both `Live*VerificationTest` classes as skipped
   - passes every batch, or names each failing test
   - uploads JUnit XML and logcat
-- [ ] 3.3 Document the batch list and the promotion rule (seven consecutive green scheduled runs) in `docs/ci.md`. Verify that every `androidTest` class appears in exactly one batch.
+- [x] 3.3 Document the batch list and the promotion rule (seven consecutive green scheduled runs) in `docs/ci.md`. Verify that every `androidTest` class appears in exactly one batch.
 - [ ] 3.4 Add `.github/workflows/codeql.yml` (design §6): `java-kotlin` with a manual `assembleDebug` build, `security-events: write` as the only write, and runs on pull requests, `main`, and weekly. It is not part of `required`. Verify a run completes, and record in `docs/ci.md` whether Kotlin extraction was complete.
 
 ## 4. Gate definition, tooling, and docs
