@@ -81,9 +81,11 @@ follow-up change can promote instrumentation to a pre-merge check.
 
 `codeql.yml` is an advisory Kotlin and Java scan on pull requests, `main`, and
 a weekly schedule. It is not part of the `required` merge check. Its manual
-`assembleDebug` build supports Kotlin source extraction. The first attempt failed
-before build and extraction because Gradle distribution downloads returned HTTP 504;
-Kotlin extraction is therefore still unverified.
+`assembleDebug` build supports Kotlin source extraction. The successful run on
+2026-11-08 compiled `:shared:compileAndroidMain` and
+`:androidApp:compileDebugKotlin` under CodeQL's Java/Kotlin tracer, and analysis
+completed without extraction errors. Kotlin extraction is complete for the
+Android debug build.
 
 ## Repository gate and emergency procedure
 

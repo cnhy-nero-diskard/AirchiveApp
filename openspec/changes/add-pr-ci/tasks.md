@@ -18,7 +18,7 @@
 - [x] 2.2 Add the `dependencies` job: OSV-Scanner over the lockfiles, failing on high or critical advisories, with a committed exceptions config that requires a reason and expiry for each entry. Verify:
   - the job passes on the branch
   - a temporary lockfile entry pinned to a version with a known critical advisory fails it and names the advisory ID (then revert it)
-- [ ] 2.3 Add the `required` job (`needs: [build, dependencies]`, `if: always()`, which fails unless every result is `success`). Verify with temporary commits, each reverted:
+- [x] 2.3 Add the `required` job (`needs: [build, dependencies]`, `if: always()`, which fails unless every result is `success`). Verify with temporary commits, each reverted:
   - a failing host test makes `required` fail
   - a covered job forced to skip makes `required` fail
   - a documentation-only change still produces the `required` check
@@ -40,7 +40,7 @@
   - passes every batch, or names each failing test
   - uploads JUnit XML and logcat
 - [x] 3.3 Document the batch list and the promotion rule (seven consecutive green scheduled runs) in `docs/ci.md`. Verify that every `androidTest` class appears in exactly one batch.
-- [ ] 3.4 Add `.github/workflows/codeql.yml` (design §6): `java-kotlin` with a manual `assembleDebug` build, `security-events: write` as the only write, and runs on pull requests, `main`, and weekly. It is not part of `required`. Verify a run completes, and record in `docs/ci.md` whether Kotlin extraction was complete.
+- [x] 3.4 Add `.github/workflows/codeql.yml` (design §6): `java-kotlin` with a manual `assembleDebug` build, `security-events: write` as the only write, and runs on pull requests, `main`, and weekly. It is not part of `required`. Verify a run completes, and record in `docs/ci.md` whether Kotlin extraction was complete.
 
 ## 4. Gate definition, tooling, and docs
 
