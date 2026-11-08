@@ -48,7 +48,7 @@
 
 ## 4. Manifest and publication workflow
 
-- [ ] 4.1 Add `scripts/release/make-manifest.sh` that writes the design §7 schema-version-1 `update.json` from the APK, tag, commit, publish time and release body. It fails on notes over 4000 characters and never emits `minSupportedVersionCode`. Verify in `test-release-scripts.sh` against a golden file, with an oversized-notes case and a check that the APK URL uses `releases/download/v<versionName>/`.
+- [x] 4.1 Add `scripts/release/make-manifest.sh` that writes the design §7 schema-version-1 `update.json` from the APK, tag, commit, publish time and release body. It fails on notes over 4000 characters and never emits `minSupportedVersionCode`. Verify in `test-release-scripts.sh` against a golden file, with an oversized-notes case and a check that the APK URL uses `releases/download/v<versionName>/`.
 - [ ] 4.2 Add `.github/workflows/release-publish.yml` per design §6:
   - `workflow_dispatch` with inputs `tag` and `dry_run` (default `true`)
   - `environment: release`, `contents: write`, SHA-pinned actions, no `secrets.` references
