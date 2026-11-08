@@ -89,11 +89,13 @@ Android debug build.
 
 ## Repository gate and emergency procedure
 
-The `main-gate.json` ruleset requires a pull request and the `required` check
-with zero approvals and no bypass actors. The existing `default` ruleset is
-unchanged. Integration `1144995` is the OpenAI **ChatGPT Codex Connector**
-(`chatgpt-codex-connector`) installation identified on the existing ruleset; it
-is not a bypass actor on the new gate.
+The `main-gate.json` ruleset targets the default branch through GitHub's
+REST API ref selector (`target: "branch"` with
+`conditions.ref_name.include: ["~DEFAULT_BRANCH"]`). It requires a pull request
+and the `required` check with zero approvals and no bypass actors. The existing
+`default` ruleset is unchanged. Integration `1144995` is the OpenAI
+**ChatGPT Codex Connector** (`chatgpt-codex-connector`) installation identified
+on the existing ruleset; it is not a bypass actor on the new gate.
 
 If verification must be bypassed during an outage, disable the `main` gate
 ruleset, land the change through a pull request, then re-enable the ruleset.

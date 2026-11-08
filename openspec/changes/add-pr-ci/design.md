@@ -127,8 +127,12 @@ firebase emulators:exec --config firebase.test.json --project demo-airchive-tele
 
 ### 7. The gate ruleset
 
-`.github/rulesets/main-gate.json` is reviewed in the PR and applied with `gh api --method POST repos/cnhy-nero-diskard/AirchiveApp/rulesets --input …`. It defines:
-- target `~DEFAULT_BRANCH`, enforcement `active`, `bypass_actors: []`
+`.github/rulesets/main-gate.json` is reviewed in the PR and applied with
+`gh api --method POST repos/cnhy-nero-diskard/AirchiveApp/rulesets --input …`.
+It uses the GitHub REST API payload shape: `target: "branch"`, with
+`conditions.ref_name.include: ["~DEFAULT_BRANCH"]` to target only the current
+default branch. It defines:
+- enforcement `active`, `bypass_actors: []`
 - `pull_request` with 0 required approvals and no code-owner, last-push, or thread-resolution requirements
 - `required_status_checks` with `strict_required_status_checks_policy: false` and the single context `required`, restricted to `integration_id: 15368` (GitHub Actions), so no other app can satisfy the check by posting a status with the same name
 

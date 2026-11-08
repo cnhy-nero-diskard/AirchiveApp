@@ -57,6 +57,12 @@ jobs:
             exit 1
           fi
 
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Run Firebase-backed Android instrumentation batches
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -70,9 +76,7 @@ jobs:
           disable-animations: true
           disable-spellchecker: true
           disable-linux-hw-accel: false
-          script: |
-            firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller \
-              --only auth,firestore "bash scripts/ci/run_instrumentation_batches.sh"
+          script: firebase emulators:exec --config firebase.test.json --project demo-airchive-telemetry-poller --only auth,firestore "bash scripts/ci/run_instrumentation_batches.sh"
 
       - name: Summarize instrumentation results
         if: always()
