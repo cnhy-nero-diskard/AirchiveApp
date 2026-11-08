@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="LiveTestAssumptions" tests="3" failures="0" errors="0" skipped="2">
+  <testcase classname="cloud.airchive.LocalEmulatorTest" name="readsEmulatorData"/>
+  <testcase classname="cloud.airchive.LiveOwnerAccessVerificationTest" name="verifiesLiveOwnerAccess">
+    <skipped message="live verification is opt-in"/>
+  </testcase>
+  <testcase classname="cloud.airchive.LiveHistoryCacheVerificationTest" name="verifiesLiveHistory">
+    <skipped message="live verification is opt-in"/>
+  </testcase>
+</testsuite>

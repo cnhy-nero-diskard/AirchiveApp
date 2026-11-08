@@ -1,0 +1,118 @@
+name: verify
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Temurin 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install Android SDK platform and build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platforms;android-36' \
+            'build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Run host tests, debug assembly, and lint
+        run: |
+          ./gradlew --continue \
+            :shared:testAndroidHostTest \
+            :androidApp:assembleDebug \
+            :androidApp:assembleDebugAndroidTest \
+            :androidApp:lintDebug
+
+      - name: Record the tested commit
+        if: always()
+        run: |
+          printf 'Tested commit: `%s`\n\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-${{ github.sha }}
+          path: |
+            shared/build/test-results/testAndroidHostTest/**
+            shared/build/reports/tests/testAndroidHostTest/**
+            androidApp/build/reports/lint-results-debug.html
+            androidApp/build/reports/lint-results-debug.xml
+            androidApp/build/reports/lint-results-debug.sarif
+          if-no-files-found: error
+          retention-days: 14
+
+  dependencies:
+    name: dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate OSV exceptions
+        run: python3 scripts/ci/osv_policy.py validate-exceptions osv-scanner.toml
+
+      - name: Scan Gradle lockfiles with OSV-Scanner
+        id: osv_scan
+        uses: google/osv-scanner-action/osv-scanner-action@0a65f82af05cd58cf587827b0bb0489548c18346 # v2.7.0
+        with:
+          scan-args: |-
+            --config=osv-scanner.toml
+            --format=json
+            --output-file=osv-results.json
+            --all-vulns
+            --lockfile=shared/gradle.lockfile
+            --lockfile=androidApp/gradle.lockfile
+        continue-on-error: true
+
+      - name: Enforce the high and critical advisory threshold
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 scripts/ci/osv_policy.py check-results osv-results.json
+          --scan-outcome '${{ steps.osv_scan.outcome }}'
+
+  required:
+    name: required
+    needs: [build, dependencies]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report verification results
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
+        run: |
+          {
+            printf 'Build: `%s`\n' "$BUILD_RESULT"
+            printf 'Dependencies: `%s`\n' "$DEPENDENCIES_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$BUILD_RESULT" != "success" || "$DEPENDENCIES_RESULT" != "success" ]]; then
+            echo 'Required verification failed because at least one covered job did not succeed.' >&2
+            exit 1
+          fi

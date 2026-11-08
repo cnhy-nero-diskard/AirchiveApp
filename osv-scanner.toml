@@ -1,0 +1,3 @@
+# Advisory exceptions go here only when needed. The CI policy requires each
+# [[IgnoredVulns]] entry to include an ID, a reason, and a future ignoreUntil date.
+IgnoredVulns = []
