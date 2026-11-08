@@ -124,3 +124,4 @@ published, rather than only on this repository's contents:
 - `AndroidGradlePluginVersion` checks whether a newer AGP release is available.
   AGP is pinned in the version catalog, so this check would make lint depend on
   release timing instead of the repository state.
+<!-- temporary required-check docs-only probe -->
