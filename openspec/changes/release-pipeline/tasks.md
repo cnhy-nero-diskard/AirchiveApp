@@ -66,13 +66,16 @@
 ## 6. Owner key transfer, dry run, and Windows retirement
 
 - [x] 6.1 Owner step: copy `airchive-release.jks` to `~/.airchive/` and run `setup-signing.sh`. Verify the printed certificate SHA-256 equals the pin, and that both Keychain items exist.
-- [ ] 6.2 Owner-approved dry run:
+- [x] 6.2 Owner-approved dry run:
   - merge a version-bump PR to the planned bootstrap version (code 3 or higher)
   - run `release.sh` to a draft, then `release-publish` with `dry_run=true`
   - record the manifest artifact and the actual download redirect chain in the PR
 
   Then delete the draft and the tag. Verify the manifest's SHA-256 and size match the draft APK, and that `gh release list` shows no published release.
-- [ ] 6.3 After 6.2 passes, remove `scripts/release/*.ps1` and any remaining Windows references in docs. Verify that `ls scripts/release` lists only the bash scripts and that `grep -rn 'Invoke-AirchiveRelease\|Setup-AirchiveSigning\|Test-ReleaseAutomation' --exclude-dir=openspec .` returns nothing.
+
+  Evidence: bootstrap PR #19 merged at `928ed8a`; dry-run workflow [42494976910](https://github.com/cnhy-nero-diskard/AirchiveApp/actions/runs/42494976910) succeeded and produced artifact `update-manifest-v0.2.0` (612 bytes). Its manifest reports version `0.2.0`, code `3`, commit `928ed8a464b69912a92e1135062e58930e1a570e`, APK SHA-256 `b67fd58af328ebda8e978da6ef91a0e8b44feaeec9b4e93c1aef7eed6927488c`, and size `21011935` bytes, matching the draft APK. The authenticated asset API returned HTTP 302 to `release-assets.githubusercontent.com`, which returned HTTP 200. The public versioned URL returned 404 while the release was a draft. The draft release and `v0.2.0` tag were then deleted; `gh release list` and `git ls-remote --tags origin refs/tags/v0.2.0` showed no remaining release or tag.
+
+- [x] 6.3 After 6.2 passes, remove `scripts/release/*.ps1` and any remaining Windows references in docs. Verify that `ls scripts/release` lists only the bash scripts and that `grep -rn 'Invoke-AirchiveRelease\|Setup-AirchiveSigning\|Test-ReleaseAutomation' --exclude-dir=openspec .` returns nothing.
 
 ## Workflow follow-up
 
