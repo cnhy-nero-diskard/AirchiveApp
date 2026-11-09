@@ -129,6 +129,11 @@ class AndroidAppUpdateDownloader(
             ?: 0
     }
 
+    fun deleteDownloadedApk(versionCode: Long): Boolean {
+        val completedFile = File(updatesDirectory, "$versionCode.apk")
+        return !completedFile.exists() || completedFile.delete()
+    }
+
     private fun ByteArray.toHexString(): String = buildString(size * 2) {
         for (byte in this@toHexString) {
             val value = byte.toInt() and 0xff

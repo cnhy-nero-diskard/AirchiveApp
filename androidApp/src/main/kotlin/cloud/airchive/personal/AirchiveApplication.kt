@@ -6,6 +6,7 @@ import cloud.airchive.personal.data.credentials.AndroidEncryptedThinQCredentialS
 import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
 import cloud.airchive.shared.data.update.AndroidAppUpdateDownloader
+import cloud.airchive.shared.data.update.AndroidAppUpdateVerifier
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateService
 import cloud.airchive.shared.data.update.createAndroidAppUpdateHttpClient
@@ -64,8 +65,14 @@ class AirchiveApplication : Application() {
                     cacheDirectory = cacheDir,
                     availableBytes = { StatFs(cacheDir.absolutePath).availableBytes },
                 )
+                val verifier = AndroidAppUpdateVerifier(
+                    context = applicationContext,
+                    expectedPackageName = BuildConfig.APPLICATION_ID,
+                    installedVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                    pinnedSignerSha256 = BuildConfig.AIRCHIVE_APP_UPDATE_SIGNER_SHA256,
+                )
                 downloader.cleanupPartialFiles()
-                val downloadController = AndroidAppUpdateDownloadController(service, downloader, appUpdateScope)
+                val downloadController = AndroidAppUpdateDownloadController(service, downloader, verifier, appUpdateScope)
                 AppUpdateBindings(
                     service = service,
                     preferences = preferences,

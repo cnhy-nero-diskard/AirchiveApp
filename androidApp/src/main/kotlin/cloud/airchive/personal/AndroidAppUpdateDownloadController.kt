@@ -4,6 +4,8 @@ import cloud.airchive.shared.data.update.AppUpdateDownloadActions
 import cloud.airchive.shared.data.update.AppUpdateDownloadException
 import cloud.airchive.shared.data.update.AppUpdateDownloadResult
 import cloud.airchive.shared.data.update.AppUpdateService
+import cloud.airchive.shared.data.update.AndroidAppUpdateVerificationResult
+import cloud.airchive.shared.data.update.AndroidAppUpdateVerifier
 import cloud.airchive.shared.data.update.UpdateFailureReason
 import cloud.airchive.shared.data.update.UpdateManifest
 import cloud.airchive.shared.data.update.AndroidAppUpdateDownloader
@@ -18,6 +20,7 @@ import kotlinx.coroutines.withContext
 class AndroidAppUpdateDownloadController(
     private val service: AppUpdateService,
     private val downloader: AndroidAppUpdateDownloader,
+    private val verifier: AndroidAppUpdateVerifier,
     private val appScope: CoroutineScope,
 ) : AppUpdateDownloadActions {
     private val lock = Any()
@@ -42,18 +45,37 @@ class AndroidAppUpdateDownloadController(
                             service.reportDownloadProgress(bytesReceived)
                         }
                         if (service.completeDownload()) {
-                            completedDownload = result
+                            when (val verification = verifier.verify(result, manifest)) {
+                                AndroidAppUpdateVerificationResult.Verified -> {
+                                    if (service.completeVerification()) {
+                                        completedDownload = result
+                                    } else {
+                                        downloader.deleteDownloadedApk(manifest.versionCode)
+                                    }
+                                }
+
+                                is AndroidAppUpdateVerificationResult.Rejected -> {
+                                    completedDownload = null
+                                    downloader.deleteDownloadedApk(manifest.versionCode)
+                                    service.failVerification(verification.reason)
+                                }
+                            }
                         } else {
-                            result.file.delete()
+                            downloader.deleteDownloadedApk(manifest.versionCode)
                         }
                     } catch (cancelled: CancellationException) {
+                        downloader.deleteDownloadedApk(manifest.versionCode)
                         withContext(NonCancellable) { service.cancelDownload() }
                         throw cancelled
                     } catch (_: AppUpdateDownloadException.InsufficientStorage) {
+                        downloader.deleteDownloadedApk(manifest.versionCode)
                         service.failDownload(UpdateFailureReason.STORAGE)
                     } catch (_: AppUpdateDownloadException.TooLarge) {
+                        downloader.deleteDownloadedApk(manifest.versionCode)
                         service.failDownload(UpdateFailureReason.DOWNLOAD_TOO_LARGE)
                     } catch (_: Exception) {
+                        downloader.deleteDownloadedApk(manifest.versionCode)
+                        completedDownload = null
                         service.failDownload(UpdateFailureReason.DOWNLOAD)
                     }
                 } finally {

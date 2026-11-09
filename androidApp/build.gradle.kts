@@ -1,6 +1,7 @@
 import java.io.File
 import java.io.StringReader
 import java.util.Properties
+import cloud.airchive.gradle.GenerateAppUpdateVerifierFixturesTask
 
 plugins {
     alias(libs.plugins.android.application)
@@ -249,6 +250,28 @@ android {
             }
         }
     }
+}
+
+val appUpdateVerifierFixtureAssets = layout.buildDirectory.dir("generated/appUpdateVerifierFixtures")
+val androidSdkDirectory = extensions
+    .getByType<com.android.build.api.variant.ApplicationAndroidComponentsExtension>()
+    .sdkComponents.sdkDirectory
+val androidSdkRoot = androidSdkDirectory.get().asFile
+android.sourceSets.getByName("androidTest").assets.directories.add(appUpdateVerifierFixtureAssets.get().asFile.absolutePath)
+
+val executableSuffix = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) ".exe" else ""
+val generateAppUpdateVerifierFixtures = tasks.register<GenerateAppUpdateVerifierFixturesTask>("generateAppUpdateVerifierFixtures") {
+    group = "verification"
+    description = "Builds throwaway-signed APK archives used only by updater instrumentation tests."
+    fixtureDirectory.set(appUpdateVerifierFixtureAssets)
+    aaptExecutable.set(File(androidSdkRoot, "build-tools/36.0.0/aapt$executableSuffix"))
+    apkSignerExecutable.set(File(androidSdkRoot, "build-tools/36.0.0/apksigner$executableSuffix"))
+    androidJar.set(File(androidSdkRoot, "platforms/android-36/android.jar"))
+    keytoolExecutable.set(File(System.getProperty("java.home"), "bin/keytool$executableSuffix"))
+}
+
+tasks.configureEach {
+    if (name == "mergeDebugAndroidTestAssets") dependsOn(generateAppUpdateVerifierFixtures)
 }
 
 kotlin {

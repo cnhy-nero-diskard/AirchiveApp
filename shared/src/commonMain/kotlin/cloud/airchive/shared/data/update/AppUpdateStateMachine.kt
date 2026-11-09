@@ -16,6 +16,8 @@ enum class UpdateFailureReason {
     STORAGE,
     DOWNLOAD,
     DOWNLOAD_TOO_LARGE,
+    APK_SIZE_MISMATCH,
+    APK_INVALID,
     HASH_MISMATCH,
     APK_PACKAGE_MISMATCH,
     APK_VERSION_MISMATCH,
@@ -124,6 +126,7 @@ class AppUpdateStateMachine(
         }
         AppUpdateEvent.DownloadCancelled -> when (current) {
             is AppUpdateState.Downloading -> AppUpdateState.Available(current.manifest)
+            is AppUpdateState.Verifying -> AppUpdateState.Available(current.manifest)
             else -> current
         }
         AppUpdateEvent.DownloadCompleted -> when (current) {

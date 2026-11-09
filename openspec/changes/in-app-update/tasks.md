@@ -44,7 +44,7 @@
   - delete on cancel or failure, and delete leftover `.part` files at startup
 
   Verify with host tests using a MockEngine body for an over-size abort, a cancel deleting the file, and a startup cleanup.
-- [ ] 4.2 Add archive inspection through `getPackageArchiveInfo`, using signing certificates on API 28+ and signatures on API 26–27: package, `longVersionCode`, exactly one signer, and not debuggable. Generate test APK fixtures at build time with a throwaway key; never commit a key. Install an API 27 system image and AVD for `scripts/test-emulator.sh` (`AIRCHIVE_TEST_AVD`). Verify with instrumented tests on the API 37 and API 27 emulators (`ANDROID_SERIAL=emulator-5554`, GPU host) covering a hash mismatch, a wrong signer, two signers, a debuggable APK, a lower code, and the valid throwaway-pin case.
+- [x] 4.2 Add archive inspection through `getPackageArchiveInfo`, using signing certificates on API 28+ and signatures on API 26–27: package, `longVersionCode`, exactly one signer, and not debuggable. Generate test APK fixtures at build time with a throwaway key; never commit a key. Install an API 27 system image and AVD for `scripts/test-emulator.sh` (`AIRCHIVE_TEST_AVD`). Verify with instrumented tests on the API 37 and API 27 emulators (`ANDROID_SERIAL=emulator-5554`, GPU host) covering a hash mismatch, a wrong signer, two signers, a debuggable APK, a lower code, and the valid throwaway-pin case.
 
 ## 5. Installation and outcome
 
