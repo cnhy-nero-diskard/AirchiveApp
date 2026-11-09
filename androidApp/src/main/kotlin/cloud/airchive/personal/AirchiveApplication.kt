@@ -1,14 +1,19 @@
 package cloud.airchive.personal
 
 import android.app.Application
+import android.os.StatFs
 import cloud.airchive.personal.data.credentials.AndroidEncryptedThinQCredentialStore
 import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import cloud.airchive.personal.data.thinq.AndroidProductionThinQGraph
+import cloud.airchive.shared.data.update.AndroidAppUpdateDownloader
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateService
 import cloud.airchive.shared.data.update.createAndroidAppUpdateHttpClient
 import cloud.airchive.shared.data.update.releaseOnlyAppUpdateBinding
 import io.ktor.client.engine.cio.CIO
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +32,9 @@ class AirchiveApplication : Application() {
     private val _thinQGraph = MutableStateFlow<AndroidProductionThinQGraph?>(null)
     val thinQGraph: StateFlow<AndroidProductionThinQGraph?> = _thinQGraph.asStateFlow()
 
+    /** Process-lifetime scope keeps an explicit update download alive across Activity recreation. */
+    private val appUpdateScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private var cachedAppUpdateBindings: AppUpdateBindings? = null
 
     /** Debug builds never create the updater or its HTTP client. */
@@ -41,8 +49,9 @@ class AirchiveApplication : Application() {
                     "Release update signer pin is not configured."
                 }
                 val preferences = installationPreferences
+                val updateHttpClient = createAndroidAppUpdateHttpClient(BuildConfig.VERSION_NAME)
                 val service = AppUpdateService(
-                    httpClient = createAndroidAppUpdateHttpClient(BuildConfig.VERSION_NAME),
+                    httpClient = updateHttpClient,
                     feedUrl = BuildConfig.AIRCHIVE_APP_UPDATE_MANIFEST_URL,
                     expectedPackageName = BuildConfig.APPLICATION_ID,
                     pinnedSignerSha256 = BuildConfig.AIRCHIVE_APP_UPDATE_SIGNER_SHA256,
@@ -50,12 +59,20 @@ class AirchiveApplication : Application() {
                     preferences = preferences,
                     nowEpochMillis = System::currentTimeMillis,
                 )
+                val downloader = AndroidAppUpdateDownloader(
+                    httpClient = updateHttpClient,
+                    cacheDirectory = cacheDir,
+                    availableBytes = { StatFs(cacheDir.absolutePath).availableBytes },
+                )
+                downloader.cleanupPartialFiles()
+                val downloadController = AndroidAppUpdateDownloadController(service, downloader, appUpdateScope)
                 AppUpdateBindings(
                     service = service,
                     preferences = preferences,
                     currentVersionName = BuildConfig.VERSION_NAME,
                     currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
                     feedUrl = BuildConfig.AIRCHIVE_APP_UPDATE_MANIFEST_URL,
+                    downloadActions = downloadController,
                 ).also { cachedAppUpdateBindings = it }
             }
         }

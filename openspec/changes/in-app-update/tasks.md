@@ -37,7 +37,7 @@
 
 ## 4. Download and pre-install verification (Android)
 
-- [ ] 4.1 Run the download in a coroutine owned by `AirchiveApplication`, so it survives rotation and leaving the screen (design §5):
+- [x] 4.1 Run the download in a coroutine owned by `AirchiveApplication`, so it survives rotation and leaving the screen (design §5):
   - check free space against `apk.size` plus headroom
   - stream to `cacheDir/updates/<versionCode>.apk.part`, hashing as it goes
   - abort above `apk.size` or 200 MB

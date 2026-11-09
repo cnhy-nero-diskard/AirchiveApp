@@ -4,6 +4,8 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -13,10 +15,14 @@ interface AppUpdateCheckPort {
     suspend fun check(): Boolean
 }
 
-/** Owner-confirmed platform actions supplied by the application-scoped updater. */
-interface AppUpdateActions {
+/** Download/cancel actions that start only from the owner's explicit Settings action. */
+interface AppUpdateDownloadActions {
     fun download(manifest: UpdateManifest)
     fun cancelDownload()
+}
+
+/** Owner-confirmed installation actions supplied when platform install support is ready. */
+interface AppUpdateActions : AppUpdateDownloadActions {
     fun install(manifest: UpdateManifest)
     fun requestInstallPermission(manifest: UpdateManifest)
 }
@@ -33,19 +39,42 @@ class AppUpdateService(
 ) : AppUpdateCheckPort {
     private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256)
     private val mutableState = MutableStateFlow(machine.state)
+    private val checkMutex = Mutex()
+    private val stateMutex = Mutex()
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
 
-    override suspend fun check(): Boolean {
-        mutableState.value = machine.dispatch(AppUpdateEvent.CheckStarted)
+    override suspend fun check(): Boolean = checkMutex.withLock { checkOnce() }
+
+    private suspend fun checkOnce(): Boolean {
+        val checkStarted = stateMutex.withLock {
+            when (mutableState.value) {
+                is AppUpdateState.Downloading,
+                is AppUpdateState.Verifying,
+                is AppUpdateState.ReadyToInstall,
+                is AppUpdateState.NeedsInstallPermission,
+                is AppUpdateState.Installing,
+                -> false
+
+                else -> {
+                    mutableState.value = machine.dispatch(AppUpdateEvent.CheckStarted)
+                    true
+                }
+            }
+        }
+        if (!checkStarted) return false
+
         return try {
             val manifest = httpClient.fetchManifest(feedUrl)
-            val result = machine.dispatch(AppUpdateEvent.OfferResolved(manifest, installedVersionCode))
-            mutableState.value = result
-            if (result is AppUpdateState.Available || result is AppUpdateState.UpToDate) {
-                preferences.recordSuccessfulCheck(nowEpochMillis())
-                true
-            } else {
-                false
+            stateMutex.withLock {
+                if (mutableState.value != AppUpdateState.Checking) return@withLock false
+                val result = machine.dispatch(AppUpdateEvent.OfferResolved(manifest, installedVersionCode))
+                mutableState.value = result
+                if (result is AppUpdateState.Available || result is AppUpdateState.UpToDate) {
+                    preferences.recordSuccessfulCheck(nowEpochMillis())
+                    true
+                } else {
+                    false
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -60,11 +89,50 @@ class AppUpdateService(
         }
     }
 
+    /** Transitions into Downloading only while the exact offered manifest is still current. */
+    suspend fun startDownload(manifest: UpdateManifest): Boolean = stateMutex.withLock {
+        val available = mutableState.value as? AppUpdateState.Available ?: return@withLock false
+        if (available.manifest != manifest) return@withLock false
+        mutableState.value = machine.dispatch(AppUpdateEvent.DownloadStarted)
+        true
+    }
+
+    suspend fun reportDownloadProgress(bytesReceived: Long) {
+        stateMutex.withLock {
+            if (mutableState.value is AppUpdateState.Downloading) {
+                mutableState.value = machine.dispatch(AppUpdateEvent.DownloadProgress(bytesReceived))
+            }
+        }
+    }
+
+    suspend fun completeDownload(): Boolean = stateMutex.withLock {
+        if (mutableState.value !is AppUpdateState.Downloading) return@withLock false
+        mutableState.value = machine.dispatch(AppUpdateEvent.DownloadCompleted)
+        true
+    }
+
+    suspend fun cancelDownload() {
+        stateMutex.withLock {
+            if (mutableState.value is AppUpdateState.Downloading) {
+                mutableState.value = machine.dispatch(AppUpdateEvent.DownloadCancelled)
+            }
+        }
+    }
+
+    suspend fun failDownload(reason: UpdateFailureReason) {
+        stateMutex.withLock {
+            if (mutableState.value is AppUpdateState.Downloading) {
+                mutableState.value = machine.dispatch(AppUpdateEvent.UpdateFailed(reason))
+            }
+        }
+    }
+
     fun close() = httpClient.close()
 
-    private fun unavailable(cause: UpdateUnavailableCause): Boolean {
+    private suspend fun unavailable(cause: UpdateUnavailableCause): Boolean = stateMutex.withLock {
+        if (mutableState.value != AppUpdateState.Checking) return@withLock false
         mutableState.value = machine.dispatch(AppUpdateEvent.CheckFailed(cause))
-        return false
+        false
     }
 }
 
@@ -76,6 +144,7 @@ data class AppUpdateBindings(
     val currentVersionCode: Long,
     val feedUrl: String = "",
     val actions: AppUpdateActions? = null,
+    val downloadActions: AppUpdateDownloadActions? = actions,
 ) {
     val state: StateFlow<AppUpdateState> get() = service.state
 }

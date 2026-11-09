@@ -105,12 +105,12 @@ fun AppUpdateSettingsSection(
                 is AppUpdateState.Available -> {
                     ManifestSummary(state.manifest, detail, bindings?.feedUrl)
                     OutlinedButton(
-                        enabled = bindings?.actions != null,
-                        onClick = { bindings?.actions?.download(state.manifest) },
+                        enabled = bindings?.downloadActions != null,
+                        onClick = { bindings?.downloadActions?.download(state.manifest) },
                         modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
                             "Download app update version ${state.manifest.versionName}",
-                            enabled = bindings?.actions != null,
-                        ) { bindings?.actions?.download(state.manifest) },
+                            enabled = bindings?.downloadActions != null,
+                        ) { bindings?.downloadActions?.download(state.manifest) },
                     ) {
                         Text("Update")
                     }
@@ -127,12 +127,12 @@ fun AppUpdateSettingsSection(
                     Text("${humanBytes(state.bytesReceived)} of ${humanBytes(state.totalBytes)}",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(
-                        enabled = bindings?.actions != null,
-                        onClick = { bindings?.actions?.cancelDownload() },
+                        enabled = bindings?.downloadActions != null,
+                        onClick = { bindings?.downloadActions?.cancelDownload() },
                         modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
                             "Cancel app update download",
-                            enabled = bindings?.actions != null,
-                        ) { bindings?.actions?.cancelDownload() },
+                            enabled = bindings?.downloadActions != null,
+                        ) { bindings?.downloadActions?.cancelDownload() },
                     ) {
                         Text("Cancel")
                     }
