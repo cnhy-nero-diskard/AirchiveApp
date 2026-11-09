@@ -12,6 +12,9 @@ import cloud.airchive.shared.contract.telemetry.EnergyUnit
 import cloud.airchive.shared.contract.telemetry.Observation
 import cloud.airchive.shared.contract.thinq.ThinQCredentialVerifier
 import cloud.airchive.shared.contract.thinq.ThinQVerificationResult
+import cloud.airchive.shared.data.update.AppUpdatePreferencesSnapshot
+import cloud.airchive.shared.data.update.InMemoryAppUpdatePreferences
+import cloud.airchive.shared.data.update.PendingInstallRecord
 import cloud.airchive.shared.fakes.FakeLocalHistory
 import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
@@ -174,6 +177,32 @@ class OwnerSettingsControllerTest {
         assertNull(after.credential)
         assertNull(after.history)
         assertEquals(OwnerSettingsConfirmStep.NONE, after.confirmStep)
+    }
+
+    @Test
+    fun confirmedSignOutLeavesInstallationWideUpdatePreferencesInPlace() = runBlocking {
+        val identity = ScriptedOwnerIdentity(initialSession = firstSession)
+        val store = FakeThinQCredentialStore()
+        val local = FakeLocalHistory()
+        val updatePreferences = InMemoryAppUpdatePreferences()
+        updatePreferences.recordSuccessfulCheck(nowEpochMillis)
+        updatePreferences.dismissVersion(9L)
+        updatePreferences.setPendingInstall(PendingInstallRecord(targetVersionCode = 10L, startedAtEpochMillis = nowEpochMillis))
+        val before = updatePreferences.appUpdateState.value
+
+        val controller = controller(identity, store, local = local)
+        controller.requestSignOut()
+        assertIs<OwnerSettingsActionResult.Success>(controller.signOutConfirmed())
+
+        assertEquals(
+            AppUpdatePreferencesSnapshot(
+                lastSuccessfulCheckEpochMillis = nowEpochMillis,
+                dismissedVersionCode = 9L,
+                pendingInstall = PendingInstallRecord(targetVersionCode = 10L, startedAtEpochMillis = nowEpochMillis),
+            ),
+            updatePreferences.appUpdateState.value,
+        )
+        assertEquals(before, updatePreferences.appUpdateState.value)
     }
 
     @Test

@@ -18,7 +18,7 @@
   - an oversized body
   - 404, offline, and timeout
   - that no request carries an `Authorization` or `Cookie` header
-- [ ] 2.2 Store the last successful check, the dismissed version, and the pending-install record in the installation-wide preferences that hold Interface detail, so sign-out leaves them. Verify with a host test that an owner sign-out leaves all three in place.
+- [x] 2.2 Store the last successful check, the dismissed version, and the pending-install record in the installation-wide preferences that hold Interface detail, so sign-out leaves them. Verify with a host test that an owner sign-out leaves all three in place.
 - [ ] 2.3 Add `AppUpdateBindings` (nullable) to `ProductionAirchiveApp`, plus BuildConfig fields for the feed URL and pinned certificate. Production builds them only in release builds; debug and iOS pass `null`. Start the resume check from `MainActivity.onResume` with its own `ForegroundRefreshBackoff` and job, only when the last success is at least 6 hours old, and cancel it in `onPause`. Verify:
   - a host test shows a resume within 6 hours makes no request, while a failure backs off and leaves the history and device refresh state unchanged
   - a debug build constructs no update client and makes no feed request, because the binding is null
