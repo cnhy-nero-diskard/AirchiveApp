@@ -53,7 +53,7 @@
   - a unit test asserts that the session params require user action on API 31+
   - a host test maps every status
   - `grep -rnE 'uninstall|pm clear|ACTION_INSTALL_PACKAGE|clearApplicationUserData' androidApp/src/main shared/src/commonMain` returns nothing from update code
-- [ ] 5.3 Write the pending-install record before committing the session, and report the outcome on the next start (design §7). Verify with host tests for "Updated to `<version>`" shown once and the record cleared, and for "Update didn't finish" with Retry when the code is lower and no session is active.
+- [x] 5.3 Write the pending-install record before committing the session, and report the outcome on the next start (design §7). Verify with host tests for "Updated to `<version>`" shown once and the record cleared, and for "Update didn't finish" with Retry when the code is lower and no session is active.
 
 ## 6. Data protection and isolation
 

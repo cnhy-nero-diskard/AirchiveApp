@@ -10,8 +10,10 @@ import cloud.airchive.shared.data.update.AndroidAppUpdateDownloader
 import cloud.airchive.shared.data.update.AndroidAppUpdateVerifier
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateService
+import cloud.airchive.shared.data.update.AppUpdateState
 import cloud.airchive.shared.data.update.createAndroidAppUpdateHttpClient
 import cloud.airchive.shared.data.update.releaseOnlyAppUpdateBinding
+import cloud.airchive.shared.data.update.resolvePendingInstallAtStartup
 import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +53,28 @@ class AirchiveApplication : Application() {
                     "Release update signer pin is not configured."
                 }
                 val preferences = installationPreferences
+                val packageInstaller = packageManager.packageInstaller
+                val pendingInstall = preferences.appUpdateState.value.pendingInstall
+                val hasActiveInstallSession = if (
+                    pendingInstall != null && BuildConfig.VERSION_CODE.toLong() < pendingInstall.targetVersionCode
+                ) {
+                    try {
+                        packageInstaller.mySessions.any { session ->
+                            session.appPackageName == BuildConfig.APPLICATION_ID && session.isActive
+                        }
+                    } catch (_: Exception) {
+                        // Defer failure reporting when Android cannot confirm that the session is gone.
+                        true
+                    }
+                } else {
+                    false
+                }
+                val startupState = resolvePendingInstallAtStartup(
+                    preferences = preferences,
+                    installedVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                    installedVersionName = BuildConfig.VERSION_NAME,
+                    hasActiveInstallSession = hasActiveInstallSession,
+                )
                 val updateHttpClient = createAndroidAppUpdateHttpClient(BuildConfig.VERSION_NAME)
                 val service = AppUpdateService(
                     httpClient = updateHttpClient,
@@ -60,6 +84,7 @@ class AirchiveApplication : Application() {
                     installedVersionCode = BuildConfig.VERSION_CODE.toLong(),
                     preferences = preferences,
                     nowEpochMillis = System::currentTimeMillis,
+                    initialState = startupState ?: AppUpdateState.Idle,
                 )
                 val downloader = AndroidAppUpdateDownloader(
                     httpClient = updateHttpClient,
@@ -78,6 +103,8 @@ class AirchiveApplication : Application() {
                     context = applicationContext,
                     installController = service,
                     apkForVersionCode = downloadController::verifiedApkForVersion,
+                    preferences = preferences,
+                    nowEpochMillis = System::currentTimeMillis,
                     appScope = appUpdateScope,
                 )
                 val updateActions = AndroidAppUpdateActionsController(

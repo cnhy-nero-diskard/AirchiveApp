@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import cloud.airchive.shared.InterfaceDetail
+import cloud.airchive.shared.data.update.PendingInstallRecord
 import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -52,6 +53,17 @@ class AndroidInterfaceDetailPreferencesTest {
         }
         assertTrue("the isolated installation preference reaches disk", persisted)
         assertEquals(mapOf(KEY to "detailed"), isolatedPreferences().all)
+    }
+
+    @Test fun pendingInstallRecordIsOnDiskWhenTheWriteReturns() {
+        val record = PendingInstallRecord(targetVersionCode = 42L, startedAtEpochMillis = 1_800_000_000_000L)
+        AndroidInterfaceDetailPreferences(context, TEST_PREFERENCE_FILE).setPendingInstall(record)
+
+        val file = File(context.applicationInfo.dataDir, "shared_prefs/$TEST_PREFERENCE_FILE.xml")
+        val persistedXml = file.readText()
+        assertTrue(persistedXml.contains("name=\"app_update_pending_version\" value=\"42\""))
+        assertTrue(persistedXml.contains("name=\"app_update_pending_started_at\" value=\"1800000000000\""))
+        assertEquals(record, AndroidInterfaceDetailPreferences(context, TEST_PREFERENCE_FILE).appUpdateState.value.pendingInstall)
     }
 
     private fun isolatedPreferences() = context.getSharedPreferences(TEST_PREFERENCE_FILE, Context.MODE_PRIVATE)

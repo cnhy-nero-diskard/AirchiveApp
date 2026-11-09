@@ -29,6 +29,56 @@ interface AppUpdatePreferences {
     fun setPendingInstall(record: PendingInstallRecord?)
 }
 
+data class PendingInstallStartupResolution(
+    val state: AppUpdateState?,
+    val shouldClearRecord: Boolean,
+)
+
+/** Resolves a prior install only after checking whether PackageInstaller still owns an active session. */
+fun pendingInstallStartupResolution(
+    record: PendingInstallRecord?,
+    installedVersionCode: Long,
+    installedVersionName: String,
+    hasActiveInstallSession: Boolean,
+): PendingInstallStartupResolution = when {
+    record == null -> PendingInstallStartupResolution(state = null, shouldClearRecord = false)
+    installedVersionCode >= record.targetVersionCode -> PendingInstallStartupResolution(
+        state = AppUpdateState.Updated(installedVersionName),
+        shouldClearRecord = true,
+    )
+    hasActiveInstallSession -> PendingInstallStartupResolution(state = null, shouldClearRecord = false)
+    else -> PendingInstallStartupResolution(
+        state = AppUpdateState.NotCompleted(installedVersionName),
+        shouldClearRecord = true,
+    )
+}
+
+fun resolvePendingInstallAtStartup(
+    preferences: AppUpdatePreferences,
+    installedVersionCode: Long,
+    installedVersionName: String,
+    hasActiveInstallSession: Boolean,
+): AppUpdateState? {
+    val resolution = pendingInstallStartupResolution(
+        record = preferences.appUpdateState.value.pendingInstall,
+        installedVersionCode = installedVersionCode,
+        installedVersionName = installedVersionName,
+        hasActiveInstallSession = hasActiveInstallSession,
+    )
+    if (resolution.shouldClearRecord) preferences.setPendingInstall(null)
+    return resolution.state
+}
+
+/** Ensures the durable outcome record is visible before PackageInstaller can replace this process. */
+fun recordPendingInstallBeforeSessionCommit(
+    preferences: AppUpdatePreferences,
+    record: PendingInstallRecord,
+    commitSession: () -> Unit,
+) {
+    preferences.setPendingInstall(record)
+    commitSession()
+}
+
 /** Common in-memory implementation for isolated test and preview graphs. */
 class InMemoryAppUpdatePreferences(
     initial: AppUpdatePreferencesSnapshot = AppUpdatePreferencesSnapshot(),

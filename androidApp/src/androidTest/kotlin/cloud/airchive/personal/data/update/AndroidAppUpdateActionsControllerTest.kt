@@ -11,6 +11,7 @@ import cloud.airchive.personal.AndroidAppUpdatePackageInstaller
 import cloud.airchive.shared.data.update.AppUpdateInstallControllerPort
 import cloud.airchive.shared.data.update.AppUpdateInstallOutcome
 import cloud.airchive.shared.data.update.AppUpdateDownloadActions
+import cloud.airchive.shared.data.update.InMemoryAppUpdatePreferences
 import cloud.airchive.shared.data.update.AppUpdateState
 import cloud.airchive.shared.data.update.UpdateApk
 import cloud.airchive.shared.data.update.UpdateManifest
@@ -68,6 +69,8 @@ class AndroidAppUpdateActionsControllerTest {
             context = context,
             installController = installController,
             apkForVersionCode = { null },
+            preferences = InMemoryAppUpdatePreferences(),
+            nowEpochMillis = { 100L },
             appScope = appScope,
             launchConfirmation = { launchedIntent = it },
         )

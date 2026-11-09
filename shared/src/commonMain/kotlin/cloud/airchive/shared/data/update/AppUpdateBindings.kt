@@ -48,8 +48,9 @@ class AppUpdateService(
     private val installedVersionCode: Long,
     private val preferences: AppUpdatePreferences,
     private val nowEpochMillis: () -> Long,
+    initialState: AppUpdateState = AppUpdateState.Idle,
 ) : AppUpdateCheckPort, AppUpdateInstallControllerPort {
-    private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256)
+    private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256, initialState)
     private val mutableState = MutableStateFlow(machine.state)
     private val checkMutex = Mutex()
     private val stateMutex = Mutex()
@@ -188,7 +189,12 @@ class AppUpdateService(
                 AppUpdateInstallOutcome.Cancelled -> AppUpdateEvent.InstallCancelled
                 is AppUpdateInstallOutcome.Failed -> AppUpdateEvent.InstallFailed(outcome.reason)
             }
-            if (event != null) mutableState.value = machine.dispatch(event)
+            if (event != null) {
+                mutableState.value = machine.dispatch(event)
+                if (outcome !is AppUpdateInstallOutcome.Succeeded) {
+                    preferences.setPendingInstall(null)
+                }
+            }
         }
     }
 
