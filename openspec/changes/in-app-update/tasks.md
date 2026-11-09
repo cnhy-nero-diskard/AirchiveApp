@@ -63,7 +63,7 @@
 
 ## 7. Acceptance on the owner's phone (owner-approved, after `release-pipeline`)
 
-- [ ] 7.1 Before building vN, run `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug` and the updater instrumented tests on both emulators. Verify that everything is green and record the counts in the PR.
+- [x] 7.1 Before building vN, run `./gradlew :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidApp:lintDebug` and the updater instrumented tests on both emulators. Verify that everything is green and record the counts in the PR.
 - [ ] 7.2 Publish bootstrap vN through `release-pipeline` and install it with `release.sh --install <phone serial>` (the last ADB install). Verify the app reports up to date.
 - [ ] 7.3 Publish vN+1 and update from inside the app: notice → Settings → Update → permission → confirm → "Updated to vN+1". Without sending any AC command, verify that sign-in, Room rows, preferences, the stored ThinQ token, all five tabs, charts and coverage, polling, and control gating are unchanged.
 - [ ] 7.4 Repeat the failure cases from design Migration Plan step 4 (offline, timeout, permission denied, cancel and retry, storage pressure, process death during download, large text, TalkBack). Verify by recording the results in the go/no-go table on issue #4.
