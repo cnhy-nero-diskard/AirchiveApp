@@ -267,6 +267,39 @@ class SharedInstrumentUiTest {
             .putExtra("fixture_app_update_enabled", appUpdateEnabled),
     )
 
+    private fun assertAccessibleUpdateAction(description: String): AccessibilityNodeInfo {
+        val node = awaitVisibleNode { it.contentDescription?.toString() == description }
+        val ancestors = generateSequence(node) { it.parent }
+            .take(5)
+            .joinToString(" -> ") {
+                "${it.className}[text=${it.text},description=${it.contentDescription},clickable=${it.isClickable},actions=${it.actionList.map { action -> action.id }}]"
+            }
+        assertTrue(
+            "TalkBack action '$description' exposes a click action; semantics path: $ancestors",
+            node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK },
+        )
+        return node
+    }
+
+    private fun assertUpdateActionFitsScreen(node: AccessibilityNodeInfo) {
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        assertTrue("update action has a non-empty touch target: $bounds", bounds.width() > 0 && bounds.height() > 0)
+        assertTrue(
+            "update action meets the 48dp touch target: ${bounds.height() / metrics.density}dp, $bounds",
+            bounds.height() / metrics.density >= 48f,
+        )
+        assertTrue("update action stays within the screen: $bounds", bounds.left >= 0 && bounds.right <= metrics.widthPixels)
+    }
+
+    private fun assertUpdateTextFitsScreen(text: String) {
+        val node = awaitVisibleNode { it.text?.toString() == text }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val metrics = instrumentation.targetContext.resources.displayMetrics
+        assertTrue("update text stays within the screen: '$text' $bounds",
+            bounds.left >= 0 && bounds.right <= metrics.widthPixels && bounds.height() > 0)
+    }
+
     private fun updateNoticeManifest(
         versionCode: Long = 1_001L,
         versionName: String = "10.0.1",
@@ -457,14 +490,27 @@ class SharedInstrumentUiTest {
                     assertEquals("Rendering $state in $detail never checks the feed", 0,
                         fixture.get().appUpdateCheckCountForTest())
                     when (state) {
+                        AppUpdateState.Idle -> assertAccessibleUpdateAction("Check for app updates")
                         is AppUpdateState.Unavailable,
                         is AppUpdateState.Failed,
-                        is AppUpdateState.NotCompleted -> assertTextPresent("Retry")
-                        AppUpdateState.UpToDate -> assertTextPresent("Check again")
-                        is AppUpdateState.Available -> assertTextPresent("Update")
-                        is AppUpdateState.Downloading -> assertTextPresent("Cancel")
-                        is AppUpdateState.ReadyToInstall -> assertTextPresent("Install update")
-                        is AppUpdateState.NeedsInstallPermission -> assertTextPresent("Open install permission settings")
+                        is AppUpdateState.NotCompleted -> {
+                            assertAccessibleUpdateAction("Retry checking for app updates")
+                        }
+                        AppUpdateState.UpToDate -> {
+                            assertAccessibleUpdateAction("Check for app updates again")
+                        }
+                        is AppUpdateState.Available -> {
+                            assertAccessibleUpdateAction("Download app update version ${state.manifest.versionName}")
+                        }
+                        is AppUpdateState.Downloading -> {
+                            assertAccessibleUpdateAction("Cancel app update download")
+                        }
+                        is AppUpdateState.ReadyToInstall -> {
+                            assertAccessibleUpdateAction("Install app update version ${state.manifest.versionName}")
+                        }
+                        is AppUpdateState.NeedsInstallPermission -> {
+                            assertAccessibleUpdateAction("Open Android install permission settings")
+                        }
                         else -> Unit
                     }
                     if (state is AppUpdateState.Available) {
@@ -486,7 +532,7 @@ class SharedInstrumentUiTest {
             }
 
             scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Idle) }
-            clickText("Check for updates")
+            clickNode(assertAccessibleUpdateAction("Check for app updates"))
             awaitTrue("only the explicit Settings action performs a check") {
                 fixture.get().appUpdateCheckCountForTest() == 1
             }
@@ -514,9 +560,11 @@ class SharedInstrumentUiTest {
             val firstOffer = updateNoticeManifest()
             scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(firstOffer)) }
             awaitVisibleNode { it.text?.toString() == "Update available · 10.0.1" }
+            assertAccessibleUpdateAction("Review update in Settings")
+            assertAccessibleUpdateAction("Dismiss update for this version")
             assertEquals("Home notices never check the feed", 0, fixture.get().appUpdateCheckCountForTest())
 
-            clickText("Dismiss")
+            clickNode(assertAccessibleUpdateAction("Dismiss update for this version"))
             assertTextAbsent("Update available · 10.0.1")
             assertEquals(firstOffer.versionCode,
                 fixture.get().appUpdateBindings!!.preferences.appUpdateState.value.dismissedVersionCode)
@@ -529,13 +577,55 @@ class SharedInstrumentUiTest {
             val nextOffer = firstOffer.copy(versionCode = firstOffer.versionCode + 1, versionName = "10.0.2")
             scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(nextOffer)) }
             awaitVisibleNode { it.text?.toString() == "Update available · 10.0.2" }
-            clickText("Review")
+            clickNode(assertAccessibleUpdateAction("Review update in Settings"))
             assertTextPresent("App version & updates")
             assertTextPresent("Version 10.0.2 is available")
             assertEquals("Review opens Settings without checking the feed", 0,
                 fixture.get().appUpdateCheckCountForTest())
         }
         clearFixturePreferences()
+    }
+
+    @Test fun appUpdateSurfacesScaleAtMaximumFontSize() {
+        val fontScale = instrumentation.targetContext.resources.configuration.fontScale
+        assertTrue("this accessibility check runs at Android's maximum font scale (2.0); was $fontScale",
+            fontScale >= 1.9f)
+        clearFixturePreferences()
+        try {
+            launchShell(appUpdateEnabled = true).use { scene ->
+                val manifest = updateNoticeManifest()
+                scene.onActivity {
+                    it.shellFixture!!.interfacePreferences.select(InterfaceDetail.DETAILED)
+                    it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(manifest))
+                }
+                assertUpdateTextFitsScreen("Update available · 10.0.1")
+                assertUpdateActionFitsScreen(assertAccessibleUpdateAction("Review update in Settings"))
+                assertUpdateActionFitsScreen(assertAccessibleUpdateAction("Dismiss update for this version"))
+                saveCapture("app-update-home-max-text")
+                val reviewAction = assertAccessibleUpdateAction("Review update in Settings")
+                clickNode(reviewAction)
+                assertTextPresent("App version & updates")
+
+                repeat(12) {
+                    val offer = find(instrumentation.uiAutomation.rootInActiveWindow) {
+                        it.isVisibleToUser && it.text?.toString() == "Version 10.0.1 is available"
+                    }
+                    if (offer == null) scrollForward()
+                }
+                assertUpdateTextFitsScreen("Version 10.0.1 is available")
+                assertUpdateTextFitsScreen("Update notice fixture.")
+                assertUpdateTextFitsScreen("Version code: 1001")
+                assertUpdateTextFitsScreen("Commit: ${manifest.commit}")
+                assertUpdateTextFitsScreen("SHA-256: ${manifest.apk.sha256}")
+                assertUpdateTextFitsScreen("Feed URL: https://updates.example.invalid/update.json")
+                assertUpdateActionFitsScreen(
+                    assertAccessibleUpdateAction("Download app update version 10.0.1"),
+                )
+                saveCapture("app-update-settings-max-text")
+            }
+        } finally {
+            clearFixturePreferences()
+        }
     }
 
     @Test fun homeUpdateNoticeWaitsForTemperatureDraftAndPendingCommand() {
