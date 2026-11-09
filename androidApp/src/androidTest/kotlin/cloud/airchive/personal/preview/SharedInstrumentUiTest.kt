@@ -509,6 +509,9 @@ class SharedInstrumentUiTest {
                             assertAccessibleUpdateAction("Install app update version ${state.manifest.versionName}")
                         }
                         is AppUpdateState.NeedsInstallPermission -> {
+                            assertTextPresent(
+                                "Allow Airchive to install this update in Android settings, then return here.",
+                            )
                             assertAccessibleUpdateAction("Open Android install permission settings")
                         }
                         else -> Unit

@@ -48,7 +48,7 @@
 
 ## 5. Installation and outcome
 
-- [ ] 5.1 Add `REQUEST_INSTALL_PACKAGES` and the install-permission flow: explain, open `ACTION_MANAGE_UNKNOWN_APP_SOURCES` for this package, and re-check on return. Verify with a Compose host test for the explanation state, and an instrumented test that returning without the permission stays in `NeedsInstallPermission`.
+- [x] 5.1 Add `REQUEST_INSTALL_PACKAGES` and the install-permission flow: explain, open `ACTION_MANAGE_UNKNOWN_APP_SOURCES` for this package, and re-check on return. Verify with a Compose host test for the explanation state, and an instrumented test that returning without the permission stays in `NeedsInstallPermission`.
 - [ ] 5.2 Install through a `PackageInstaller` session (`MODE_FULL_INSTALL`, `setAppPackageName`, and `setRequireUserAction(USER_ACTION_REQUIRED)` on API 31+), with a non-exported status receiver and a mutable `PendingIntent`. `STATUS_PENDING_USER_ACTION` launches the confirmation, and the other statuses map to states. Verify:
   - a unit test asserts that the session params require user action on API 31+
   - a host test maps every status

@@ -73,12 +73,19 @@ class AirchiveApplication : Application() {
                 )
                 downloader.cleanupPartialFiles()
                 val downloadController = AndroidAppUpdateDownloadController(service, downloader, verifier, appUpdateScope)
+                val updateActions = AndroidAppUpdateActionsController(
+                    context = applicationContext,
+                    installPermissionState = service,
+                    downloadActions = downloadController,
+                    appScope = appUpdateScope,
+                )
                 AppUpdateBindings(
                     service = service,
                     preferences = preferences,
                     currentVersionName = BuildConfig.VERSION_NAME,
                     currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
                     feedUrl = BuildConfig.AIRCHIVE_APP_UPDATE_MANIFEST_URL,
+                    actions = updateActions,
                     downloadActions = downloadController,
                 ).also { cachedAppUpdateBindings = it }
             }

@@ -271,7 +271,14 @@ val generateAppUpdateVerifierFixtures = tasks.register<GenerateAppUpdateVerifier
 }
 
 tasks.configureEach {
-    if (name == "mergeDebugAndroidTestAssets") dependsOn(generateAppUpdateVerifierFixtures)
+    if (name in setOf(
+            "mergeDebugAndroidTestAssets",
+            "generateDebugAndroidTestLintModel",
+            "lintAnalyzeDebugAndroidTest",
+        )
+    ) {
+        dependsOn(generateAppUpdateVerifierFixtures)
+    }
 }
 
 kotlin {
