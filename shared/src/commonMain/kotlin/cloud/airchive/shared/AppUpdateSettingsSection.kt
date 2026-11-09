@@ -260,6 +260,8 @@ private fun UpdateFailureReason.label(): String = when (this) {
     UpdateFailureReason.STORAGE -> "Not enough storage space"
     UpdateFailureReason.DOWNLOAD -> "The download failed"
     UpdateFailureReason.DOWNLOAD_TOO_LARGE -> "The download was larger than expected"
+    UpdateFailureReason.APK_SIZE_MISMATCH -> "The downloaded file size did not match"
+    UpdateFailureReason.APK_INVALID -> "The downloaded file could not be read"
     UpdateFailureReason.HASH_MISMATCH -> "The downloaded file did not match its checksum"
     UpdateFailureReason.APK_PACKAGE_MISMATCH -> "The downloaded file was for a different app"
     UpdateFailureReason.APK_VERSION_MISMATCH -> "The downloaded version was not newer"

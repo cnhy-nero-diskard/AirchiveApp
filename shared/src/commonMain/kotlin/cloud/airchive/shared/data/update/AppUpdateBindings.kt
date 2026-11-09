@@ -113,15 +113,29 @@ class AppUpdateService(
 
     suspend fun cancelDownload() {
         stateMutex.withLock {
-            if (mutableState.value is AppUpdateState.Downloading) {
+            if (mutableState.value is AppUpdateState.Downloading || mutableState.value is AppUpdateState.Verifying) {
                 mutableState.value = machine.dispatch(AppUpdateEvent.DownloadCancelled)
+            }
+        }
+    }
+
+    suspend fun completeVerification(): Boolean = stateMutex.withLock {
+        if (mutableState.value !is AppUpdateState.Verifying) return@withLock false
+        mutableState.value = machine.dispatch(AppUpdateEvent.VerificationSucceeded)
+        true
+    }
+
+    suspend fun failVerification(reason: UpdateFailureReason) {
+        stateMutex.withLock {
+            if (mutableState.value is AppUpdateState.Verifying) {
+                mutableState.value = machine.dispatch(AppUpdateEvent.VerificationFailed(reason))
             }
         }
     }
 
     suspend fun failDownload(reason: UpdateFailureReason) {
         stateMutex.withLock {
-            if (mutableState.value is AppUpdateState.Downloading) {
+            if (mutableState.value is AppUpdateState.Downloading || mutableState.value is AppUpdateState.Verifying) {
                 mutableState.value = machine.dispatch(AppUpdateEvent.UpdateFailed(reason))
             }
         }
