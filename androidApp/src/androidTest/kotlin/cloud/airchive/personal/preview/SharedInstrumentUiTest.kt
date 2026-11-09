@@ -26,6 +26,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
+import cloud.airchive.shared.InterfaceDetail
+import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.UpdateApk
+import cloud.airchive.shared.data.update.UpdateFailureReason
+import cloud.airchive.shared.data.update.UpdateManifest
+import cloud.airchive.shared.data.update.UpdateUnavailableCause
 
 /** The debug-only preview never constructs a production graph or contacts an AC. */
 @RunWith(AndroidJUnit4::class)
@@ -250,13 +256,15 @@ class SharedInstrumentUiTest {
         suspendInitialAccessCheck: Boolean = false,
         initialOfflineAccessCheck: Boolean = false,
         retainFixtureForRecreation: Boolean = false,
+        appUpdateEnabled: Boolean = false,
     ) = ActivityScenario.launch<SharedInstrumentPreviewActivity>(
         Intent(ApplicationProvider.getApplicationContext(), SharedInstrumentPreviewActivity::class.java)
             .putExtra("shell", true)
             .putExtra("fixture_signed_in", initiallySignedIn)
             .putExtra("fixture_suspend_access", suspendInitialAccessCheck)
             .putExtra("fixture_offline_access", initialOfflineAccessCheck)
-            .putExtra("retain_fixture_for_recreation", retainFixtureForRecreation),
+            .putExtra("retain_fixture_for_recreation", retainFixtureForRecreation)
+            .putExtra("fixture_app_update_enabled", appUpdateEnabled),
     )
 
     /**
@@ -374,6 +382,107 @@ class SharedInstrumentUiTest {
                 "Fixture graph must not compose $productionType; composed: $composed",
                 productionType in shell.constructedGraph,
             )
+        }
+    }
+
+    @Test fun appUpdateSettingsRendersEveryStateInBothDetailsWithoutCheckingOnOpen() {
+        clearFixturePreferences()
+        launchShell(appUpdateEnabled = true).use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            clickTab("Settings")
+            assertTextPresent("App version & updates")
+            assertTextPresent("Current version 9.9.9-fixture")
+            assertTextPresent("Last checked: Not yet")
+            assertEquals("Composing and opening Settings does not check the feed", 0,
+                fixture.get().appUpdateCheckCountForTest())
+
+            val manifest = UpdateManifest(
+                schemaVersion = 1,
+                channel = "stable",
+                packageName = "cloud.airchive.personal",
+                versionCode = 1_001L,
+                versionName = "10.0.1",
+                commit = "a1b2c3d4e5f6",
+                publishedAt = "2026-11-09T00:00:00Z",
+                releaseNotes = "These <b>markers</b> stay plain text.",
+                apk = UpdateApk(
+                    url = "https://github.com/example/AirchiveApp/releases/download/v10.0.1/app.apk",
+                    sha256 = "ab".repeat(32),
+                    size = 1_024_000L,
+                    signingCertSha256 = "cd".repeat(32),
+                ),
+            )
+            val stateCases = listOf(
+                AppUpdateState.Idle to "Check when you’re ready",
+                AppUpdateState.Checking to "Checking for updates",
+                AppUpdateState.UpToDate to "You’re up to date",
+                AppUpdateState.Unavailable(UpdateUnavailableCause.OFFLINE) to "You’re offline",
+                AppUpdateState.Available(manifest) to "Version 10.0.1 is available",
+                AppUpdateState.Downloading(manifest, bytesReceived = 512_000L, totalBytes = 1_024_000L) to "Downloading update · 50%",
+                AppUpdateState.Verifying(manifest) to "Verifying downloaded update",
+                AppUpdateState.Failed(UpdateFailureReason.HASH_MISMATCH) to "checksum",
+                AppUpdateState.ReadyToInstall(manifest) to "ready to install",
+                AppUpdateState.NeedsInstallPermission(manifest) to "Allow Airchive to install this update",
+                AppUpdateState.Installing(manifest) to "Waiting for Android to finish installing",
+                AppUpdateState.Updated("10.0.1") to "Updated to 10.0.1",
+                AppUpdateState.NotCompleted("10.0.1") to "Update didn’t finish · 10.0.1",
+            )
+
+            for (detail in listOf(InterfaceDetail.SIMPLE, InterfaceDetail.DETAILED)) {
+                selectShellDetail(scene, detail)
+                for ((state, expectedCopy) in stateCases) {
+                    scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(state) }
+                    awaitVisibleNode { it.text?.toString()?.contains(expectedCopy) == true }
+                    assertEquals("Rendering $state in $detail never checks the feed", 0,
+                        fixture.get().appUpdateCheckCountForTest())
+                    when (state) {
+                        is AppUpdateState.Unavailable,
+                        is AppUpdateState.Failed,
+                        is AppUpdateState.NotCompleted -> assertTextPresent("Retry")
+                        AppUpdateState.UpToDate -> assertTextPresent("Check again")
+                        is AppUpdateState.Available -> assertTextPresent("Update")
+                        is AppUpdateState.Downloading -> assertTextPresent("Cancel")
+                        is AppUpdateState.ReadyToInstall -> assertTextPresent("Install update")
+                        is AppUpdateState.NeedsInstallPermission -> assertTextPresent("Open install permission settings")
+                        else -> Unit
+                    }
+                    if (state is AppUpdateState.Available) {
+                        assertTextPresent("These <b>markers</b> stay plain text.")
+                        assertTextPresent("Download size · 1000 KB")
+                        if (detail == InterfaceDetail.SIMPLE) {
+                            assertTextAbsent("Commit: ${manifest.commit}")
+                            assertTextAbsent("SHA-256: ${manifest.apk.sha256}")
+                            saveCapture("app-update-simple-available")
+                        } else {
+                            assertTextPresent("Commit: ${manifest.commit}")
+                            assertTextPresent("SHA-256: ${manifest.apk.sha256}")
+                            assertTextPresent("Feed URL: https://updates.example.invalid/update.json")
+                            assertTextPresent("Version code: 999")
+                            saveCapture("app-update-detailed-available")
+                        }
+                    }
+                }
+            }
+
+            scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Idle) }
+            clickText("Check for updates")
+            awaitTrue("only the explicit Settings action performs a check") {
+                fixture.get().appUpdateCheckCountForTest() == 1
+            }
+            awaitVisibleNode { it.text?.toString() == "You’re up to date" }
+        }
+    }
+
+    @Test fun nullAppUpdateBindingExplainsReleaseBuildAvailability() {
+        clearFixturePreferences()
+        launchShell().use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            clickTab("Settings")
+            assertTextPresent("In-app updates apply to release builds")
+            assertNull("The debug shell has no app-update binding", fixture.get().appUpdateBindings)
+            assertEquals("The null-binding state has no update check", 0, fixture.get().appUpdateCheckCountForTest())
         }
     }
 

@@ -7,6 +7,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
+/** Read/check contract consumed by the shared Settings UI. */
+interface AppUpdateCheckPort {
+    val state: StateFlow<AppUpdateState>
+    suspend fun check(): Boolean
+}
+
+/** Owner-confirmed platform actions supplied by the application-scoped updater. */
+interface AppUpdateActions {
+    fun download(manifest: UpdateManifest)
+    fun cancelDownload()
+    fun install(manifest: UpdateManifest)
+    fun requestInstallPermission(manifest: UpdateManifest)
+}
+
 /** Platform-independent update checker with an isolated feed client and preferences. */
 class AppUpdateService(
     private val httpClient: AppUpdateHttpClient,
@@ -16,12 +30,12 @@ class AppUpdateService(
     private val installedVersionCode: Long,
     private val preferences: AppUpdatePreferences,
     private val nowEpochMillis: () -> Long,
-) {
+) : AppUpdateCheckPort {
     private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256)
     private val mutableState = MutableStateFlow(machine.state)
-    val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
+    override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
 
-    suspend fun check(): Boolean {
+    override suspend fun check(): Boolean {
         mutableState.value = machine.dispatch(AppUpdateEvent.CheckStarted)
         return try {
             val manifest = httpClient.fetchManifest(feedUrl)
@@ -56,10 +70,12 @@ class AppUpdateService(
 
 /** Android or another platform supplies this binding only when updates are enabled. */
 data class AppUpdateBindings(
-    val service: AppUpdateService,
+    val service: AppUpdateCheckPort,
     val preferences: AppUpdatePreferences,
     val currentVersionName: String,
     val currentVersionCode: Long,
+    val feedUrl: String = "",
+    val actions: AppUpdateActions? = null,
 ) {
     val state: StateFlow<AppUpdateState> get() = service.state
 }

@@ -131,6 +131,8 @@ fun ProductionAirchiveApp(
     thinQBindings: ProductionThinQBindings? = null,
     interfacePreferences: InterfaceDetailPreferences? = null,
     appUpdateBindings: AppUpdateBindings? = null,
+    currentVersionName: String = "Unknown",
+    currentVersionCode: Long? = null,
     nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     val preferences = remember(interfacePreferences) { interfacePreferences ?: InMemoryInterfaceDetailPreferences() }
@@ -144,6 +146,8 @@ fun ProductionAirchiveApp(
                         onManualRefresh = onManualRefresh,
                         ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                         thinQBindings = thinQBindings,
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
                         nowProvider = nowProvider,
                     )
                 }
@@ -199,6 +203,8 @@ private fun ProductionRouteHost(
     onManualRefresh: (() -> Unit)?,
     ownerAuthConfigurationMessage: String?,
     thinQBindings: ProductionThinQBindings?,
+    currentVersionName: String,
+    currentVersionCode: Long?,
     nowProvider: () -> Long,
 ) {
     val session by coordinator.session.collectAsState()
@@ -395,6 +401,8 @@ private fun ProductionRouteHost(
                     afterSettingsAction = afterSettingsAction,
                     thinQBindings = thinQBindings,
                     credentialState = credentialState,
+                    currentVersionName = currentVersionName,
+                    currentVersionCode = currentVersionCode,
                 )
             }
         }
@@ -817,6 +825,8 @@ fun ProductionSettingsRoute(
     afterSettingsAction: suspend () -> Unit,
     thinQBindings: ProductionThinQBindings?,
     credentialState: ThinQCredentialState,
+    currentVersionName: String = "Unknown",
+    currentVersionCode: Long? = null,
 ) {
     InstrumentPage("Settings") {
         SettingsSection("Connections") {
@@ -846,6 +856,14 @@ fun ProductionSettingsRoute(
                     Text("Signed out: no local cache to inspect for another account.")
                 }
             }
+        }
+        SettingsSection("App version & updates") {
+            AppUpdateSettingsSection(
+                bindings = LocalAppUpdateBindings.current,
+                currentVersionName = currentVersionName,
+                currentVersionCode = currentVersionCode,
+                nowEpochMillis = nowEpochMillis,
+            )
         }
         SettingsSection("Preferences") { InterfaceDetailSelector() }
     }

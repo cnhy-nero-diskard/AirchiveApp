@@ -25,7 +25,7 @@
 
 ## 3. Settings section and Home notice
 
-- [ ] 3.1 Add "App version & updates" to Settings with every state in design §4:
+- [x] 3.1 Add "App version & updates" to Settings with every state in design §4:
   - current version and last check
   - available version with plain-text notes and size
   - progress with Cancel
