@@ -108,6 +108,8 @@ class MainActivity : ComponentActivity() {
                     thinQBindings = graph?.bindings() ?: thinQBindings,
                     interfacePreferences = interfacePreferences,
                     appUpdateBindings = appUpdateBindings,
+                    currentVersionName = BuildConfig.VERSION_NAME,
+                    currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
                 )
             } else {
                 ProductionConfigBlockedScreen(

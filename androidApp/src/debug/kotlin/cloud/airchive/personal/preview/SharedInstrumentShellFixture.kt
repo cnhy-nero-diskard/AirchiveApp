@@ -41,6 +41,12 @@ import cloud.airchive.shared.fakes.FakeThinQCredentialStore
 import cloud.airchive.shared.fakes.FakeThinQCredentialVerifier
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import cloud.airchive.shared.data.update.AppUpdateActions
+import cloud.airchive.shared.data.update.AppUpdateBindings
+import cloud.airchive.shared.data.update.AppUpdateCheckPort
+import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.InMemoryAppUpdatePreferences
+import cloud.airchive.shared.data.update.UpdateManifest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +91,7 @@ class SharedInstrumentShellFixture(
     initiallySignedIn: Boolean = false,
     suspendInitialAccessCheck: Boolean = false,
     initialOfflineAccessCheck: Boolean = false,
+    enableAppUpdateBinding: Boolean = false,
 ) {
 
     /** Injectable controlled clock replacing the shell's system clock reads. */
@@ -147,6 +154,18 @@ class SharedInstrumentShellFixture(
         counters,
         thinQGate,
     )
+
+    private val fixtureAppUpdateService = FixtureAppUpdateService()
+    private val fixtureAppUpdatePreferences = InMemoryAppUpdatePreferences()
+    private val fixtureAppUpdateActions = FixtureAppUpdateActions()
+    val appUpdateBindings: AppUpdateBindings? = if (enableAppUpdateBinding) AppUpdateBindings(
+        service = fixtureAppUpdateService,
+        preferences = fixtureAppUpdatePreferences,
+        currentVersionName = "9.9.9-fixture",
+        currentVersionCode = 999L,
+        feedUrl = "https://updates.example.invalid/update.json",
+        actions = fixtureAppUpdateActions,
+    ) else null
 
     /** Production owner/history shell graph, wired to the fake ports only. */
     val coordinator = ProductionHistoryCoordinator(
@@ -258,9 +277,19 @@ class SharedInstrumentShellFixture(
             onManualRefresh = { scope.launch { coordinator.onManualRefresh(clock.now()) } },
             thinQBindings = bindings,
             interfacePreferences = interfacePreferences,
+            appUpdateBindings = appUpdateBindings,
+            currentVersionName = "9.9.9-fixture-debug",
+            currentVersionCode = 999L,
             nowProvider = clock::now,
         )
     }
+
+    /** Swaps only the synthetic update state; no feed client or network is involved. */
+    fun setAppUpdateStateForTest(state: AppUpdateState) {
+        fixtureAppUpdateService.setState(state)
+    }
+
+    fun appUpdateCheckCountForTest(): Int = fixtureAppUpdateService.checkCalls.get()
 
     /** Advances the fake client's next live-read timestamp, never a real device. */
     fun setThinQLiveReadTimestamp(epochMillis: Long) {
@@ -382,6 +411,27 @@ class SharedInstrumentShellFixture(
         /** Synthetic-only marker used by privacy/save-state instrumentation tests. */
         const val SYNTHETIC_PAT_MARKER = "synthetic-shell-pat-marker-2468"
     }
+}
+
+private class FixtureAppUpdateService : AppUpdateCheckPort {
+    private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    override val state = mutableState.asStateFlow()
+    val checkCalls = AtomicInteger()
+
+    override suspend fun check(): Boolean {
+        checkCalls.incrementAndGet()
+        mutableState.value = AppUpdateState.UpToDate
+        return true
+    }
+
+    fun setState(state: AppUpdateState) { mutableState.value = state }
+}
+
+private class FixtureAppUpdateActions : AppUpdateActions {
+    override fun download(manifest: UpdateManifest) = Unit
+    override fun cancelDownload() = Unit
+    override fun install(manifest: UpdateManifest) = Unit
+    override fun requestInstallPermission(manifest: UpdateManifest) = Unit
 }
 
 /**

@@ -1,6 +1,7 @@
 package cloud.airchive.personal.data.preferences
 
 import android.content.Context
+import androidx.core.content.edit
 import cloud.airchive.shared.InterfaceDetail
 import cloud.airchive.shared.InterfaceDetailPreferences
 import cloud.airchive.shared.data.update.AppUpdatePreferences
@@ -21,31 +22,31 @@ class AndroidInterfaceDetailPreferences(
     override val appUpdateState = updateState.asStateFlow()
 
     override fun select(detail: InterfaceDetail) {
-        preferences.edit().putString(KEY, detail.storedValue).apply()
+        preferences.edit { putString(KEY, detail.storedValue) }
         state.value = detail
     }
 
     override fun recordSuccessfulCheck(epochMillis: Long) {
         require(epochMillis > 0L) { "Successful check time must be positive." }
-        preferences.edit().putLong(KEY_LAST_SUCCESSFUL_UPDATE_CHECK, epochMillis).apply()
+        preferences.edit { putLong(KEY_LAST_SUCCESSFUL_UPDATE_CHECK, epochMillis) }
         updateState.value = updateState.value.copy(lastSuccessfulCheckEpochMillis = epochMillis)
     }
 
     override fun dismissVersion(versionCode: Long) {
         require(versionCode > 0L) { "Dismissed version code must be positive." }
-        preferences.edit().putLong(KEY_DISMISSED_UPDATE_VERSION, versionCode).apply()
+        preferences.edit { putLong(KEY_DISMISSED_UPDATE_VERSION, versionCode) }
         updateState.value = updateState.value.copy(dismissedVersionCode = versionCode)
     }
 
     override fun setPendingInstall(record: PendingInstallRecord?) {
-        val editor = preferences.edit()
-        if (record == null) {
-            editor.remove(KEY_PENDING_UPDATE_VERSION).remove(KEY_PENDING_UPDATE_STARTED_AT)
-        } else {
-            editor.putLong(KEY_PENDING_UPDATE_VERSION, record.targetVersionCode)
-                .putLong(KEY_PENDING_UPDATE_STARTED_AT, record.startedAtEpochMillis)
+        preferences.edit {
+            if (record == null) {
+                remove(KEY_PENDING_UPDATE_VERSION).remove(KEY_PENDING_UPDATE_STARTED_AT)
+            } else {
+                putLong(KEY_PENDING_UPDATE_VERSION, record.targetVersionCode)
+                    .putLong(KEY_PENDING_UPDATE_STARTED_AT, record.startedAtEpochMillis)
+            }
         }
-        editor.apply()
         updateState.value = updateState.value.copy(pendingInstall = record)
     }
 

@@ -57,6 +57,7 @@ class SharedInstrumentPreviewActivity : ComponentActivity() {
                     initiallySignedIn = intent.getBooleanExtra("fixture_signed_in", false),
                     suspendInitialAccessCheck = intent.getBooleanExtra("fixture_suspend_access", false),
                     initialOfflineAccessCheck = intent.getBooleanExtra("fixture_offline_access", false),
+                    enableAppUpdateBinding = intent.getBooleanExtra("fixture_app_update_enabled", false),
                 )
             shellFixture = fixture
             setContent { fixture.Shell() }

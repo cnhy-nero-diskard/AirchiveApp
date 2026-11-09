@@ -55,6 +55,7 @@ class AirchiveApplication : Application() {
                     preferences = preferences,
                     currentVersionName = BuildConfig.VERSION_NAME,
                     currentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                    feedUrl = BuildConfig.AIRCHIVE_APP_UPDATE_MANIFEST_URL,
                 ).also { cachedAppUpdateBindings = it }
             }
         }
