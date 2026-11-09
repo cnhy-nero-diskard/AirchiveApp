@@ -3,7 +3,7 @@
 ## 1. Shared update model and rules
 
 - [x] 1.1 In `shared/commonMain`, add the version-1 manifest model and a strict parser (design §1, `release-pipeline` design §7). It rejects unknown `schemaVersion`, missing or mistyped fields, non-HTTPS APK URLs, non-hex hashes, and notes over 4000 characters, and it ignores unknown extra fields. Verify with host tests covering a valid manifest, each rejection, and that notes stay plain text.
-- [ ] 1.2 Add the offer decision (package, pinned signer, version code greater than installed) and the update state machine from design §4, with expected package and pin as constructor inputs. Verify with host tests for every transition, including:
+- [x] 1.2 Add the offer decision (package, pinned signer, version code greater than installed) and the update state machine from design §4, with expected package and pin as constructor inputs. Verify with host tests for every transition, including:
   - same or lower code → `UpToDate`
   - signer mismatch → `Unavailable` with no download
   - Cancel → `Available`
