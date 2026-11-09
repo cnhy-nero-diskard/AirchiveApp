@@ -58,7 +58,7 @@
 ## 6. Data protection and isolation
 
 - [x] 6.1 Add Room migration testing (`room3-testing` or the Room 3 equivalent) to a test that opens every schema in `shared/schemas` and migrates it to the current version with no destructive fallback and row counts preserved. It runs in the existing CI `build` job. Verify the test passes and that a temporary schema bump with no migration fails it (then revert).
-- [ ] 6.2 Add a host test that fails if update code depends on ThinQ, Firebase, the credential store, or the AC command port. Verify it passes, and fails with a temporary import (then revert).
+- [x] 6.2 Add a host test that fails if update code depends on ThinQ, Firebase, the credential store, or the AC command port. Verify it passes, and fails with a temporary import (then revert).
 - [ ] 6.3 Document the updater in `docs/app-updates.md`: states, failure reasons, permissions, the recovery route over ADB with `release.sh --install`, and the acceptance checklist. Verify each state named in design §4 appears in the doc.
 
 ## 7. Acceptance on the owner's phone (owner-approved, after `release-pipeline`)
