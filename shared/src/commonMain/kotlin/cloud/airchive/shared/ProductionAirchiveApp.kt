@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -83,6 +85,7 @@ import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
+import cloud.airchive.shared.data.update.AppUpdateBindings
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -91,6 +94,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+internal val LocalAppUpdateBindings = staticCompositionLocalOf<AppUpdateBindings?> { null }
 
 /**
  * Production owner graph for the Android app.
@@ -125,20 +130,23 @@ fun ProductionAirchiveApp(
     ownerAuthConfigurationMessage: String? = null,
     thinQBindings: ProductionThinQBindings? = null,
     interfacePreferences: InterfaceDetailPreferences? = null,
+    appUpdateBindings: AppUpdateBindings? = null,
     nowProvider: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     val preferences = remember(interfacePreferences) { interfacePreferences ?: InMemoryInterfaceDetailPreferences() }
     InterfaceDetailProvider(preferences) {
-        AirchiveTheme {
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                ProductionRouteHost(
-                    coordinator = coordinator,
-                    accountController = accountController,
-                    onManualRefresh = onManualRefresh,
-                    ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
-                    thinQBindings = thinQBindings,
-                    nowProvider = nowProvider,
-                )
+        CompositionLocalProvider(LocalAppUpdateBindings provides appUpdateBindings) {
+            AirchiveTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    ProductionRouteHost(
+                        coordinator = coordinator,
+                        accountController = accountController,
+                        onManualRefresh = onManualRefresh,
+                        ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
+                        thinQBindings = thinQBindings,
+                        nowProvider = nowProvider,
+                    )
+                }
             }
         }
     }

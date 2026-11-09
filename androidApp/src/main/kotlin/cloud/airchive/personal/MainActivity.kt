@@ -2,7 +2,6 @@ package cloud.airchive.personal
 
 import android.os.Bundle
 import android.os.SystemClock
-import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -23,6 +22,8 @@ import cloud.airchive.shared.data.onboarding.OwnerTransition
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.ProductionRefreshOutcome
 import cloud.airchive.shared.data.sync.ForegroundRefreshBackoff
+import cloud.airchive.shared.data.update.AppUpdateBindings
+import cloud.airchive.shared.data.update.AppUpdateResumeCheckScheduler
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -59,10 +60,13 @@ class MainActivity : ComponentActivity() {
     private var accountController: ProductionAccountController? = null
     private var airchiveApplication: AirchiveApplication? = null
     private var thinQBindings: ProductionThinQBindings? = null
+    private var appUpdateBindings: AppUpdateBindings? = null
+    private var appUpdateResumeCheckScheduler: AppUpdateResumeCheckScheduler? = null
     private var controllerScope: CoroutineScope? = null
     private var activeRefreshJob: Job? = null
     private var foregroundHistoryJob: Job? = null
     private var foregroundDeviceJob: Job? = null
+    private var foregroundAppUpdateJob: Job? = null
     private var historyScheduleKey: String? = null
     private var historyBackoff = ForegroundRefreshBackoff()
     private var historyNextAt = 0L
@@ -74,6 +78,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val processGraphOwner = application as AirchiveApplication
+        airchiveApplication = processGraphOwner
+        appUpdateBindings = processGraphOwner.appUpdateBindings()
         val configuration = try {
             FirebaseOwnerIdentityFactory.fromBuildConfig(this)
         } catch (_: Exception) {
@@ -87,7 +94,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val interfacePreferences = AndroidInterfaceDetailPreferences(applicationContext)
+        val interfacePreferences = processGraphOwner.installationPreferences
         setContent {
             val activeCoordinator = coordinator
             val activeAccountController = accountController
@@ -100,6 +107,7 @@ class MainActivity : ComponentActivity() {
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     thinQBindings = graph?.bindings() ?: thinQBindings,
                     interfacePreferences = interfacePreferences,
+                    appUpdateBindings = appUpdateBindings,
                 )
             } else {
                 ProductionConfigBlockedScreen(
@@ -112,6 +120,7 @@ class MainActivity : ComponentActivity() {
     /** Timers live only while resumed; context changes cancel their current work. */
     override fun onResume() {
         super.onResume()
+        startAppUpdateResumeCheck()
         val activeCoordinator = coordinator ?: return
         val app = airchiveApplication ?: return
         foregroundHistoryJob = lifecycleScope.launch {
@@ -165,11 +174,32 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        foregroundAppUpdateJob?.cancel()
+        foregroundAppUpdateJob = null
         foregroundHistoryJob?.cancel()
         foregroundHistoryJob = null
         foregroundDeviceJob?.cancel()
         foregroundDeviceJob = null
         super.onPause()
+    }
+
+    private fun startAppUpdateResumeCheck() {
+        val bindings = appUpdateBindings ?: return
+        val scheduler = appUpdateResumeCheckScheduler ?: AppUpdateResumeCheckScheduler(
+            preferences = bindings.preferences,
+            check = bindings.service::check,
+            nowEpochMillis = System::currentTimeMillis,
+            elapsedRealtimeMillis = SystemClock::elapsedRealtime,
+        ).also { appUpdateResumeCheckScheduler = it }
+        foregroundAppUpdateJob?.cancel()
+        foregroundAppUpdateJob = lifecycleScope.launch {
+            while (true) {
+                val waitMillis = scheduler.delayUntilNextAttemptMillis() ?: break
+                if (waitMillis > 0L) delay(waitMillis)
+                val succeeded = scheduler.attemptIfDue() ?: break
+                if (succeeded) break
+            }
+        }
     }
 
     /** Explicit refresh action for the shared UI to invoke; it bypasses the age gate. */
