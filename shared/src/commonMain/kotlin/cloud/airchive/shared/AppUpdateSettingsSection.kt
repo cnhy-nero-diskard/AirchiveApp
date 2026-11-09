@@ -74,8 +74,12 @@ fun AppUpdateSettingsSection(
                     if (bindings != null) {
                         OutlinedButton(
                             onClick = { scope.launch { bindings.service.check() } },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                        ) { Text("Check for updates") }
+                            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                                "Check for app updates",
+                            ) { scope.launch { bindings.service.check() } },
+                        ) {
+                            Text("Check for updates")
+                        }
                     }
                 }
 
@@ -86,12 +90,16 @@ fun AppUpdateSettingsSection(
 
                 AppUpdateState.UpToDate -> {
                     Text("You’re up to date", style = MaterialTheme.typography.bodyMedium)
-                    checkButton(bindings, "Check again") { scope.launch { bindings?.service?.check() } }
+                    checkButton(bindings, "Check again", "Check for app updates again") {
+                        scope.launch { bindings?.service?.check() }
+                    }
                 }
 
                 is AppUpdateState.Unavailable -> {
                     Text("Updates unavailable · ${state.cause.label()}", style = MaterialTheme.typography.bodyMedium)
-                    checkButton(bindings, "Retry") { scope.launch { bindings?.service?.check() } }
+                    checkButton(bindings, "Retry", "Retry checking for app updates") {
+                        scope.launch { bindings?.service?.check() }
+                    }
                 }
 
                 is AppUpdateState.Available -> {
@@ -99,8 +107,13 @@ fun AppUpdateSettingsSection(
                     OutlinedButton(
                         enabled = bindings?.actions != null,
                         onClick = { bindings?.actions?.download(state.manifest) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text("Update") }
+                        modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                            "Download app update version ${state.manifest.versionName}",
+                            enabled = bindings?.actions != null,
+                        ) { bindings?.actions?.download(state.manifest) },
+                    ) {
+                        Text("Update")
+                    }
                 }
 
                 is AppUpdateState.Downloading -> {
@@ -116,8 +129,13 @@ fun AppUpdateSettingsSection(
                     OutlinedButton(
                         enabled = bindings?.actions != null,
                         onClick = { bindings?.actions?.cancelDownload() },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text("Cancel") }
+                        modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                            "Cancel app update download",
+                            enabled = bindings?.actions != null,
+                        ) { bindings?.actions?.cancelDownload() },
+                    ) {
+                        Text("Cancel")
+                    }
                 }
 
                 is AppUpdateState.Verifying -> {
@@ -128,7 +146,9 @@ fun AppUpdateSettingsSection(
 
                 is AppUpdateState.Failed -> {
                     Text("Update didn’t finish · ${state.reason.label()}", style = MaterialTheme.typography.bodyMedium)
-                    checkButton(bindings, "Retry") { scope.launch { bindings?.service?.check() } }
+                    checkButton(bindings, "Retry", "Retry checking for app updates") {
+                        scope.launch { bindings?.service?.check() }
+                    }
                 }
 
                 is AppUpdateState.ReadyToInstall -> {
@@ -137,8 +157,13 @@ fun AppUpdateSettingsSection(
                     Button(
                         enabled = bindings?.actions != null,
                         onClick = { bindings?.actions?.install(state.manifest) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text("Install update") }
+                        modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                            "Install app update version ${state.manifest.versionName}",
+                            enabled = bindings?.actions != null,
+                        ) { bindings?.actions?.install(state.manifest) },
+                    ) {
+                        Text("Install update")
+                    }
                 }
 
                 is AppUpdateState.NeedsInstallPermission -> {
@@ -148,8 +173,13 @@ fun AppUpdateSettingsSection(
                     OutlinedButton(
                         enabled = bindings?.actions != null,
                         onClick = { bindings?.actions?.requestInstallPermission(state.manifest) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) { Text("Open install permission settings") }
+                        modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                            "Open Android install permission settings",
+                            enabled = bindings?.actions != null,
+                        ) { bindings?.actions?.requestInstallPermission(state.manifest) },
+                    ) {
+                        Text("Open install permission settings")
+                    }
                 }
 
                 is AppUpdateState.Installing -> {
@@ -164,7 +194,9 @@ fun AppUpdateSettingsSection(
 
                 is AppUpdateState.NotCompleted -> {
                     Text("Update didn’t finish · ${state.versionName}", style = MaterialTheme.typography.bodyMedium)
-                    checkButton(bindings, "Retry") { scope.launch { bindings?.service?.check() } }
+                    checkButton(bindings, "Retry", "Retry checking for app updates") {
+                        scope.launch { bindings?.service?.check() }
+                    }
                 }
             }
         }
@@ -172,12 +204,23 @@ fun AppUpdateSettingsSection(
 }
 
 @Composable
-private fun checkButton(bindings: AppUpdateBindings?, label: String, onClick: () -> Unit) {
+private fun checkButton(
+    bindings: AppUpdateBindings?,
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+) {
     if (bindings == null) {
         Text("In-app updates apply to release builds", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                description,
+                onActivate = onClick,
+            ),
+        ) {
             Text(label)
         }
     }

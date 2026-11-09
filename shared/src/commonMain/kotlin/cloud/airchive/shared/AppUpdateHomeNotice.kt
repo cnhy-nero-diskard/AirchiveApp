@@ -1,6 +1,7 @@
 package cloud.airchive.shared
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -54,6 +56,7 @@ internal fun AppUpdateHomeNotice(
         hasPendingConfirmation = hasPendingConfirmation,
         hasPendingCommand = hasPendingCommand,
     ) ?: return
+    val stackActions = LocalDensity.current.fontScale > 1.2f
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -61,23 +64,70 @@ internal fun AppUpdateHomeNotice(
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = MaterialTheme.shapes.medium,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                "Update available · ${manifest.versionName}",
-                modifier = Modifier.weight(1f).semantics { heading() },
-                style = MaterialTheme.typography.titleSmall,
-            )
-            TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("Review")
+        if (stackActions) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Update available · ${manifest.versionName}",
+                    modifier = Modifier.fillMaxWidth().semantics { heading() },
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                UpdateNoticeActions(
+                    onOpenSettings = onOpenSettings,
+                    onDismiss = { bindings.preferences.dismissVersion(manifest.versionCode) },
+                    modifier = Modifier.align(Alignment.End),
+                )
             }
-            TextButton(
-                onClick = { bindings.preferences.dismissVersion(manifest.versionCode) },
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text("Dismiss") }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Update available · ${manifest.versionName}",
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                UpdateNoticeActions(
+                    onOpenSettings = onOpenSettings,
+                    onDismiss = { bindings.preferences.dismissVersion(manifest.versionCode) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateNoticeActions(
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        TextButton(
+            onClick = onOpenSettings,
+            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                "Review update in Settings",
+                onActivate = onOpenSettings,
+            ),
+        ) {
+            Text("Review")
+        }
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                "Dismiss update for this version",
+                onActivate = onDismiss,
+            ),
+        ) {
+            Text("Dismiss")
         }
     }
 }
