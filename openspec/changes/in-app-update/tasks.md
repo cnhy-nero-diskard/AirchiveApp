@@ -12,7 +12,7 @@
 
 ## 2. Feed client, preferences, and check scheduling
 
-- [ ] 2.1 Add the update HTTP client (design §2): its own Ktor CIO instance with no auth or cookies, User-Agent `Airchive/<versionName>`, HTTPS-only, at most 5 redirects, host rule `github.com` / `*.githubusercontent.com`, 64 KiB manifest cap, and 15 s / 30 s timeouts. Verify with MockEngine host tests for:
+- [x] 2.1 Add the update HTTP client (design §2): its own Ktor CIO instance with no auth or cookies, User-Agent `Airchive/<versionName>`, HTTPS-only, at most 5 redirects, host rule `github.com` / `*.githubusercontent.com`, 64 KiB manifest cap, and 15 s / 30 s timeouts. Verify with MockEngine host tests for:
   - a redirect to another host and to `http:`
   - six redirects
   - an oversized body
