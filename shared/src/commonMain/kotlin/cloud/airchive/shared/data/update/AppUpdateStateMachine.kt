@@ -150,10 +150,12 @@ class AppUpdateStateMachine(
         }
         AppUpdateEvent.InstallPermissionMissing -> when (current) {
             is AppUpdateState.ReadyToInstall -> AppUpdateState.NeedsInstallPermission(current.manifest)
+            is AppUpdateState.NeedsInstallPermission -> current
             else -> current
         }
         AppUpdateEvent.InstallPermissionGranted -> when (current) {
             is AppUpdateState.NeedsInstallPermission -> AppUpdateState.ReadyToInstall(current.manifest)
+            is AppUpdateState.ReadyToInstall -> current
             else -> current
         }
         AppUpdateEvent.InstallStarted -> when (current) {

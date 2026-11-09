@@ -15,6 +15,12 @@ interface AppUpdateCheckPort {
     suspend fun check(): Boolean
 }
 
+/** State mutation needed to re-check Android's install-unknown-apps permission on return. */
+interface AppUpdateInstallPermissionPort {
+    val state: StateFlow<AppUpdateState>
+    suspend fun updateInstallPermission(manifest: UpdateManifest, allowed: Boolean)
+}
+
 /** Download/cancel actions that start only from the owner's explicit Settings action. */
 interface AppUpdateDownloadActions {
     fun download(manifest: UpdateManifest)
@@ -25,6 +31,7 @@ interface AppUpdateDownloadActions {
 interface AppUpdateActions : AppUpdateDownloadActions {
     fun install(manifest: UpdateManifest)
     fun requestInstallPermission(manifest: UpdateManifest)
+    fun recheckInstallPermission() = Unit
 }
 
 /** Platform-independent update checker with an isolated feed client and preferences. */
@@ -36,7 +43,7 @@ class AppUpdateService(
     private val installedVersionCode: Long,
     private val preferences: AppUpdatePreferences,
     private val nowEpochMillis: () -> Long,
-) : AppUpdateCheckPort {
+) : AppUpdateCheckPort, AppUpdateInstallPermissionPort {
     private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256)
     private val mutableState = MutableStateFlow(machine.state)
     private val checkMutex = Mutex()
@@ -137,6 +144,24 @@ class AppUpdateService(
         stateMutex.withLock {
             if (mutableState.value is AppUpdateState.Downloading || mutableState.value is AppUpdateState.Verifying) {
                 mutableState.value = machine.dispatch(AppUpdateEvent.UpdateFailed(reason))
+            }
+        }
+    }
+
+    override suspend fun updateInstallPermission(manifest: UpdateManifest, allowed: Boolean) {
+        stateMutex.withLock {
+            when (val current = mutableState.value) {
+                is AppUpdateState.ReadyToInstall -> if (current.manifest == manifest) {
+                    val event = if (allowed) AppUpdateEvent.InstallPermissionGranted
+                    else AppUpdateEvent.InstallPermissionMissing
+                    mutableState.value = machine.dispatch(event)
+                }
+                is AppUpdateState.NeedsInstallPermission -> if (current.manifest == manifest) {
+                    val event = if (allowed) AppUpdateEvent.InstallPermissionGranted
+                    else AppUpdateEvent.InstallPermissionMissing
+                    mutableState.value = machine.dispatch(event)
+                }
+                else -> Unit
             }
         }
     }

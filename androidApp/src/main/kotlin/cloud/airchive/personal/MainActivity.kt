@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
     /** Timers live only while resumed; context changes cancel their current work. */
     override fun onResume() {
         super.onResume()
+        appUpdateBindings?.actions?.recheckInstallPermission()
         startAppUpdateResumeCheck()
         val activeCoordinator = coordinator ?: return
         val app = airchiveApplication ?: return
