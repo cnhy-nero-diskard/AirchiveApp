@@ -11,10 +11,13 @@ import cloud.airchive.shared.data.update.AppUpdateInstallOutcome
 import cloud.airchive.shared.data.update.AppUpdateInstallSessionPolicy
 import cloud.airchive.shared.data.update.AppUpdateInstallStatus
 import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.AppUpdatePreferences
+import cloud.airchive.shared.data.update.PendingInstallRecord
 import cloud.airchive.shared.data.update.UpdateFailureReason
 import cloud.airchive.shared.data.update.UpdateManifest
 import cloud.airchive.shared.data.update.appUpdateInstallSessionPolicy
 import cloud.airchive.shared.data.update.mapAppUpdateInstallStatus
+import cloud.airchive.shared.data.update.recordPendingInstallBeforeSessionCommit
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -26,6 +29,8 @@ class AndroidAppUpdatePackageInstaller(
     context: Context,
     private val installController: AppUpdateInstallControllerPort,
     private val apkForVersionCode: (Long) -> File?,
+    private val preferences: AppUpdatePreferences,
+    private val nowEpochMillis: () -> Long,
     private val appScope: CoroutineScope,
     private val launchConfirmation: (Intent) -> Unit = { intent ->
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -46,28 +51,38 @@ class AndroidAppUpdatePackageInstaller(
         }
 
         var sessionId: Int? = null
+        var pendingRecordWritten = false
         try {
-            sessionId = packageInstaller.createSession(
+            val createdSessionId = packageInstaller.createSession(
                 createAppUpdateSessionParams(
                     packageName = manifest.packageName,
                     apiLevel = Build.VERSION.SDK_INT,
                     policy = appUpdateInstallSessionPolicy(Build.VERSION.SDK_INT),
                 ),
             )
-            packageInstaller.openSession(sessionId).use { session ->
+            sessionId = createdSessionId
+            packageInstaller.openSession(createdSessionId).use { session ->
                 apk.inputStream().use { input ->
                     session.openWrite(APK_SESSION_ENTRY, 0L, apk.length()).use { output ->
                         input.copyTo(output, COPY_BUFFER_BYTES)
                         session.fsync(output)
                     }
                 }
-                session.commit(statusPendingIntent(sessionId).intentSender)
+                recordPendingInstallBeforeSessionCommit(
+                    preferences = preferences,
+                    record = PendingInstallRecord(manifest.versionCode, nowEpochMillis()),
+                ) {
+                    pendingRecordWritten = true
+                    session.commit(statusPendingIntent(createdSessionId).intentSender)
+                }
             }
         } catch (cancelled: CancellationException) {
             sessionId?.let(::abandonSessionSafely)
+            if (pendingRecordWritten) preferences.setPendingInstall(null)
             throw cancelled
         } catch (failure: Exception) {
             sessionId?.let(::abandonSessionSafely)
+            if (pendingRecordWritten) preferences.setPendingInstall(null)
             val reason = if (failure is IOException) UpdateFailureReason.INSTALL_STORAGE
             else UpdateFailureReason.INSTALL_ERROR
             installController.reportInstallOutcome(manifest, AppUpdateInstallOutcome.Failed(reason))

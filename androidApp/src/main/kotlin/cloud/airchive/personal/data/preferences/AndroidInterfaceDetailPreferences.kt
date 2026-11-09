@@ -39,14 +39,14 @@ class AndroidInterfaceDetailPreferences(
     }
 
     override fun setPendingInstall(record: PendingInstallRecord?) {
-        preferences.edit {
-            if (record == null) {
-                remove(KEY_PENDING_UPDATE_VERSION).remove(KEY_PENDING_UPDATE_STARTED_AT)
-            } else {
-                putLong(KEY_PENDING_UPDATE_VERSION, record.targetVersionCode)
-                    .putLong(KEY_PENDING_UPDATE_STARTED_AT, record.startedAtEpochMillis)
-            }
+        val editor = preferences.edit()
+        if (record == null) {
+            editor.remove(KEY_PENDING_UPDATE_VERSION).remove(KEY_PENDING_UPDATE_STARTED_AT)
+        } else {
+            editor.putLong(KEY_PENDING_UPDATE_VERSION, record.targetVersionCode)
+                .putLong(KEY_PENDING_UPDATE_STARTED_AT, record.startedAtEpochMillis)
         }
+        check(editor.commit()) { "Unable to persist app update install state." }
         updateState.value = updateState.value.copy(pendingInstall = record)
     }
 
