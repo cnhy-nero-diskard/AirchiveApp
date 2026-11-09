@@ -82,6 +82,7 @@ import cloud.airchive.shared.data.onboarding.ProductionAccountController
 import cloud.airchive.shared.data.onboarding.ThinQCredentialSetupResult
 import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.thinq.ThinQDeviceProfilePublication
+import cloud.airchive.shared.data.thinq.AcCommandSlotState
 import cloud.airchive.shared.data.sync.HistorySyncPresentation
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.presentHistorySync
@@ -208,6 +209,7 @@ private fun ProductionRouteHost(
     nowProvider: () -> Long,
 ) {
     val session by coordinator.session.collectAsState()
+    val accountState by accountController.state.collectAsState()
     val isRefreshing by coordinator.isRefreshing.collectAsState()
     var rawAccessState by remember(coordinator, session?.uid) {
         mutableStateOf<OwnerAccessState>(
@@ -343,6 +345,8 @@ private fun ProductionRouteHost(
                     ownerAuthConfigurationMessage = ownerAuthConfigurationMessage,
                     credentialState = credentialState,
                     thinQBindings = thinQBindings,
+                    appUpdateBindings = LocalAppUpdateBindings.current,
+                    hasPendingConfirmation = accountState.confirmStep != ProductionAccountConfirmStep.NONE,
                     temperatureDraft = temperatureDraft,
                     onTemperatureDraftChange = { temperatureDraft = it },
                     hasSession = session != null,
@@ -448,6 +452,8 @@ private fun ProductionHome(
     ownerAuthConfigurationMessage: String?,
     credentialState: ThinQCredentialState,
     thinQBindings: ProductionThinQBindings?,
+    appUpdateBindings: AppUpdateBindings?,
+    hasPendingConfirmation: Boolean,
     temperatureDraft: TemperatureDraft?,
     onTemperatureDraftChange: (TemperatureDraft?) -> Unit,
     hasSession: Boolean,
@@ -473,6 +479,14 @@ private fun ProductionHome(
     ) {
         Text("Airchive", modifier = Modifier.semantics { heading() },
             style = MaterialTheme.typography.headlineLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        val commandSlotState = thinQBindings?.commandController?.slotState?.collectAsState()?.value
+        AppUpdateHomeNotice(
+            bindings = appUpdateBindings,
+            hasTemperatureDraft = temperatureDraft != null,
+            hasPendingConfirmation = hasPendingConfirmation,
+            hasPendingCommand = commandSlotState != null && commandSlotState !is AcCommandSlotState.Idle,
+            onOpenSettings = onOpenSettings,
+        )
         if (accessState !is OwnerAccessState.Authorized) {
             ProductionAccessCard(coordinator, accessState, onAccessChanged, onRequestAccountChange, nowProvider)
         }
