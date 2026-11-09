@@ -32,7 +32,7 @@
   - Retry, up to date, unavailable with cause, and "In-app updates apply to release builds" for a null binding
 
   Detailed adds version code, commit, SHA-256, and feed URL. Opening it never checks. Verify with Compose host tests for each state in Simple and Detailed, and a test that composing the section issues no feed request.
-- [ ] 3.2 Add the dismissible Home notice in a reserved slot outside the instrument panel (not a modal). It is deferred while a temperature draft, confirmation, or command is pending, hidden for a dismissed version, and opens the Settings section when tapped. Verify with Compose host tests for a pending command (notice appears only after it settles, command unchanged), dismissal persisting for that version, and tap navigation.
+- [x] 3.2 Add the dismissible Home notice in a reserved slot outside the instrument panel (not a modal). It is deferred while a temperature draft, confirmation, or command is pending, hidden for a dismissed version, and opens the Settings section when tapped. Verify with Compose host tests for a pending command (notice appears only after it settles, command unchanged), dismissal persisting for that version, and tap navigation.
 - [ ] 3.3 Check large text and TalkBack semantics for both surfaces. Verify with Compose host tests at the maximum font scale (no clipping) and content descriptions on every action.
 
 ## 4. Download and pre-install verification (Android)

@@ -267,6 +267,26 @@ class SharedInstrumentUiTest {
             .putExtra("fixture_app_update_enabled", appUpdateEnabled),
     )
 
+    private fun updateNoticeManifest(
+        versionCode: Long = 1_001L,
+        versionName: String = "10.0.1",
+    ) = UpdateManifest(
+        schemaVersion = 1,
+        channel = "stable",
+        packageName = "cloud.airchive.personal",
+        versionCode = versionCode,
+        versionName = versionName,
+        commit = "e".repeat(40),
+        publishedAt = "2026-11-09T00:00:00Z",
+        releaseNotes = "Update notice fixture.",
+        apk = UpdateApk(
+            url = "https://github.com/example/AirchiveApp/releases/download/$versionName/app.apk",
+            sha256 = "f".repeat(64),
+            size = 1_000_000L,
+            signingCertSha256 = "d".repeat(64),
+        ),
+    )
+
     /**
      * OpenSpec task 1.3: the `shell` debug fixture composes the **actual**
      * [cloud.airchive.shared.ProductionAirchiveApp] over fake owner/history/
@@ -484,6 +504,79 @@ class SharedInstrumentUiTest {
             assertNull("The debug shell has no app-update binding", fixture.get().appUpdateBindings)
             assertEquals("The null-binding state has no update check", 0, fixture.get().appUpdateCheckCountForTest())
         }
+    }
+
+    @Test fun homeUpdateNoticeDismissalIsVersionScopedAndReviewOpensSettings() {
+        clearFixturePreferences()
+        launchShell(appUpdateEnabled = true).use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            val firstOffer = updateNoticeManifest()
+            scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(firstOffer)) }
+            awaitVisibleNode { it.text?.toString() == "Update available · 10.0.1" }
+            assertEquals("Home notices never check the feed", 0, fixture.get().appUpdateCheckCountForTest())
+
+            clickText("Dismiss")
+            assertTextAbsent("Update available · 10.0.1")
+            assertEquals(firstOffer.versionCode,
+                fixture.get().appUpdateBindings!!.preferences.appUpdateState.value.dismissedVersionCode)
+
+            scene.recreate()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(firstOffer)) }
+            assertTextAbsent("Update available · 10.0.1")
+
+            val nextOffer = firstOffer.copy(versionCode = firstOffer.versionCode + 1, versionName = "10.0.2")
+            scene.onActivity { it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(nextOffer)) }
+            awaitVisibleNode { it.text?.toString() == "Update available · 10.0.2" }
+            clickText("Review")
+            assertTextPresent("App version & updates")
+            assertTextPresent("Version 10.0.2 is available")
+            assertEquals("Review opens Settings without checking the feed", 0,
+                fixture.get().appUpdateCheckCountForTest())
+        }
+        clearFixturePreferences()
+    }
+
+    @Test fun homeUpdateNoticeWaitsForTemperatureDraftAndPendingCommand() {
+        clearFixturePreferences()
+        launchShell(appUpdateEnabled = true).use { scene ->
+            prepareConfiguredShell(scene)
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity {
+                fixture.set(it.shellFixture!!)
+                fixture.get().thinQGate.hold()
+            }
+
+            clickNode(awaitVisibleNode { it.contentDescription?.toString() == "Increase target temperature" })
+            awaitVisibleNode { it.text?.toString() == "26" }
+            scene.onActivity {
+                it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Available(updateNoticeManifest()))
+            }
+            assertTextAbsent("Update available · 10.0.1")
+            awaitTrue("the temperature command reaches its deferred fake port") {
+                fixture.get().counters.thinQCommandSubmissions.get() == 1 &&
+                    fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Sending
+            }
+            assertTextAbsent("Update available · 10.0.1")
+
+            fixture.get().thinQGate.release()
+            awaitTrue("the original command settles once") {
+                fixture.get().thinQContext.commandController.state.value is
+                    cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
+            }
+            awaitVisibleNode { it.text?.toString() == "Update available · 10.0.1" }
+            val confirmed = fixture.get().thinQContext.commandController.state.value as
+                cloud.airchive.shared.data.thinq.AcCommandUiState.Confirmed
+            val command = confirmed.outcome.command as
+                cloud.airchive.shared.contract.thinq.AcCommand.SetTargetTemperature
+            assertEquals(26.0, command.value, 0.0)
+            assertEquals("The notice did not dispatch or repeat the AC command", 1,
+                fixture.get().counters.thinQCommandSubmissions.get())
+            assertEquals("The Home notice never checks the feed", 0, fixture.get().appUpdateCheckCountForTest())
+        }
+        clearFixturePreferences()
     }
 
     @Test fun accountSwitchClearsThinQFormAndSyntheticPatDraft() {

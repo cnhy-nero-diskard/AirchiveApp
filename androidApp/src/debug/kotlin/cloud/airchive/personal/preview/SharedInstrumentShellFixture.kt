@@ -45,7 +45,6 @@ import cloud.airchive.shared.data.update.AppUpdateActions
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateCheckPort
 import cloud.airchive.shared.data.update.AppUpdateState
-import cloud.airchive.shared.data.update.InMemoryAppUpdatePreferences
 import cloud.airchive.shared.data.update.UpdateManifest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -156,11 +155,10 @@ class SharedInstrumentShellFixture(
     )
 
     private val fixtureAppUpdateService = FixtureAppUpdateService()
-    private val fixtureAppUpdatePreferences = InMemoryAppUpdatePreferences()
     private val fixtureAppUpdateActions = FixtureAppUpdateActions()
     val appUpdateBindings: AppUpdateBindings? = if (enableAppUpdateBinding) AppUpdateBindings(
         service = fixtureAppUpdateService,
-        preferences = fixtureAppUpdatePreferences,
+        preferences = interfacePreferences,
         currentVersionName = "9.9.9-fixture",
         currentVersionCode = 999L,
         feedUrl = "https://updates.example.invalid/update.json",
