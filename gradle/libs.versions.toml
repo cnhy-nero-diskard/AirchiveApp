@@ -45,6 +45,7 @@ kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotl
 
 room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
 room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room" }
+room3-testing = { module = "androidx.room3:room3-testing", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 sqlite-bundled-jvm = { module = "androidx.sqlite:sqlite-bundled-jvm", version.ref = "sqlite" }
 

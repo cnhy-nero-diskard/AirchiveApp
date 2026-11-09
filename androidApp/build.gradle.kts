@@ -258,6 +258,7 @@ val androidSdkDirectory = extensions
     .sdkComponents.sdkDirectory
 val androidSdkRoot = androidSdkDirectory.get().asFile
 android.sourceSets.getByName("androidTest").assets.directories.add(appUpdateVerifierFixtureAssets.get().asFile.absolutePath)
+android.sourceSets.getByName("androidTest").assets.directories.add(rootProject.file("shared/schemas").absolutePath)
 
 val executableSuffix = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) ".exe" else ""
 val generateAppUpdateVerifierFixtures = tasks.register<GenerateAppUpdateVerifierFixturesTask>("generateAppUpdateVerifierFixtures") {
@@ -278,6 +279,7 @@ tasks.configureEach {
         )
     ) {
         dependsOn(generateAppUpdateVerifierFixtures)
+        dependsOn(":shared:copyRoomSchemas")
     }
 }
 
@@ -316,4 +318,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.uiautomator)
     androidTestImplementation(libs.kotlinx.datetime)
+    androidTestImplementation(libs.room3.testing)
+    androidTestImplementation(libs.sqlite.bundled)
 }
