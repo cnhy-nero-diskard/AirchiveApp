@@ -3,6 +3,7 @@ package cloud.airchive.shared.data.update
 /** Reasons that make an update feed unavailable before an APK is offered. */
 enum class UpdateUnavailableCause {
     OFFLINE,
+    TIMEOUT,
     FEED_ERROR,
     UNKNOWN_SCHEMA,
     PACKAGE_MISMATCH,

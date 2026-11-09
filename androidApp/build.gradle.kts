@@ -69,6 +69,8 @@ val airchiveVersionName = airchiveVersionProperties.map { properties ->
     }
     properties.getProperty("versionName").trim()
 }
+val appUpdateManifestUrl = "https://github.com/cnhy-nero-diskard/AirchiveApp/releases/latest/download/update.json"
+val appUpdateSignerSha256 = "2cf5480e933008a24e469d7936cb4abd76cc2352e26ddf3c2a8b4effd4b54202"
 if (providers.gradleProperty("airchive.versionCode").isPresent) {
     error("The airchive.versionCode override has been removed; edit config/airchive-version.properties instead.")
 }
@@ -178,6 +180,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "AIRCHIVE_FIREBASE_PROJECT_ID", "\"${airchiveConfigValue("firebase.projectId")}\"")
+        buildConfigField("String", "AIRCHIVE_APP_UPDATE_MANIFEST_URL", buildConfigStringLiteral(""))
+        buildConfigField("String", "AIRCHIVE_APP_UPDATE_SIGNER_SHA256", buildConfigStringLiteral(""))
         buildConfigField(
             "String",
             "AIRCHIVE_FIREBASE_API_KEY",
@@ -238,6 +242,8 @@ android {
         getByName("release") {
             isMinifyEnabled = false
             manifestPlaceholders["airchiveBuildCommit"] = releaseBuildCommit.orEmpty()
+            buildConfigField("String", "AIRCHIVE_APP_UPDATE_MANIFEST_URL", buildConfigStringLiteral(appUpdateManifestUrl))
+            buildConfigField("String", "AIRCHIVE_APP_UPDATE_SIGNER_SHA256", buildConfigStringLiteral(appUpdateSignerSha256))
             if (hasPrivateReleaseSigning) {
                 signingConfig = signingConfigs.getByName("privateRelease")
             }
