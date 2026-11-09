@@ -31,6 +31,10 @@ class AndroidAppUpdateDownloadController(
     var completedDownload: AppUpdateDownloadResult? = null
         private set
 
+    fun verifiedApkForVersion(versionCode: Long): java.io.File? = completedDownload?.file?.takeIf { file ->
+        file.isFile && file.name == "$versionCode.apk"
+    }
+
     override fun download(manifest: UpdateManifest) {
         val token = Any()
         synchronized(lock) {
