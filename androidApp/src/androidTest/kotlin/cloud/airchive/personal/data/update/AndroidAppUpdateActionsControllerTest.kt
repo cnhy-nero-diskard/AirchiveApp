@@ -3,11 +3,14 @@ package cloud.airchive.personal.data.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.PackageInstaller
 import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import cloud.airchive.personal.AndroidAppUpdateActionsController
+import cloud.airchive.personal.AndroidAppUpdatePackageInstaller
+import cloud.airchive.shared.data.update.AppUpdateInstallControllerPort
+import cloud.airchive.shared.data.update.AppUpdateInstallOutcome
 import cloud.airchive.shared.data.update.AppUpdateDownloadActions
-import cloud.airchive.shared.data.update.AppUpdateInstallPermissionPort
 import cloud.airchive.shared.data.update.AppUpdateState
 import cloud.airchive.shared.data.update.UpdateApk
 import cloud.airchive.shared.data.update.UpdateManifest
@@ -26,13 +29,14 @@ class AndroidAppUpdateActionsControllerTest {
     fun returningWithoutPermissionStaysInNeedsInstallPermission() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val manifest = testManifest()
-        val permissionState = FakeInstallPermissionState(AppUpdateState.ReadyToInstall(manifest))
+        val installController = FakeInstallController(AppUpdateState.ReadyToInstall(manifest))
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         var launchedIntent: Intent? = null
         val actions = AndroidAppUpdateActionsController(
             context = context,
-            installPermissionState = permissionState,
+            installController = installController,
             downloadActions = NoopDownloadActions,
+            packageInstaller = null,
             appScope = appScope,
             canRequestPackageInstalls = { false },
             launchSettings = { launchedIntent = it },
@@ -40,14 +44,43 @@ class AndroidAppUpdateActionsControllerTest {
 
         try {
             actions.install(manifest)
-            assertEquals(AppUpdateState.NeedsInstallPermission(manifest), permissionState.state.value)
+            assertEquals(AppUpdateState.NeedsInstallPermission(manifest), installController.state.value)
 
             actions.requestInstallPermission(manifest)
             assertEquals(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, launchedIntent?.action)
             assertEquals(Uri.parse("package:${context.packageName}"), launchedIntent?.data)
 
             actions.recheckInstallPermission()
-            assertEquals(AppUpdateState.NeedsInstallPermission(manifest), permissionState.state.value)
+            assertEquals(AppUpdateState.NeedsInstallPermission(manifest), installController.state.value)
+        } finally {
+            appScope.cancel()
+        }
+    }
+
+    @Test
+    fun pendingUserActionLaunchesSystemConfirmationIntent() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val manifest = testManifest()
+        val installController = FakeInstallController(AppUpdateState.Installing(manifest))
+        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        var launchedIntent: Intent? = null
+        val installer = AndroidAppUpdatePackageInstaller(
+            context = context,
+            installController = installController,
+            apkForVersionCode = { null },
+            appScope = appScope,
+            launchConfirmation = { launchedIntent = it },
+        )
+
+        try {
+            val confirmationIntent = Intent("cloud.airchive.test.CONFIRM_INSTALL")
+            val statusIntent = Intent()
+                .putExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_PENDING_USER_ACTION)
+                .putExtra(Intent.EXTRA_INTENT, confirmationIntent)
+            installer.handleStatusIntent(statusIntent)
+
+            assertEquals(confirmationIntent.action, launchedIntent?.action)
+            assertEquals(AppUpdateState.Installing(manifest), installController.state.value)
         } finally {
             appScope.cancel()
         }
@@ -70,7 +103,7 @@ class AndroidAppUpdateActionsControllerTest {
         ),
     )
 
-    private class FakeInstallPermissionState(initialState: AppUpdateState) : AppUpdateInstallPermissionPort {
+    private class FakeInstallController(initialState: AppUpdateState) : AppUpdateInstallControllerPort {
         private val mutableState = MutableStateFlow(initialState)
         override val state: StateFlow<AppUpdateState> = mutableState
 
@@ -85,6 +118,10 @@ class AndroidAppUpdateActionsControllerTest {
                 else -> Unit
             }
         }
+
+        override suspend fun startInstall(manifest: UpdateManifest): Boolean = false
+
+        override suspend fun reportInstallOutcome(manifest: UpdateManifest, outcome: AppUpdateInstallOutcome) = Unit
     }
 
     private object NoopDownloadActions : AppUpdateDownloadActions {

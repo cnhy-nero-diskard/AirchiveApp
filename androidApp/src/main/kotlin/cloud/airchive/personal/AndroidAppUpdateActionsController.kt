@@ -3,11 +3,13 @@ package cloud.airchive.personal
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
 import android.provider.Settings
 import androidx.core.net.toUri
 import cloud.airchive.shared.data.update.AppUpdateActions
 import cloud.airchive.shared.data.update.AppUpdateDownloadActions
-import cloud.airchive.shared.data.update.AppUpdateInstallPermissionPort
+import cloud.airchive.shared.data.update.AppUpdateInstallControllerPort
 import cloud.airchive.shared.data.update.AppUpdateState
 import cloud.airchive.shared.data.update.UpdateManifest
 import kotlinx.coroutines.CoroutineScope
@@ -16,8 +18,9 @@ import kotlinx.coroutines.launch
 /** Android install-permission gate and settings route for the verified update APK. */
 class AndroidAppUpdateActionsController(
     context: Context,
-    private val installPermissionState: AppUpdateInstallPermissionPort,
+    private val installController: AppUpdateInstallControllerPort,
     private val downloadActions: AppUpdateDownloadActions,
+    private val packageInstaller: AndroidAppUpdatePackageInstaller?,
     private val appScope: CoroutineScope,
     private val canRequestPackageInstalls: () -> Boolean = {
         context.packageManager.canRequestPackageInstalls()
@@ -34,15 +37,17 @@ class AndroidAppUpdateActionsController(
 
     override fun install(manifest: UpdateManifest) {
         appScope.launch {
-            installPermissionState.updateInstallPermission(
+            val allowed = canRequestPackageInstalls()
+            installController.updateInstallPermission(
                 manifest = manifest,
-                allowed = canRequestPackageInstalls(),
+                allowed = allowed,
             )
+            if (allowed) packageInstaller?.install(manifest)
         }
     }
 
     override fun requestInstallPermission(manifest: UpdateManifest) {
-        val current = installPermissionState.state.value as? AppUpdateState.NeedsInstallPermission ?: return
+        val current = installController.state.value as? AppUpdateState.NeedsInstallPermission ?: return
         if (current.manifest != manifest) return
 
         val intent = Intent(
@@ -57,17 +62,21 @@ class AndroidAppUpdateActionsController(
     }
 
     override fun recheckInstallPermission() {
-        val current = installPermissionState.state.value
+        val current = installController.state.value
         val manifest = when (current) {
             is AppUpdateState.ReadyToInstall -> current.manifest
             is AppUpdateState.NeedsInstallPermission -> current.manifest
             else -> return
         }
         appScope.launch {
-            installPermissionState.updateInstallPermission(
+            installController.updateInstallPermission(
                 manifest = manifest,
                 allowed = canRequestPackageInstalls(),
             )
         }
+    }
+
+    fun handleInstallerStatus(statusIntent: Intent) {
+        packageInstaller?.handleStatusIntent(statusIntent)
     }
 }

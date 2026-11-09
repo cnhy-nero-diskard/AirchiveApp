@@ -1,6 +1,7 @@
 package cloud.airchive.personal
 
 import android.app.Application
+import android.content.Intent
 import android.os.StatFs
 import cloud.airchive.personal.data.credentials.AndroidEncryptedThinQCredentialStore
 import cloud.airchive.personal.data.preferences.AndroidInterfaceDetailPreferences
@@ -73,10 +74,17 @@ class AirchiveApplication : Application() {
                 )
                 downloader.cleanupPartialFiles()
                 val downloadController = AndroidAppUpdateDownloadController(service, downloader, verifier, appUpdateScope)
+                val installer = AndroidAppUpdatePackageInstaller(
+                    context = applicationContext,
+                    installController = service,
+                    apkForVersionCode = downloadController::verifiedApkForVersion,
+                    appScope = appUpdateScope,
+                )
                 val updateActions = AndroidAppUpdateActionsController(
                     context = applicationContext,
-                    installPermissionState = service,
+                    installController = service,
                     downloadActions = downloadController,
+                    packageInstaller = installer,
                     appScope = appUpdateScope,
                 )
                 AppUpdateBindings(
@@ -90,6 +98,10 @@ class AirchiveApplication : Application() {
                 ).also { cachedAppUpdateBindings = it }
             }
         }
+    }
+
+    fun handleAppUpdateInstallStatus(statusIntent: Intent) {
+        (appUpdateBindings()?.actions as? AndroidAppUpdateActionsController)?.handleInstallerStatus(statusIntent)
     }
 
     @Synchronized

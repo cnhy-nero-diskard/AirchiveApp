@@ -32,6 +32,49 @@ enum class UpdateFailureReason {
     INSTALL_ERROR,
 }
 
+/** Platform-neutral statuses returned by Android's PackageInstaller. */
+enum class AppUpdateInstallStatus {
+    PENDING_USER_ACTION,
+    SUCCESS,
+    FAILURE_ABORTED,
+    FAILURE_CONFLICT,
+    FAILURE_INCOMPATIBLE,
+    FAILURE_STORAGE,
+    FAILURE_BLOCKED,
+    FAILURE_INVALID,
+    FAILURE_TIMEOUT,
+    FAILURE,
+}
+
+/** Shared state transition represented by an installer callback. */
+sealed interface AppUpdateInstallOutcome {
+    data object AwaitingUserAction : AppUpdateInstallOutcome
+    data object Succeeded : AppUpdateInstallOutcome
+    data object Cancelled : AppUpdateInstallOutcome
+    data class Failed(val reason: UpdateFailureReason) : AppUpdateInstallOutcome
+}
+
+fun mapAppUpdateInstallStatus(status: AppUpdateInstallStatus): AppUpdateInstallOutcome = when (status) {
+    AppUpdateInstallStatus.PENDING_USER_ACTION -> AppUpdateInstallOutcome.AwaitingUserAction
+    AppUpdateInstallStatus.SUCCESS -> AppUpdateInstallOutcome.Succeeded
+    AppUpdateInstallStatus.FAILURE_ABORTED -> AppUpdateInstallOutcome.Cancelled
+    AppUpdateInstallStatus.FAILURE_CONFLICT -> AppUpdateInstallOutcome.Failed(UpdateFailureReason.INSTALL_CONFLICT)
+    AppUpdateInstallStatus.FAILURE_INCOMPATIBLE ->
+        AppUpdateInstallOutcome.Failed(UpdateFailureReason.INSTALL_INCOMPATIBLE)
+    AppUpdateInstallStatus.FAILURE_STORAGE -> AppUpdateInstallOutcome.Failed(UpdateFailureReason.INSTALL_STORAGE)
+    AppUpdateInstallStatus.FAILURE_BLOCKED -> AppUpdateInstallOutcome.Failed(UpdateFailureReason.INSTALL_BLOCKED)
+    AppUpdateInstallStatus.FAILURE_INVALID,
+    AppUpdateInstallStatus.FAILURE_TIMEOUT,
+    AppUpdateInstallStatus.FAILURE,
+    -> AppUpdateInstallOutcome.Failed(UpdateFailureReason.INSTALL_ERROR)
+}
+
+/** Session policy mirrors the PackageInstaller parameters Airchive configures. */
+data class AppUpdateInstallSessionPolicy(val requireUserAction: Boolean)
+
+fun appUpdateInstallSessionPolicy(apiLevel: Int): AppUpdateInstallSessionPolicy =
+    AppUpdateInstallSessionPolicy(requireUserAction = apiLevel >= 31)
+
 /** User-visible update progression shared by Android UI and platform adapters. */
 sealed interface AppUpdateState {
     data object Idle : AppUpdateState

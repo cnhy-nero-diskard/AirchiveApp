@@ -21,6 +21,11 @@ interface AppUpdateInstallPermissionPort {
     suspend fun updateInstallPermission(manifest: UpdateManifest, allowed: Boolean)
 }
 
+interface AppUpdateInstallControllerPort : AppUpdateInstallPermissionPort {
+    suspend fun startInstall(manifest: UpdateManifest): Boolean
+    suspend fun reportInstallOutcome(manifest: UpdateManifest, outcome: AppUpdateInstallOutcome)
+}
+
 /** Download/cancel actions that start only from the owner's explicit Settings action. */
 interface AppUpdateDownloadActions {
     fun download(manifest: UpdateManifest)
@@ -43,7 +48,7 @@ class AppUpdateService(
     private val installedVersionCode: Long,
     private val preferences: AppUpdatePreferences,
     private val nowEpochMillis: () -> Long,
-) : AppUpdateCheckPort, AppUpdateInstallPermissionPort {
+) : AppUpdateCheckPort, AppUpdateInstallControllerPort {
     private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256)
     private val mutableState = MutableStateFlow(machine.state)
     private val checkMutex = Mutex()
@@ -163,6 +168,27 @@ class AppUpdateService(
                 }
                 else -> Unit
             }
+        }
+    }
+
+    override suspend fun startInstall(manifest: UpdateManifest): Boolean = stateMutex.withLock {
+        val ready = mutableState.value as? AppUpdateState.ReadyToInstall ?: return@withLock false
+        if (ready.manifest != manifest) return@withLock false
+        mutableState.value = machine.dispatch(AppUpdateEvent.InstallStarted)
+        mutableState.value is AppUpdateState.Installing
+    }
+
+    override suspend fun reportInstallOutcome(manifest: UpdateManifest, outcome: AppUpdateInstallOutcome) {
+        stateMutex.withLock {
+            val installing = mutableState.value as? AppUpdateState.Installing ?: return@withLock
+            if (installing.manifest != manifest) return@withLock
+            val event = when (outcome) {
+                AppUpdateInstallOutcome.AwaitingUserAction -> null
+                AppUpdateInstallOutcome.Succeeded -> AppUpdateEvent.InstallCompleted(manifest.versionName)
+                AppUpdateInstallOutcome.Cancelled -> AppUpdateEvent.InstallCancelled
+                is AppUpdateInstallOutcome.Failed -> AppUpdateEvent.InstallFailed(outcome.reason)
+            }
+            if (event != null) mutableState.value = machine.dispatch(event)
         }
     }
 
