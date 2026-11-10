@@ -9,6 +9,7 @@ import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdatePreferences
 import cloud.airchive.shared.data.update.AppUpdateService
 import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.classifyAndroidAppUpdateNetworkFailure
 import cloud.airchive.shared.data.update.createAndroidAppUpdateHttpClient
 import cloud.airchive.shared.data.update.releaseOnlyAppUpdateBinding
 import cloud.airchive.shared.data.update.resolvePendingInstallAtStartup
@@ -75,6 +76,7 @@ internal class AndroidAppUpdateGraph(
             preferences = preferences,
             nowEpochMillis = System::currentTimeMillis,
             initialState = startupState ?: AppUpdateState.Idle,
+            networkFailureCause = ::classifyAndroidAppUpdateNetworkFailure,
         )
         val cacheDirectory = appContext.cacheDir
         val downloader = AndroidAppUpdateDownloader(

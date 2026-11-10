@@ -49,6 +49,7 @@ class AppUpdateService(
     private val preferences: AppUpdatePreferences,
     private val nowEpochMillis: () -> Long,
     initialState: AppUpdateState = AppUpdateState.Idle,
+    private val networkFailureCause: (Throwable) -> UpdateUnavailableCause? = { null },
 ) : AppUpdateCheckPort, AppUpdateInstallControllerPort {
     private val machine = AppUpdateStateMachine(expectedPackageName, pinnedSignerSha256, initialState)
     private val mutableState = MutableStateFlow(machine.state)
@@ -95,10 +96,12 @@ class AppUpdateService(
             unavailable(UpdateUnavailableCause.UNKNOWN_SCHEMA)
         } catch (_: HttpRequestTimeoutException) {
             unavailable(UpdateUnavailableCause.TIMEOUT)
-        } catch (_: IOException) {
-            unavailable(UpdateUnavailableCause.OFFLINE)
-        } catch (_: Exception) {
-            unavailable(UpdateUnavailableCause.FEED_ERROR)
+        } catch (error: Exception) {
+            unavailable(
+                networkFailureCause(error)
+                    ?: if (error is IOException) UpdateUnavailableCause.OFFLINE
+                    else UpdateUnavailableCause.FEED_ERROR,
+            )
         }
     }
 
