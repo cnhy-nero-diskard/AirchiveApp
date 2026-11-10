@@ -1,7 +1,10 @@
 package cloud.airchive.personal
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
 import android.os.StatFs
 import cloud.airchive.shared.data.update.AndroidAppUpdateDownloader
 import cloud.airchive.shared.data.update.AndroidAppUpdateVerifier
@@ -21,17 +24,49 @@ internal class AndroidAppUpdateGraph(
     context: Context,
     private val preferences: () -> AppUpdatePreferences,
     private val appScope: CoroutineScope,
+    private val isReleaseBuild: Boolean = BuildConfig.BUILD_TYPE == "release",
+    private val launchColdConfirmation: (Intent) -> Unit = { intent ->
+        context.applicationContext.startActivity(intent)
+    },
 ) {
     private val appContext = context.applicationContext
     private var cachedBindings: AppUpdateBindings? = null
 
     @Synchronized
-    fun bindings(): AppUpdateBindings? = releaseOnlyAppUpdateBinding(BuildConfig.BUILD_TYPE == "release") {
+    fun bindings(): AppUpdateBindings? = releaseOnlyAppUpdateBinding(isReleaseBuild) {
         cachedBindings ?: createBindings().also { cachedBindings = it }
     }
 
+    @Synchronized
     fun handleInstallStatus(statusIntent: Intent) {
-        (bindings()?.actions as? AndroidAppUpdateActionsController)?.handleInstallerStatus(statusIntent)
+        if (!isReleaseBuild) return
+        val existingBindings = cachedBindings
+        if (existingBindings == null) {
+            // A cold release receiver must not build the graph for a final status: graph startup
+            // consumes the durable pending-install record before the foreground UI can show it.
+            // Leave final statuses for the next Activity startup to resolve from that record.
+            if (statusIntent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE) ==
+                PackageInstaller.STATUS_PENDING_USER_ACTION
+            ) {
+                val confirmationIntent = statusIntent.confirmationIntent() ?: return
+                try {
+                    launchColdConfirmation(Intent(confirmationIntent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: ActivityNotFoundException) {
+                    // Keep the pending-install record so the next foreground start can report recovery.
+                } catch (_: SecurityException) {
+                    // Keep the pending-install record so the next foreground start can report recovery.
+                }
+            }
+            return
+        }
+        (existingBindings.actions as? AndroidAppUpdateActionsController)?.handleInstallerStatus(statusIntent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun Intent.confirmationIntent(): Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+    } else {
+        getParcelableExtra(Intent.EXTRA_INTENT) as? Intent
     }
 
     private fun createBindings(): AppUpdateBindings {
