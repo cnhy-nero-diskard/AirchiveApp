@@ -18,7 +18,7 @@ The app SHALL read only the configured AC's allowed Firestore paths with the sig
 - **THEN** the app SHALL show the denied state, retain existing cached history for that owner, and offer a retry
 
 ### Requirement: Initial synchronization is bounded
-On a fresh owner-authorized installation, the app SHALL load at most the latest 24 hours of five-minute observations plus the latest 30 available finalized daily totals before declaring initial history ready. Collection queries SHALL respect the Airchive access contract's maximum page size of 250. Older observation ranges SHALL load only after an explicit user selection and then be cached.
+On a fresh owner-authorized installation, the app SHALL load at most the latest 24 hours of five-minute observations plus the latest 30 available finalized daily totals before declaring initial history ready. Collection queries SHALL respect the Airchive access contract's maximum page size of 250. Older observation ranges SHALL load only for an explicitly selected period and then be cached; selection can start bounded missing-range loading automatically.
 
 #### Scenario: First successful history load
 - **WHEN** the owner completes setup and history access is available
@@ -29,19 +29,27 @@ On a fresh owner-authorized installation, the app SHALL load at most the latest 
 - **THEN** the app SHALL fetch it in bounded pages and retain it locally for later viewing
 
 ### Requirement: Refresh catches new and revised samples
-The app SHALL refresh when opened or resumed after its last successful refresh is at least ten minutes old, and whenever the owner explicitly requests refresh. It SHALL query changes to both `persistedAt` and `reconciledAt` with boundary overlap, merge by `sampleId`, and advance its durable watermark only after all required pages and local writes succeed. It SHALL NOT continuously listen to Firestore or schedule background telemetry polling in the first release.
+The app SHALL refresh history while foregrounded and authorized when its last successful refresh is at least five minutes old, and whenever the owner explicitly requests refresh.
+
+#### Scenario: Refresh retains durable watermarks and foreground limits
+- **WHEN** a scheduled or manual history refresh runs
+- **THEN** It SHALL query changes to both `persistedAt` and `reconciledAt` with boundary overlap, merge by `sampleId`, and advance its durable watermark only after all required pages and local writes succeed. Scheduled failures SHALL back off and the app SHALL NOT continuously listen to Firestore or schedule background telemetry polling.
 
 #### Scenario: Older sample is reconciled
-- **WHEN** a previously cached sample receives a later `reconciledAt` update
+- **WHEN** an existing sample is revised by reconciliation
 - **THEN** the next successful refresh SHALL replace the cached projection of that sample
 
 #### Scenario: Partial refresh failure
 - **WHEN** any required page or local commit fails during refresh
-- **THEN** the app SHALL retain the earlier successful watermark so a later retry can recover the missing changes
+- **THEN** the durable watermark SHALL NOT advance and cached history SHALL remain available
 
 #### Scenario: Manual refresh
-- **WHEN** the owner requests refresh before the ten-minute interval has elapsed
-- **THEN** the app SHALL attempt a new bounded synchronization
+- **WHEN** the owner requests refresh before five minutes have elapsed
+- **THEN** the app SHALL attempt refresh without waiting for the foreground age gate
+
+#### Scenario: App enters background
+- **WHEN** the app leaves the foreground
+- **THEN** scheduled history refresh SHALL stop
 
 ### Requirement: Cached history remains honest offline
 The app SHALL present cached history without network access, show the time and outcome of the last successful refresh, and distinguish missing or null energy intervals from measured zero. Cache contents SHALL be scoped to the signed-in owner, Firebase project, and device.

@@ -1,7 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Accepted native instrument identity spans the five production routes
-The app SHALL preserve the accepted native Home Instrument identity across Home, Device, Energy, History, and Settings. Home SHALL present one continuous panel that pairs comfort and recorded energy with equal emphasis: a setpoint with local editing and explicit Apply when control authority permits, separate supported mode and fan controls, and an energy chart with nearby coverage and latest usable sample age. Yesterday's finalized LG total, when available, and history-sync context SHALL be labeled separately from today's sampled subtotal and the live device read. Device SHALL reuse the Home comfort instrument rather than introduce a second control language. Missing readings SHALL use an em dash and honest setup/unavailable context, never invented zero or apparent connection.
+The app SHALL preserve the accepted native Home Instrument identity across Home, Device, Energy, History, and Settings.
+
+#### Scenario: Instrument content preserves controls and measurement meaning
+- **WHEN** the owner opens Home or Device
+- **THEN** Home SHALL present one continuous panel that pairs comfort and recorded energy with equal emphasis: a setpoint with local editing and explicit Apply when control authority permits, separate supported mode and fan controls, and an energy chart with nearby coverage and latest usable sample age. Yesterday's finalized LG total, when available, and history-sync context SHALL be labeled separately from today's sampled subtotal and the live device read. Device SHALL reuse the Home comfort instrument rather than introduce a second control language. Missing readings SHALL use an em dash and honest setup/unavailable context, never invented zero or apparent connection.
 
 #### Scenario: Owner opens Home
 - **WHEN** an onboarded owner opens Home with cached data and verified live control authority
@@ -82,7 +86,11 @@ Interface detail SHALL offer Simple and Detailed, with Simple selected when no v
 - **THEN** the saved Interface detail choice SHALL remain in effect for the next session
 
 ### Requirement: Interface detail applies immediately and sets disclosure defaults
-A new choice SHALL take effect immediately across Home, Device, Energy, History, and Settings without an app restart. Informational sections SHALL start collapsed in Simple and expanded in Detailed; task and action sections, including Account actions, SHALL start collapsed in both modes. The owner SHALL be able to override disclosures manually, and those overrides SHALL reset to the selected mode's defaults whenever the mode changes. State-required recovery sections, such as unverified history access, SHALL default to expanded in either mode and after a mode change, while retaining manual disclosure control.
+A new choice SHALL take effect immediately across Home, Device, Energy, History, and Settings without an app restart.
+
+#### Scenario: Detail changes reset disclosures without hiding recovery
+- **WHEN** the owner changes Interface detail while a route or recovery flow is open
+- **THEN** Informational sections SHALL start collapsed in Simple and expanded in Detailed; task and action sections, including Account actions, SHALL start collapsed in both modes. The owner SHALL be able to override disclosures manually, and those overrides SHALL reset to the selected mode's defaults whenever the mode changes. State-required recovery sections, such as unverified history access, SHALL default to expanded in either mode and after a mode change, while retaining manual disclosure control.
 
 #### Scenario: Change the choice
 - **WHEN** the owner selects Detailed in Settings
@@ -111,7 +119,11 @@ Selecting Simple or Detailed SHALL NOT send an AC command, request telemetry, tr
 - **THEN** the Device route's normal entry read SHALL still occur, and the selection itself SHALL have issued no request
 
 ### Requirement: Energy totals use only usable samples and keep coverage evidence
-Recorded energy SHALL be presented as five-minute samples, never as instantaneous power, and energy-per-time SHALL appear only as interval-average power from a recognized conversion. Missing/non-finite, anomalous, failed-energy-read or unrecognized-unit values SHALL be excluded from usable sums while their status and evidence remain available. A separate live-state source failure SHALL NOT by itself discard otherwise usable energy. The app SHALL distinguish recorded query-cache coverage from usable measured coverage, SHALL label a sampled subtotal separately from finalized LG daily totals and local interval sums, and SHALL keep Asia/Manila day boundaries.
+Recorded energy SHALL be presented as five-minute samples, never as instantaneous power, and energy-per-time SHALL appear only as interval-average power from a recognized conversion.
+
+#### Scenario: Energy eligibility preserves source and coverage distinctions
+- **WHEN** the app aggregates energy samples or displays their coverage
+- **THEN** Missing/non-finite, anomalous, failed-energy-read or unrecognized-unit values SHALL be excluded from usable sums while their status and evidence remain available. A separate live-state source failure SHALL NOT by itself discard otherwise usable energy. The app SHALL distinguish recorded query-cache coverage from usable measured coverage, SHALL label a sampled subtotal separately from finalized LG daily totals and local interval sums, and SHALL keep Asia/Manila day boundaries.
 
 #### Scenario: Invalid sample in a selected day
 - **WHEN** recorded query coverage includes an interval whose energy sample is invalid or has unknown units
@@ -126,7 +138,11 @@ Recorded energy SHALL be presented as five-minute samples, never as instantaneou
 - **THEN** usable energy SHALL remain in the sum while the independent state-source failure remains available as evidence
 
 ### Requirement: Home energy bins and freshness ages are honest and readable
-Home SHALL group actual five-minute intervals into eight three-hour bins for the current day. Measured, partial, gap, measured-zero and future states SHALL remain distinguishable through readable text, outlines and accessible descriptions, not color alone; partial bins SHALL NOT look like completely measured solid bars. A newly received unusable sample SHALL NOT advance the timestamp used for latest usable sample age. Device state age, latest usable sample age, and history sync age SHALL be displayed independently.
+Home SHALL group actual five-minute intervals into eight three-hour bins for the current day.
+
+#### Scenario: Home bins retain real coverage and independent freshness
+- **WHEN** the app renders Home energy groups and their age labels
+- **THEN** Measured, partial, gap, measured-zero and future states SHALL remain distinguishable through readable text, outlines and accessible descriptions, not color alone; partial bins SHALL NOT look like completely measured solid bars. A newly received unusable sample SHALL NOT advance the timestamp used for latest usable sample age. Device state age, latest usable sample age, and history sync age SHALL be displayed independently.
 
 #### Scenario: Invalid newest sample
 - **WHEN** the newest incoming sample is invalid

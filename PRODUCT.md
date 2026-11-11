@@ -48,7 +48,7 @@ Home Instrument: porcelain surfaces, slate text, restrained cobalt accents, and 
 
 ## Evidence on Hand
 
-- openspec/changes/add-personal-airchive-mobile-app/ contains the original product requirements and implementation record.
+- openspec/changes/archive/2026-11-11-add-personal-airchive-mobile-app/ contains the original product requirements and implementation record.
 - shared/src/commonMain/kotlin/cloud/airchive/shared/ProductionAirchiveApp.kt implements the production route shell and Home.
 - DeviceControlsCard.kt, EnergyRoute.kt, and HistoryHealthRoute.kt contain current interaction and measurement semantics.
 - docs/thinq-control.md records direct observations separately from owner-reported real-device acceptance.

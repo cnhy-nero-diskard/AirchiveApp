@@ -29,7 +29,11 @@ The History ledger SHALL show newest-first hourly groups in a virtualized list, 
 
 
 ### Requirement: Energy totals use only usable samples and keep coverage evidence
-Recorded energy SHALL be presented as hourly or longer aggregates of five-minute samples, never as instantaneous power, and energy-per-time SHALL appear only as interval-average power from a recognized conversion. Missing/non-finite, anomalous, failed-energy-read or unrecognized-unit values SHALL be excluded from usable sums while their status and evidence remain available. A separate live-state source failure SHALL NOT by itself discard otherwise usable energy. The app SHALL distinguish recorded query-cache coverage from usable measured coverage, SHALL label a sampled subtotal separately from finalized LG daily totals and local interval sums, and SHALL keep Asia/Manila day boundaries.
+Recorded energy SHALL be presented as hourly or longer aggregates of five-minute samples, never as instantaneous power, and energy-per-time SHALL appear only as interval-average power from a recognized conversion.
+
+#### Scenario: Energy eligibility preserves source and coverage distinctions
+- **WHEN** the app aggregates energy samples or displays their coverage
+- **THEN** Missing/non-finite, anomalous, failed-energy-read or unrecognized-unit values SHALL be excluded from usable sums while their status and evidence remain available. A separate live-state source failure SHALL NOT by itself discard otherwise usable energy. The app SHALL distinguish recorded query-cache coverage from usable measured coverage, SHALL label a sampled subtotal separately from finalized LG daily totals and local interval sums, and SHALL keep Asia/Manila day boundaries.
 
 #### Scenario: Invalid sample in a selected day
 - **WHEN** recorded query coverage includes an interval whose energy sample is invalid or has unknown units
@@ -44,7 +48,11 @@ Recorded energy SHALL be presented as hourly or longer aggregates of five-minute
 - **THEN** usable energy SHALL remain in the sum while the independent state-source failure remains available as evidence
 
 ### Requirement: Home energy bins and freshness ages are honest and readable
-Home SHALL group actual five-minute intervals into 24 hourly bins for the current day. Measured, partial, gap, measured-zero and future states SHALL remain distinguishable through readable text, outlines and accessible descriptions, not color alone; partial bins SHALL NOT look like completely measured solid bars. A newly received unusable sample SHALL NOT advance the timestamp used for latest usable sample age. Device state age, latest usable sample age, and history sync age SHALL be displayed independently.
+Home SHALL group actual five-minute intervals into 24 hourly bins for the current day.
+
+#### Scenario: Home bins retain real coverage and independent freshness
+- **WHEN** the app renders Home energy groups and their age labels
+- **THEN** Measured, partial, gap, measured-zero and future states SHALL remain distinguishable through readable text, outlines and accessible descriptions, not color alone; partial bins SHALL NOT look like completely measured solid bars. A newly received unusable sample SHALL NOT advance the timestamp used for latest usable sample age. Device state age, latest usable sample age, and history sync age SHALL be displayed independently.
 
 #### Scenario: Invalid newest sample
 - **WHEN** the newest incoming sample is invalid

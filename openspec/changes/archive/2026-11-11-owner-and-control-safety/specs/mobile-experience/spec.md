@@ -3,7 +3,11 @@
 ## MODIFIED Requirements
 
 ### Requirement: Accepted native instrument identity spans the five production routes
-The app SHALL preserve the accepted native Home Instrument identity across Home, Device, Energy, History, and Settings. Home SHALL present one continuous panel that pairs comfort and recorded energy with equal emphasis: a setpoint with local editing that is sent after a one-second pause when control authority permits, separate supported mode and fan controls, and an energy chart with nearby coverage and latest usable sample age. Yesterday's finalized LG total, when available, and history-sync context SHALL be labeled separately from today's sampled subtotal and the live device read. Device SHALL reuse the Home comfort instrument rather than introduce a second control language. Missing readings SHALL use an em dash and honest setup/unavailable context, never invented zero or apparent connection.
+The app SHALL preserve the accepted native Home Instrument identity across Home, Device, Energy, History, and Settings.
+
+#### Scenario: Instrument content preserves controls and measurement meaning
+- **WHEN** the owner opens Home or Device
+- **THEN** Home SHALL present one continuous panel that pairs comfort and recorded energy with equal emphasis: a setpoint with local editing that is sent after a one-second pause when control authority permits, separate supported mode and fan controls, and an energy chart with nearby coverage and latest usable sample age. Yesterday's finalized LG total, when available, and history-sync context SHALL be labeled separately from today's sampled subtotal and the live device read. Device SHALL reuse the Home comfort instrument rather than introduce a second control language. Missing readings SHALL use an em dash and honest setup/unavailable context, never invented zero or apparent connection.
 
 #### Scenario: Owner opens Home
 - **WHEN** an onboarded owner opens Home with cached data and verified live control authority

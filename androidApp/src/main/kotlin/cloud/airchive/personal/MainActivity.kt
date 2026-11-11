@@ -22,6 +22,9 @@ import cloud.airchive.shared.data.onboarding.OwnerTransition
 import cloud.airchive.shared.data.sync.ProductionHistoryCoordinator
 import cloud.airchive.shared.data.sync.ProductionRefreshOutcome
 import cloud.airchive.shared.data.sync.ForegroundRefreshBackoff
+import cloud.airchive.shared.data.sync.ForegroundRefreshLoop
+import cloud.airchive.shared.data.thinq.ThinQContextCoordinator
+import cloud.airchive.shared.data.thinq.ThinQContextKey
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateResumeCheckScheduler
 import cloud.airchive.shared.data.thinq.ThinQLiveRefreshState
@@ -32,7 +35,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -67,12 +72,10 @@ class MainActivity : ComponentActivity() {
     private var foregroundHistoryJob: Job? = null
     private var foregroundDeviceJob: Job? = null
     private var foregroundAppUpdateJob: Job? = null
-    private var historyScheduleKey: String? = null
-    private var historyBackoff = ForegroundRefreshBackoff()
-    private var historyNextAt = 0L
-    private var deviceScheduleKey: cloud.airchive.shared.data.thinq.ThinQContextKey? = null
-    private var deviceBackoff = ForegroundRefreshBackoff()
-    private var deviceNextAt = 0L
+    private val historyRefreshLoop = ForegroundRefreshLoop<String>(SystemClock::elapsedRealtime)
+    private val deviceRefreshLoop = ForegroundRefreshLoop<Pair<ThinQContextCoordinator, ThinQContextKey>>(
+        SystemClock::elapsedRealtime, ForegroundRefreshBackoff.BASE_MILLIS,
+    )
     private var ownerAuthConfigurationMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,51 +130,26 @@ class MainActivity : ComponentActivity() {
         val activeCoordinator = coordinator ?: return
         val app = airchiveApplication ?: return
         foregroundHistoryJob = lifecycleScope.launch {
-            activeCoordinator.session.collectLatest { session ->
-                if (session == null) return@collectLatest
-                if (historyScheduleKey != session.uid) {
-                    historyScheduleKey = session.uid
-                    historyBackoff = ForegroundRefreshBackoff()
-                    historyNextAt = 0L
-                }
-                while (true) {
-                    delay((historyNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-                    val failed = try {
-                        when (activeCoordinator.refreshAfterAccessCheck(System.currentTimeMillis())) {
-                            is ProductionRefreshOutcome.RefreshFailed,
-                            is ProductionRefreshOutcome.DeferredAfterRecentFailure -> true
-                            else -> false
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) { true }
-                    historyNextAt = SystemClock.elapsedRealtime() + historyBackoff.nextDelay(failed)
+            historyRefreshLoop.run(activeCoordinator.session.map { it?.uid }) {
+                when (activeCoordinator.refreshAfterAccessCheck(System.currentTimeMillis())) {
+                    is ProductionRefreshOutcome.RefreshFailed,
+                    is ProductionRefreshOutcome.DeferredAfterRecentFailure -> true
+                    else -> false
                 }
             }
         }
         foregroundDeviceJob = lifecycleScope.launch {
-            app.thinQGraph.collectLatest { graph ->
-                graph ?: return@collectLatest
-                graph.coordinator.contextKey.collectLatest { context ->
-                    if (context.ownerUid == null) return@collectLatest
-                    if (deviceScheduleKey != context) {
-                        deviceScheduleKey = context
-                        deviceBackoff = ForegroundRefreshBackoff()
-                        // Home entry performs the first read; do not duplicate it.
-                        deviceNextAt = SystemClock.elapsedRealtime() + ForegroundRefreshBackoff.BASE_MILLIS
+            @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+            val contexts = app.thinQGraph.flatMapLatest { graph ->
+                graph?.coordinator?.let { coordinator ->
+                    coordinator.contextKey.map { key ->
+                        if (key.ownerUid == null) null else coordinator to key
                     }
-                    while (true) {
-                        delay((deviceNextAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
-                        var failed = false
-                        val result = try {
-                            graph.coordinator.refreshScheduledState(context)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) { failed = true; null }
-                        failed = failed || result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
-                        deviceNextAt = SystemClock.elapsedRealtime() + deviceBackoff.nextDelay(failed)
-                    }
-                }
+                } ?: flowOf(null)
+            }
+            deviceRefreshLoop.run(contexts) { (coordinator, context) ->
+                val result = coordinator.refreshScheduledState(context)
+                result is ThinQLiveRefreshState.Stale || result is ThinQLiveRefreshState.Unavailable
             }
         }
     }

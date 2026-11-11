@@ -1229,7 +1229,12 @@ class SharedInstrumentUiTest {
             val sliderBounds = Rect().also(slider::getBoundsInScreen)
 
             assertTrue(uiDevice.click(sliderBounds.left + sliderBounds.width() * 9 / 10, sliderBounds.centerY()))
-            SystemClock.sleep(100)
+            awaitTrue("tapping a supported stop submits exactly once") {
+                var count = 0
+                scene.onActivity { count = it.submittedCommands }
+                count == 1
+            }
+            awaitComposedFrames()
             scene.onActivity { assertEquals(1, it.submittedCommands) }
         }
     }
@@ -2415,19 +2420,18 @@ class SharedInstrumentUiTest {
             assertTrue("landscape scrolling exposes the consumption unit", energyUnitBounds.bottom <= navigationTop)
             saveCapture("synthetic-home-readings-phone-landscape-scale-1.0")
 
-            var action: AccessibilityNodeInfo? = null
-            repeat(8) {
-                action = find(instrumentation.uiAutomation.rootInActiveWindow) {
-                    it.isVisibleToUser && it.text?.toString() == "Refresh history"
-                }
-                if (action == null) scrollForward()
+            val reload = awaitNode { node -> node.actionList.any { it.label?.toString() == "Reload history" } }
+            val beforeReads = AtomicInteger()
+            scene.onActivity { beforeReads.set(it.shellFixture!!.counters.telemetryReads.get()) }
+            assertTrue(reload.performAction(reload.actionList.first { it.label?.toString() == "Reload history" }.id))
+            awaitTrue("accessible history reload remains usable in landscape") {
+                var reads = 0
+                scene.onActivity { reads = it.shellFixture!!.counters.telemetryReads.get() }
+                reads > beforeReads.get()
             }
-            val visibleAction = action
-                ?: throw AssertionError("The Home content action remains reachable by scrolling: " +
-                    accessibilitySnapshot(instrumentation.uiAutomation.rootInActiveWindow))
-            val actionBounds = Rect().also(visibleAction::getBoundsInScreen)
-            assertTrue("Home content action scrolls above the fixed navigation without overlap; action=$actionBounds, navigationTop=$navigationTop",
-                actionBounds.bottom <= navigationTop)
+            val setup = awaitVisibleNode { it.text?.toString() == "Open Settings" }
+            val setupBounds = Rect().also(setup::getBoundsInScreen)
+            assertTrue("the actual Home setup action remains reachable above navigation", setupBounds.bottom <= navigationTop)
             saveCapture("synthetic-home-controls-phone-landscape-scale-1.0")
 
             for (route in listOf("Device", "Energy", "History", "Settings")) {
@@ -3265,6 +3269,8 @@ class SharedInstrumentUiTest {
         }
         val deadline = SystemClock.uptimeMillis() + 15_000
         while (SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.clearCache()
             find(instrumentation.uiAutomation.rootInActiveWindow, predicate)
                 ?.takeIf { it.isVisibleToUser }
                 ?.let { return it }
