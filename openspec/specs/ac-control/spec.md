@@ -7,11 +7,15 @@ Lets the owner view the AC's current ThinQ state and safely perform the four eve
 ## Requirements
 
 ### Requirement: Live device state is distinct from sampled history
-The Device screen SHALL obtain current state directly from LG when opened or explicitly refreshed and SHALL show the time of that live read. It SHALL NOT describe a five-minute Firestore observation as live state. If LG is unreachable, the app SHALL label any retained state as old and disable commands requiring current capability knowledge.
+The Device screen SHALL obtain initial live state directly from LG and show its observation time separately from sampled history. Home and Device SHALL reuse an existing same-context live state on navigation; explicit refresh and eligible foreground scheduling SHALL obtain new state. If LG is unreachable, retained state SHALL be labeled old and commands requiring current capability knowledge SHALL be disabled.
 
 #### Scenario: Open Device screen online
-- **WHEN** the owner opens the Device screen with valid ThinQ access
+- **WHEN** the owner opens the Device screen with valid ThinQ access and no matching live read has been attempted
 - **THEN** the app SHALL request current state and present its observation time separately from telemetry sync time
+
+#### Scenario: Return to a previously read control surface
+- **WHEN** the owner returns to Home or Device with an existing same-context live reading or read failure
+- **THEN** navigation SHALL reuse that state without issuing or retrying a read, while explicit refresh and independent eligible foreground scheduling remain available
 
 #### Scenario: LG unavailable
 - **WHEN** a live state request fails
@@ -51,7 +55,11 @@ ThinQ controls SHALL remain available when Firestore history access or synchroni
 - **THEN** the owner SHALL still be able to operate the AC while history shows its stale status
 
 ### Requirement: Live values, drafts, and command feedback are scoped to the active owner and credential
-Live readings, local drafts, and command feedback SHALL be presented only for the active owner and ThinQ credential context. Owner change, sign-out, credential removal/replacement or protected-key loss SHALL invalidate the previous context; its readings, drafts and feedback SHALL NOT reappear even after the new context succeeds. Controls SHALL remain unavailable until a successful device-matching live read and verified matching profile belong to the active context, and a failed new-context read SHALL NOT fall back to previous-context values.
+Live readings, local drafts, and command feedback SHALL be presented only for the active owner and ThinQ credential context.
+
+#### Scenario: Context invalidation clears retained presentation
+- **WHEN** the active owner or credential context changes
+- **THEN** Owner change, sign-out, credential removal/replacement or protected-key loss SHALL invalidate the previous context; its readings, drafts and feedback SHALL NOT reappear even after the new context succeeds. Controls SHALL remain unavailable until a successful device-matching live read and verified matching profile belong to the active context, and a failed new-context read SHALL NOT fall back to previous-context values.
 
 #### Scenario: Owner switch before any successful read
 - **WHEN** a different account signs in and the owner opens a control surface with no successful read for the new owner
@@ -62,7 +70,11 @@ Live readings, local drafts, and command feedback SHALL be presented only for th
 - **THEN** the app SHALL present an unavailable state rather than the pre-replacement reading
 
 ### Requirement: Results in flight from a superseded context are ignored
-A read or command result started under a previous owner, credential, or session SHALL be discarded when it completes after that context has ended. Such a result SHALL NOT establish current state, enable controls, or direct a command for the active context. An operation whose context becomes invalid before dispatch SHALL NOT send a command, and an already dispatched operation or its follow-up requests SHALL NOT borrow a replacement context's credential. A transient failure within the same unchanged context MAY keep a retained old reading visible with its age labeled, with commands disabled.
+A read or command result started under a previous owner, credential, or session SHALL be discarded when it completes after that context has ended.
+
+#### Scenario: Late work cannot borrow or publish a replacement context
+- **WHEN** work captured before a context change completes afterward
+- **THEN** Such a result SHALL NOT establish current state, enable controls, or direct a command for the active context. An operation whose context becomes invalid before dispatch SHALL NOT send a command, and an already dispatched operation or its follow-up requests SHALL NOT borrow a replacement context's credential. A transient failure within the same unchanged context MAY keep a retained old reading visible with its age labeled, with commands disabled.
 
 #### Scenario: Old read completes after replacement
 - **WHEN** a read issued before credential replacement returns after the replacement completes
@@ -80,8 +92,8 @@ A read or command result started under a previous owner, credential, or session 
 A local temperature draft SHALL be preserved while the owner navigates from Home or Device to Settings or into device details and back under the same owner and credential. A fresh same-context read SHALL update the observed value without overwriting or submitting a still-supported pending draft, and the last confirmed setting SHALL remain identifiable while editing. Persistence across process death SHALL NOT be promised.
 
 #### Scenario: Draft through a Settings round trip
-- **WHEN** the owner edits the setpoint, opens Settings or device details, and returns without applying
-- **THEN** the unapplied draft SHALL still be present and clearly distinct from the observed temperature
+- **WHEN** the owner edits the setpoint, leaves for Settings or device details before the paused send dispatches, and returns in the same context
+- **THEN** the unsent draft SHALL remain distinct from the observed temperature, leaving the control surface SHALL cancel its unsent countdown, and restoring that draft SHALL NOT arm another send
 
 #### Scenario: Fresh read during an unapplied draft
 - **WHEN** a successful current read arrives while an unapplied draft exists
@@ -99,11 +111,15 @@ When the verified profile changes so that a pending draft is no longer supported
 - **THEN** the draft SHALL be discarded rather than carried into the new context
 
 ### Requirement: Apply sends only temperature and keeps command status honest
-Minus and plus setpoint adjustments SHALL change only the local draft. Apply SHALL send a temperature command only, with no coupled mode or fan change, and SHALL be serialized with other control commands so that only one command for the configured device is in flight at a time, including across owner/credential transitions; the submitted value SHALL match the active profile's supported values and current-state requirements. An ambiguous outcome SHALL offer a fresh read and SHALL NOT resend the command. A pending command SHALL NOT be resent or cancelled merely because the Interface detail preference changed, and its status SHALL remain accurate after navigation. If a superseded request still occupies the submission slot, the new context SHALL disable conflicting controls with an explanation or report that no new command was submitted, without exposing the old command details or automatically queuing a retry.
+Minus and plus setpoint adjustments SHALL change the local draft immediately.
+
+#### Scenario: Temperature submission preserves serialization and honest outcomes
+- **WHEN** the owner submits a temperature draft or an earlier command remains in flight
+- **THEN** The draft SHALL be applied by sending its final value once after one second passes with no further adjustment; each such pause SHALL send at most one command. The send SHALL be a temperature command only, with no coupled mode or fan change, and SHALL be serialized with other control commands so that only one command for the configured device is in flight at a time, including across owner/credential transitions; the submitted value SHALL match the active profile's supported values and current-state requirements. A draft whose send was not started because the device slot was busy or the context changed SHALL say it was not sent. An ambiguous outcome SHALL offer a fresh read and SHALL NOT resend the command. A pending command SHALL NOT be resent or cancelled merely because the Interface detail preference changed, and its status SHALL remain accurate after navigation. If a superseded request still occupies the submission slot, the new context SHALL disable conflicting controls with an explanation or report that no new command was submitted, without exposing the old command details or automatically queuing a retry.
 
 #### Scenario: Adjust and apply
-- **WHEN** the owner changes the setpoint with minus or plus and taps Apply
-- **THEN** only a temperature command SHALL be sent, with mode and fan untouched
+- **WHEN** the owner taps plus twice within one second and then stops
+- **THEN** exactly one temperature command SHALL be sent, carrying the final draft value, with mode and fan untouched
 
 #### Scenario: Ambiguous outcome
 - **WHEN** the command response does not establish whether the requested value was applied
@@ -116,3 +132,46 @@ Minus and plus setpoint adjustments SHALL change only the local draft. Apply SHA
 #### Scenario: Previous context still has an in-flight command
 - **WHEN** a new context becomes eligible while a superseded command still occupies the device's submission slot
 - **THEN** a second command SHALL NOT be sent, the busy condition SHALL be explained without prior-context target/outcome details, and no automatic submission SHALL occur when the slot becomes free
+
+#### Scenario: Send not started
+- **WHEN** the one-second pause ends while the device slot is busy or the context has changed
+- **THEN** no command SHALL be sent and the draft SHALL be labeled as not sent
+
+### Requirement: Context is checked immediately before a command is sent
+The app SHALL confirm that the owner and credential context that started a command is still current immediately before sending the control request, after any profile read the send depends on. A command whose context changed before that point SHALL NOT be sent and SHALL be reported as not sent.
+
+#### Scenario: Token removed during the profile read
+- **WHEN** the owner removes the ThinQ token while the command's profile read is in progress
+- **THEN** no control request SHALL be sent and the command SHALL be reported as not sent
+
+### Requirement: Command tracking survives configuration changes
+An in-flight command, its device slot, and its pending, unconfirmed, or confirmed outcome SHALL survive Activity recreation from rotation, theme, font-scale, or window changes. Recreation SHALL NOT cancel a command or re-enable controls that its outcome should keep disabled.
+
+#### Scenario: Rotation while a command is in flight
+- **WHEN** the device rotates while a command is in flight
+- **THEN** the command SHALL continue, the recreated screen SHALL show its pending status, and a second command SHALL NOT be sent until the first resolves
+
+### Requirement: Unconfirmed outcomes never invite a retry
+When a command was accepted or possibly delivered but its result was not confirmed, the app SHALL say the change may have been applied and offer a fresh read. It SHALL NOT tell the owner to send the command again, whatever caused the confirmation to fail.
+
+#### Scenario: Confirmation read rate-limited
+- **WHEN** LG accepts a command and the confirmation read is rate-limited
+- **THEN** the status SHALL say the change was sent but not confirmed and offer a fresh read, without retry wording
+
+### Requirement: Read failures name their cause and recovery
+A failed live read SHALL be reported by cause: token rejected or expired, no control authority, rate limited, AC offline, or network unavailable. A token or authority problem SHALL offer credential replacement. The cause and its recovery action SHALL be visible in both Simple and Detailed.
+
+#### Scenario: Revoked token
+- **WHEN** the device list or state read fails because LG rejects the token
+- **THEN** Home and Device SHALL say the token was rejected and offer to replace it, in Simple and Detailed
+
+#### Scenario: AC offline
+- **WHEN** the device reports it is offline
+- **THEN** the app SHALL say the AC is offline rather than suggest checking the phone's connection
+
+### Requirement: Selectors never imply an unsettable current value
+When the AC's current mode or fan speed is unknown or is not among the writable options, the selector SHALL show the current value as unknown or not settable and SHALL NOT position itself on any option. No command SHALL be sent until the owner deliberately chooses an option.
+
+#### Scenario: Fan AUTO with only LOW and HIGH writable
+- **WHEN** the AC reports fan AUTO and the profile allows only LOW and HIGH
+- **THEN** the selector SHALL show AUTO as the current, not settable value, sit on no option, and send nothing until LOW or HIGH is chosen

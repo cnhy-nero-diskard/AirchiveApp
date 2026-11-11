@@ -1,7 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Live values, drafts, and command feedback are scoped to the active owner and credential
-Live readings, local drafts, and command feedback SHALL be presented only for the active owner and ThinQ credential context. Owner change, sign-out, credential removal/replacement or protected-key loss SHALL invalidate the previous context; its readings, drafts and feedback SHALL NOT reappear even after the new context succeeds. Controls SHALL remain unavailable until a successful device-matching live read and verified matching profile belong to the active context, and a failed new-context read SHALL NOT fall back to previous-context values.
+Live readings, local drafts, and command feedback SHALL be presented only for the active owner and ThinQ credential context.
+
+#### Scenario: Context invalidation clears retained presentation
+- **WHEN** the active owner or credential context changes
+- **THEN** Owner change, sign-out, credential removal/replacement or protected-key loss SHALL invalidate the previous context; its readings, drafts and feedback SHALL NOT reappear even after the new context succeeds. Controls SHALL remain unavailable until a successful device-matching live read and verified matching profile belong to the active context, and a failed new-context read SHALL NOT fall back to previous-context values.
 
 #### Scenario: Owner switch before any successful read
 - **WHEN** a different account signs in and the owner opens a control surface with no successful read for the new owner
@@ -12,7 +16,11 @@ Live readings, local drafts, and command feedback SHALL be presented only for th
 - **THEN** the app SHALL present an unavailable state rather than the pre-replacement reading
 
 ### Requirement: Results in flight from a superseded context are ignored
-A read or command result started under a previous owner, credential, or session SHALL be discarded when it completes after that context has ended. Such a result SHALL NOT establish current state, enable controls, or direct a command for the active context. An operation whose context becomes invalid before dispatch SHALL NOT send a command, and an already dispatched operation or its follow-up requests SHALL NOT borrow a replacement context's credential. A transient failure within the same unchanged context MAY keep a retained old reading visible with its age labeled, with commands disabled.
+A read or command result started under a previous owner, credential, or session SHALL be discarded when it completes after that context has ended.
+
+#### Scenario: Late work cannot borrow or publish a replacement context
+- **WHEN** work captured before a context change completes afterward
+- **THEN** Such a result SHALL NOT establish current state, enable controls, or direct a command for the active context. An operation whose context becomes invalid before dispatch SHALL NOT send a command, and an already dispatched operation or its follow-up requests SHALL NOT borrow a replacement context's credential. A transient failure within the same unchanged context MAY keep a retained old reading visible with its age labeled, with commands disabled.
 
 #### Scenario: Old read completes after replacement
 - **WHEN** a read issued before credential replacement returns after the replacement completes
@@ -49,7 +57,11 @@ When the verified profile changes so that a pending draft is no longer supported
 - **THEN** the draft SHALL be discarded rather than carried into the new context
 
 ### Requirement: Apply sends only temperature and keeps command status honest
-Minus and plus setpoint adjustments SHALL change only the local draft. Apply SHALL send a temperature command only, with no coupled mode or fan change, and SHALL be serialized with other control commands so that only one command for the configured device is in flight at a time, including across owner/credential transitions; the submitted value SHALL match the active profile's supported values and current-state requirements. An ambiguous outcome SHALL offer a fresh read and SHALL NOT resend the command. A pending command SHALL NOT be resent or cancelled merely because the Interface detail preference changed, and its status SHALL remain accurate after navigation. If a superseded request still occupies the submission slot, the new context SHALL disable conflicting controls with an explanation or report that no new command was submitted, without exposing the old command details or automatically queuing a retry.
+Minus and plus setpoint adjustments SHALL change only the local draft.
+
+#### Scenario: Temperature submission preserves serialization and honest outcomes
+- **WHEN** the owner submits a temperature draft or an earlier command remains in flight
+- **THEN** Apply SHALL send a temperature command only, with no coupled mode or fan change, and SHALL be serialized with other control commands so that only one command for the configured device is in flight at a time, including across owner/credential transitions; the submitted value SHALL match the active profile's supported values and current-state requirements. An ambiguous outcome SHALL offer a fresh read and SHALL NOT resend the command. A pending command SHALL NOT be resent or cancelled merely because the Interface detail preference changed, and its status SHALL remain accurate after navigation. If a superseded request still occupies the submission slot, the new context SHALL disable conflicting controls with an explanation or report that no new command was submitted, without exposing the old command details or automatically queuing a retry.
 
 #### Scenario: Adjust and apply
 - **WHEN** the owner changes the setpoint with minus or plus and taps Apply
