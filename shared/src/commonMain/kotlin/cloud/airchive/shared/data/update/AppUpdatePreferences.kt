@@ -29,28 +29,17 @@ interface AppUpdatePreferences {
     fun setPendingInstall(record: PendingInstallRecord?)
 }
 
-data class PendingInstallStartupResolution(
-    val state: AppUpdateState?,
-    val shouldClearRecord: Boolean,
-)
-
-/** Resolves a prior install only after checking whether PackageInstaller still owns an active session. */
+/** Resolves a prior install without consuming its durable outcome before Settings presents it. */
 fun pendingInstallStartupResolution(
     record: PendingInstallRecord?,
     installedVersionCode: Long,
     installedVersionName: String,
     hasActiveInstallSession: Boolean,
-): PendingInstallStartupResolution = when {
-    record == null -> PendingInstallStartupResolution(state = null, shouldClearRecord = false)
-    installedVersionCode >= record.targetVersionCode -> PendingInstallStartupResolution(
-        state = AppUpdateState.Updated(installedVersionName),
-        shouldClearRecord = true,
-    )
-    hasActiveInstallSession -> PendingInstallStartupResolution(state = null, shouldClearRecord = false)
-    else -> PendingInstallStartupResolution(
-        state = AppUpdateState.NotCompleted(installedVersionName),
-        shouldClearRecord = true,
-    )
+): AppUpdateState? = when {
+    record == null -> null
+    installedVersionCode >= record.targetVersionCode -> AppUpdateState.Updated(installedVersionName)
+    hasActiveInstallSession -> null
+    else -> AppUpdateState.NotCompleted(installedVersionName)
 }
 
 fun resolvePendingInstallAtStartup(
@@ -59,14 +48,29 @@ fun resolvePendingInstallAtStartup(
     installedVersionName: String,
     hasActiveInstallSession: Boolean,
 ): AppUpdateState? {
-    val resolution = pendingInstallStartupResolution(
+    return pendingInstallStartupResolution(
         record = preferences.appUpdateState.value.pendingInstall,
         installedVersionCode = installedVersionCode,
         installedVersionName = installedVersionName,
         hasActiveInstallSession = hasActiveInstallSession,
     )
-    if (resolution.shouldClearRecord) preferences.setPendingInstall(null)
-    return resolution.state
+}
+
+/** Clears a recovered result only after the running version proves which outcome is valid. */
+fun acknowledgePendingInstallOutcome(
+    preferences: AppUpdatePreferences,
+    installedVersionCode: Long,
+    state: AppUpdateState,
+): Boolean {
+    val record = preferences.appUpdateState.value.pendingInstall ?: return false
+    val canAcknowledge = when (state) {
+        is AppUpdateState.Updated -> installedVersionCode >= record.targetVersionCode
+        is AppUpdateState.NotCompleted -> installedVersionCode < record.targetVersionCode
+        else -> false
+    }
+    if (!canAcknowledge) return false
+    preferences.setPendingInstall(null)
+    return true
 }
 
 /** Ensures the durable outcome record is visible before PackageInstaller can replace this process. */

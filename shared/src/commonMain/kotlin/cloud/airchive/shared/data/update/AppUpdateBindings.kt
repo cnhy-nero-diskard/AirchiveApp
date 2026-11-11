@@ -13,6 +13,7 @@ import kotlin.coroutines.cancellation.CancellationException
 interface AppUpdateCheckPort {
     val state: StateFlow<AppUpdateState>
     suspend fun check(): Boolean
+    suspend fun acknowledgeStartupOutcome() = Unit
 }
 
 /** State mutation needed to re-check Android's install-unknown-apps permission on return. */
@@ -58,6 +59,14 @@ class AppUpdateService(
     override val state: StateFlow<AppUpdateState> = mutableState.asStateFlow()
 
     override suspend fun check(): Boolean = checkMutex.withLock { checkOnce() }
+
+    override suspend fun acknowledgeStartupOutcome() {
+        stateMutex.withLock {
+            if (acknowledgePendingInstallOutcome(preferences, installedVersionCode, mutableState.value)) {
+                mutableState.value = machine.dispatch(AppUpdateEvent.InstallOutcomeAcknowledged)
+            }
+        }
+    }
 
     private suspend fun checkOnce(): Boolean {
         val checkStarted = stateMutex.withLock {

@@ -10,6 +10,26 @@ import kotlinx.coroutines.runBlocking
 
 class AppUpdateResumeCheckSchedulerTest {
     @Test
+    fun pendingInstallOutcomeSuppressesResumeCheckUntilAcknowledged() = runBlocking {
+        val now = 1_800_000_000_000L
+        val preferences = InMemoryAppUpdatePreferences(
+            AppUpdatePreferencesSnapshot(
+                lastSuccessfulCheckEpochMillis = now - AppUpdateResumeCheckScheduler.CHECK_INTERVAL_MILLIS - 1L,
+                pendingInstall = PendingInstallRecord(targetVersionCode = 42L, startedAtEpochMillis = 100L),
+            ),
+        )
+        var requests = 0
+        val scheduler = scheduler(preferences, now, elapsed = 0L) {
+            requests += 1
+            true
+        }
+
+        assertNull(scheduler.delayUntilNextAttemptMillis())
+        assertNull(scheduler.attemptIfDue())
+        assertEquals(0, requests)
+    }
+
+    @Test
     fun resumeWithinSixHoursOfSuccessfulCheckDoesNotRequestFeed() = runBlocking {
         val now = 1_800_000_000_000L
         val preferences = InMemoryAppUpdatePreferences(

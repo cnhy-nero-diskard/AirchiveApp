@@ -13,8 +13,9 @@ class AppUpdateResumeCheckScheduler(
 ) {
     private var nextAttemptAtElapsedRealtime = 0L
 
-    /** Null means a recent successful check makes a resume request unnecessary. */
+    /** Null means the last check is recent or a recovered install result is awaiting acknowledgement. */
     fun delayUntilNextAttemptMillis(): Long? {
+        if (preferences.appUpdateState.value.pendingInstall != null) return null
         val lastSuccess = preferences.appUpdateState.value.lastSuccessfulCheckEpochMillis
         if (lastSuccess != null && nowEpochMillis() - lastSuccess < CHECK_INTERVAL_MILLIS) return null
         return (nextAttemptAtElapsedRealtime - elapsedRealtimeMillis()).coerceAtLeast(0L)
