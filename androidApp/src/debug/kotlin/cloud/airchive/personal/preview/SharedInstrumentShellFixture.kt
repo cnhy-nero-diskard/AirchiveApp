@@ -44,7 +44,9 @@ import java.util.concurrent.atomic.AtomicLong
 import cloud.airchive.shared.data.update.AppUpdateActions
 import cloud.airchive.shared.data.update.AppUpdateBindings
 import cloud.airchive.shared.data.update.AppUpdateCheckPort
+import cloud.airchive.shared.data.update.AppUpdatePreferences
 import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.PendingInstallRecord
 import cloud.airchive.shared.data.update.UpdateManifest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -154,7 +156,7 @@ class SharedInstrumentShellFixture(
         thinQGate,
     )
 
-    private val fixtureAppUpdateService = FixtureAppUpdateService()
+    private val fixtureAppUpdateService = FixtureAppUpdateService(interfacePreferences)
     private val fixtureAppUpdateActions = FixtureAppUpdateActions()
     val appUpdateBindings: AppUpdateBindings? = if (enableAppUpdateBinding) AppUpdateBindings(
         service = fixtureAppUpdateService,
@@ -287,6 +289,10 @@ class SharedInstrumentShellFixture(
         fixtureAppUpdateService.setState(state)
     }
 
+    fun setPendingInstallForTest(record: PendingInstallRecord?) {
+        interfacePreferences.setPendingInstall(record)
+    }
+
     fun appUpdateCheckCountForTest(): Int = fixtureAppUpdateService.checkCalls.get()
 
     /** Advances the fake client's next live-read timestamp, never a real device. */
@@ -411,7 +417,9 @@ class SharedInstrumentShellFixture(
     }
 }
 
-private class FixtureAppUpdateService : AppUpdateCheckPort {
+private class FixtureAppUpdateService(
+    private val preferences: AppUpdatePreferences,
+) : AppUpdateCheckPort {
     private val mutableState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     override val state = mutableState.asStateFlow()
     val checkCalls = AtomicInteger()
@@ -420,6 +428,11 @@ private class FixtureAppUpdateService : AppUpdateCheckPort {
         checkCalls.incrementAndGet()
         mutableState.value = AppUpdateState.UpToDate
         return true
+    }
+
+    override suspend fun acknowledgeStartupOutcome() {
+        preferences.setPendingInstall(null)
+        mutableState.value = AppUpdateState.Idle
     }
 
     fun setState(state: AppUpdateState) { mutableState.value = state }

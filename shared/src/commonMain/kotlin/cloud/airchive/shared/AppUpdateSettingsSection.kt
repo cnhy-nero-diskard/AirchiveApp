@@ -11,6 +11,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,7 +28,7 @@ import cloud.airchive.shared.data.update.UpdateManifest
 import cloud.airchive.shared.data.update.UpdateUnavailableCause
 import kotlinx.coroutines.launch
 
-/** Settings presentation for update state. Composition is read-only; checks are always owner-triggered. */
+/** Settings presentation for update state. Checks and recovered-result dismissal are owner-triggered. */
 @Composable
 fun AppUpdateSettingsSection(
     bindings: AppUpdateBindings?,
@@ -42,6 +43,12 @@ fun AppUpdateSettingsSection(
     val scope = rememberCoroutineScope()
     val currentName = bindings?.currentVersionName?.takeIf(String::isNotBlank) ?: currentVersionName
     val currentCode = bindings?.currentVersionCode ?: currentVersionCode
+    val pendingInstall = preferenceSnapshot?.pendingInstall
+    val pendingOutcomeMatchesInstalledVersion = pendingInstall != null && currentCode != null && when (state) {
+        is AppUpdateState.Updated -> currentCode >= pendingInstall.targetVersionCode
+        is AppUpdateState.NotCompleted -> currentCode < pendingInstall.targetVersionCode
+        else -> false
+    }
 
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -190,12 +197,37 @@ fun AppUpdateSettingsSection(
 
                 is AppUpdateState.Updated -> {
                     Text("Updated to ${state.versionName}", style = MaterialTheme.typography.bodyMedium)
+                    if (pendingOutcomeMatchesInstalledVersion) {
+                        TextButton(
+                            onClick = { scope.launch { bindings.service.acknowledgeStartupOutcome() } },
+                            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                                "Dismiss app update result",
+                            ) { scope.launch { bindings.service.acknowledgeStartupOutcome() } },
+                        ) {
+                            Text("Dismiss")
+                        }
+                    }
                 }
 
                 is AppUpdateState.NotCompleted -> {
                     Text("Update didn’t finish · ${state.versionName}", style = MaterialTheme.typography.bodyMedium)
                     checkButton(bindings, "Retry", "Retry checking for app updates") {
-                        scope.launch { bindings?.service?.check() }
+                        scope.launch {
+                            if (pendingOutcomeMatchesInstalledVersion) {
+                                bindings.service.acknowledgeStartupOutcome()
+                            }
+                            bindings?.service?.check()
+                        }
+                    }
+                    if (pendingOutcomeMatchesInstalledVersion) {
+                        TextButton(
+                            onClick = { scope.launch { bindings.service.acknowledgeStartupOutcome() } },
+                            modifier = Modifier.heightIn(min = 48.dp).appUpdateActionSemantics(
+                                "Dismiss app update result",
+                            ) { scope.launch { bindings.service.acknowledgeStartupOutcome() } },
+                        ) {
+                            Text("Dismiss")
+                        }
                     }
                 }
             }

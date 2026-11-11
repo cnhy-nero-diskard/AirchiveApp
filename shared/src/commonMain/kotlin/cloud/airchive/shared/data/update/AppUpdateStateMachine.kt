@@ -114,6 +114,7 @@ sealed interface AppUpdateEvent {
     data object InstallCancelled : AppUpdateEvent
     data class InstallFailed(val reason: UpdateFailureReason) : AppUpdateEvent
     data class InstallCompleted(val versionName: String) : AppUpdateEvent
+    data object InstallOutcomeAcknowledged : AppUpdateEvent
     data class PendingInstallResolved(val installedVersionCode: Long, val targetVersionCode: Long, val versionName: String) : AppUpdateEvent
 }
 
@@ -215,6 +216,12 @@ class AppUpdateStateMachine(
         }
         is AppUpdateEvent.InstallCompleted -> when (current) {
             is AppUpdateState.Installing -> AppUpdateState.Updated(event.versionName)
+            else -> current
+        }
+        AppUpdateEvent.InstallOutcomeAcknowledged -> when (current) {
+            is AppUpdateState.Updated,
+            is AppUpdateState.NotCompleted,
+            -> AppUpdateState.Idle
             else -> current
         }
         is AppUpdateEvent.PendingInstallResolved -> when {

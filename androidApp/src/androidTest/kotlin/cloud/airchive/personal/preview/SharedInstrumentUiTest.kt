@@ -28,6 +28,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import cloud.airchive.shared.InterfaceDetail
 import cloud.airchive.shared.data.update.AppUpdateState
+import cloud.airchive.shared.data.update.PendingInstallRecord
 import cloud.airchive.shared.data.update.UpdateApk
 import cloud.airchive.shared.data.update.UpdateFailureReason
 import cloud.airchive.shared.data.update.UpdateManifest
@@ -552,6 +553,27 @@ class SharedInstrumentUiTest {
             assertTextPresent("In-app updates apply to release builds")
             assertNull("The debug shell has no app-update binding", fixture.get().appUpdateBindings)
             assertEquals("The null-binding state has no update check", 0, fixture.get().appUpdateCheckCountForTest())
+        }
+    }
+
+    @Test fun recoveredUpdateOutcomeCanBeDismissedAfterItIsShown() {
+        clearFixturePreferences()
+        launchShell(appUpdateEnabled = true).use { scene ->
+            val fixture = AtomicReference<SharedInstrumentShellFixture>()
+            scene.onActivity { fixture.set(it.shellFixture!!) }
+            clickTab("Settings")
+            scene.onActivity {
+                it.shellFixture!!.setPendingInstallForTest(
+                    PendingInstallRecord(targetVersionCode = 999L, startedAtEpochMillis = 100L),
+                )
+                it.shellFixture!!.setAppUpdateStateForTest(AppUpdateState.Updated("10.0.0"))
+            }
+
+            assertTextPresent("Updated to 10.0.0")
+            clickNode(assertAccessibleUpdateAction("Dismiss app update result"))
+            awaitVisibleNode { it.text?.toString()?.contains("Check when you’re ready") == true }
+            assertNull(fixture.get().appUpdateBindings!!.preferences.appUpdateState.value.pendingInstall)
+            assertEquals(AppUpdateState.Idle, fixture.get().appUpdateBindings!!.state.value)
         }
     }
 
