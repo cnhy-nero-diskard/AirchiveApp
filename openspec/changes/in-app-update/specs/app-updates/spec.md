@@ -103,15 +103,23 @@ Installation SHALL go through the system installer and SHALL require the owner's
 - **THEN** the system confirmation SHALL still be shown
 
 ### Requirement: The update outcome is reported after restart
-Before installing, the app SHALL record the target version. On the next start it SHALL show "Updated to <version>" once if the installed version reached the target, or that the update did not finish with a retry if it did not.
+Before installing, the app SHALL record the target version. On the next start it SHALL show "Updated to <version>" if the installed version reached the target, or that the update did not finish with Retry if it did not. The recovered result SHALL remain available in Settings until the owner dismisses it or retries, and the app SHALL clear the pending-install record only after that acknowledgement.
 
 #### Scenario: Successful update
 - **WHEN** the app starts after an install and its version code is at least the recorded target
-- **THEN** it SHALL show the updated version once and clear the record
+- **THEN** it SHALL show the updated version and keep the pending-install record until the owner dismisses the result
+
+#### Scenario: Owner acknowledges a successful update
+- **WHEN** the owner dismisses the recovered success result in Settings
+- **THEN** the app SHALL clear the pending-install record and SHALL NOT show that result on later starts
 
 #### Scenario: Update did not finish
 - **WHEN** the app starts with a recorded target higher than its version code and no install in progress
-- **THEN** it SHALL show that the update did not finish and offer it again
+- **THEN** it SHALL show that the update did not finish and offer Retry and Dismiss actions
+
+#### Scenario: Owner retries an unfinished update
+- **WHEN** the owner taps Retry on the recovered result
+- **THEN** the app SHALL clear the pending-install record before starting a new update check
 
 ### Requirement: Updating never touches the household or local data
 No update step SHALL send an AC command, read or write ThinQ or Firebase, uninstall the app, or clear its data. An update SHALL preserve the owner's sign-in, Room history, preferences, and the protected ThinQ token. Every exported Room schema SHALL migrate to the current schema without losing rows.

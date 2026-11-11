@@ -125,8 +125,9 @@ The check time, a version the owner dismissed, and any pending install are store
 ### 7. Outcome after restart
 
 Installing replaces the process, so the success callback may never arrive. Before committing the session, the app stores a pending record `{targetVersionCode, startedAt}`. On the next launch:
-- If the installed code is at least the target, it shows "Updated to `<versionName>`" once and clears the record.
-- If the code is lower and no session is active, it shows "Update didn't finish" with Retry.
+- If the installed code is at least the target, it shows "Updated to `<versionName>`" in Settings and keeps the record until the owner dismisses the result.
+- If the code is lower and no session is active, it shows "Update didn't finish" with Retry and Dismiss. Retry clears the record before starting a new check; Dismiss clears it without checking.
+- While either recovered result is awaiting acknowledgement, resume polling is suppressed so it cannot replace the result. Later starts can recover the result again until it is acknowledged.
 
 ### 8. Protecting data across updates
 

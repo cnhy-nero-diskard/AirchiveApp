@@ -7,7 +7,7 @@ Defines a complete personal mobile experience for operating one AC and understan
 ## Requirements
 
 ### Requirement: Main routes cover the owner's everyday tasks
-The app SHALL provide Home, Device, Energy, History/Health, and Settings destinations. Home SHALL lead with the AC and an actionable summary; Device SHALL expose live state and supported controls; Energy SHALL show usage over time; History/Health SHALL explain observations and collector quality; Settings SHALL manage credentials, refresh, and local data. Each destination SHALL handle loading, empty, offline, stale, denied, and error states relevant to it.
+The app SHALL provide Home, Device, Energy, History/Health, and Settings destinations. Home SHALL lead with the AC and an actionable summary; Device SHALL expose live state and supported controls; Energy SHALL show usage over time; History/Health SHALL explain observations and collector quality; Settings SHALL manage credentials, refresh, local data, and app version and updates. Each destination SHALL handle loading, empty, offline, stale, denied, and error states relevant to it.
 
 #### Scenario: Ready owner opens the app
 - **WHEN** an onboarded owner opens the app with cached data
